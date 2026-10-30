@@ -1,0 +1,152 @@
+[
+  {
+    "id": "raketten_eiland",
+    "titel": "Raketten op het eiland",
+    "eenmalig": true,
+    "tekst": "Luchtfoto's tonen raketinstallaties op een eiland vlak bij je kust. De wereld houdt de adem in.",
+    "voorwaarde": {
+      "spanning_boven": 15,
+      "na_dag": 150,
+      "kans_per_dag": 0.003
+    },
+    "keuzes": [
+      {
+        "tekst": "Zeeblokkade instellen",
+        "effect": {
+          "spanning": 1,
+          "moraal": 6,
+          "duur_dagen": 40
+        },
+        "vervolg": {
+          "event": "blokkade_beslissing",
+          "na_dagen": 20
+        }
+      },
+      {
+        "tekst": "Geheime ruil: jouw raketten elders weg",
+        "effect": {
+          "spanning": -10,
+          "controle": 4,
+          "loyaliteit_zwevend": -3
+        }
+      },
+      {
+        "tekst": "Openbaar maken in de Volkerenraad",
+        "effect": {
+          "loyaliteit_zwevend": 4,
+          "spanning": 4,
+          "kapitaal": -40
+        },
+        "vereist": {
+          "kapitaal": 40
+        }
+      }
+    ]
+  },
+  {
+    "id": "blokkade_beslissing",
+    "titel": "Schepen op koers",
+    "alleen_als_vervolg": true,
+    "tekst": "Vrachtschepen varen recht op je blokkade af. De kapiteins hebben geen orders om te stoppen.",
+    "keuzes": [
+      {
+        "tekst": "Doorzetten tot zij inbinden",
+        "effect": {
+          "spanning": -4,
+          "moraal": 5,
+          "duur_dagen": 40,
+          "stabiliteit": 2,
+          "loyaliteit_zwevend": -1
+        }
+      },
+      {
+        "tekst": "Toegeven in ruil voor een belofte",
+        "effect": {
+          "spanning": -12,
+          "stabiliteit": -5,
+          "moraal": -5,
+          "duur_dagen": 40,
+          "loyaliteit_zwevend": 2
+        }
+      }
+    ]
+  },
+  {
+    "id": "overloper",
+    "titel": "Een wetenschapper loopt over",
+    "afkoeling": 500,
+    "tekst": "Een raketgeleerde van de andere kant meldt zich bij je ambassade. Hij wil asiel en neemt plannen mee.",
+    "voorwaarde": {
+      "na_dag": 200,
+      "kans_per_dag": 0.002
+    },
+    "keuzes": [
+      {
+        "tekst": "Opnemen en laten werken",
+        "effect": {
+          "ruimtevaart": 10,
+          "spanning": 1,
+          "complot": 2
+        }
+      },
+      {
+        "tekst": "Terugsturen als gebaar van goede wil",
+        "effect": {
+          "spanning": -6,
+          "moraal": -3,
+          "duur_dagen": 30
+        }
+      },
+      {
+        "tekst": "Ruilen tegen gevangen spionnen",
+        "effect": {
+          "controle": 4,
+          "complot": 3
+        }
+      }
+    ]
+  },
+  {
+    "id": "graan_voor_vijand",
+    "titel": "Graan voor de vijand",
+    "afkoeling": 500,
+    "tekst": "De oogst bij je rivaal is mislukt. Hun handelaars bieden goed geld voor jouw graan.",
+    "voorwaarde": {
+      "na_dag": 180,
+      "kans_per_dag": 0.002
+    },
+    "keuzes": [
+      {
+        "tekst": "Verkopen",
+        "effect": {
+          "kapitaal": 80,
+          "graan": -40,
+          "stabiliteit": -2,
+          "loyaliteit_zwevend": -1
+        },
+        "vereist": {
+          "graan": 40
+        }
+      },
+      {
+        "tekst": "Weigeren",
+        "effect": {
+          "spanning": 4,
+          "moraal": 4,
+          "duur_dagen": 40
+        }
+      },
+      {
+        "tekst": "Gratis leveren aan hun bevolking",
+        "effect": {
+          "graan": -100,
+          "media": 10,
+          "spanning": -4
+        },
+        "vereist": {
+          "graan": 100
+        }
+      }
+    ]
+  }
+]

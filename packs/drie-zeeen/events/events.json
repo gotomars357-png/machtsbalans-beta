@@ -1,0 +1,1089 @@
+[
+  {
+    "id": "energiecrisis",
+    "titel": "Energiecrisis",
+    "afkoeling": 90,
+    "tekst": "De energievoorraad is al een week bijna leeg. Fabrieken draaien halve diensten.",
+    "voorwaarde": {
+      "resource": "energie",
+      "onder": 20,
+      "duur_dagen": 7
+    },
+    "keuzes": [
+      {
+        "tekst": "Noodimport tegen hoge prijs",
+        "effect": {
+          "kapitaal": -80,
+          "energie": 80,
+          "stabiliteit": 3
+        }
+      },
+      {
+        "tekst": "Rantsoenering",
+        "effect": {
+          "productie_factor": 0.8,
+          "duur_dagen": 30,
+          "stabiliteit": -5
+        }
+      }
+    ]
+  },
+  {
+    "id": "voedseltekort",
+    "titel": "Lege schappen",
+    "afkoeling": 90,
+    "tekst": "Voedsel raakt op. In de steden ontstaan rijen voor de winkels.",
+    "voorwaarde": {
+      "resource": "voedsel",
+      "onder": 15,
+      "duur_dagen": 5
+    },
+    "keuzes": [
+      {
+        "tekst": "Graan importeren",
+        "effect": {
+          "kapitaal": -70,
+          "voedsel": 100
+        }
+      },
+      {
+        "tekst": "Prijsplafond invoeren",
+        "effect": {
+          "kapitaal": -15,
+          "stabiliteit_doel": -6,
+          "duur_dagen": 40
+        }
+      }
+    ]
+  },
+  {
+    "id": "onrust",
+    "titel": "Onrust op straat",
+    "afkoeling": 120,
+    "tekst": "Demonstraties groeien. De oppositie spreekt van een regering die de verbinding kwijt is.",
+    "voorwaarde": {
+      "resource": "stabiliteit",
+      "onder": 30,
+      "duur_dagen": 5
+    },
+    "keuzes": [
+      {
+        "tekst": "Hervormingen beloven en financieren",
+        "effect": {
+          "kapitaal": -110,
+          "stabiliteit": 10,
+          "stabiliteit_doel": 4,
+          "duur_dagen": 60
+        }
+      },
+      {
+        "tekst": "Hard optreden",
+        "effect": {
+          "stabiliteit": 5,
+          "loyaliteit_zwevend": -5
+        }
+      },
+      {
+        "tekst": "Uitzitten",
+        "effect": {
+          "stabiliteit": -3
+        }
+      }
+    ]
+  },
+  {
+    "id": "chipdoorbraak",
+    "titel": "Doorbraak in het lab",
+    "eenmalig": true,
+    "tekst": "Een onderzoeksgroep claimt een nieuwe chiparchitectuur. Wat doe je ermee?",
+    "voorwaarde": {
+      "resource": "chips",
+      "boven": 60
+    },
+    "keuzes": [
+      {
+        "tekst": "Openbaar maken met partners",
+        "effect": {
+          "tech_factor": 1.03,
+          "loyaliteit_zwevend": 4
+        }
+      },
+      {
+        "tekst": "Licenties verkopen",
+        "effect": {
+          "kapitaal": 160,
+          "chips": -30
+        }
+      },
+      {
+        "tekst": "Geheim houden en zelf inzetten",
+        "effect": {
+          "tech_factor": 1.06,
+          "spanning": 4
+        }
+      }
+    ]
+  },
+  {
+    "id": "goede_oogst",
+    "titel": "Recordoogst",
+    "afkoeling": 300,
+    "tekst": "Het weer zat mee. De silo's lopen over.",
+    "voorwaarde": {
+      "na_dag": 40,
+      "kans_per_dag": 0.002
+    },
+    "keuzes": [
+      {
+        "tekst": "Opslaan voor slechte tijden",
+        "effect": {
+          "voedsel": 90
+        }
+      },
+      {
+        "tekst": "Exporteren",
+        "effect": {
+          "kapitaal": 80
+        }
+      }
+    ]
+  },
+  {
+    "id": "investeerders",
+    "titel": "Buitenlands fonds",
+    "afkoeling": 250,
+    "tekst": "Een staatsfonds wil fors investeren in je industrie, in ruil voor zeggenschap.",
+    "voorwaarde": {
+      "na_dag": 130,
+      "kans_per_dag": 0.0025
+    },
+    "keuzes": [
+      {
+        "tekst": "Accepteren",
+        "effect": {
+          "kapitaal": 170,
+          "stabiliteit": -3
+        }
+      },
+      {
+        "tekst": "Afwijzen",
+        "effect": {
+          "stabiliteit": 2
+        }
+      }
+    ]
+  },
+  {
+    "id": "staking",
+    "titel": "Algemene staking",
+    "afkoeling": 220,
+    "tekst": "Vakbonden eisen een deel van de groei. Havens en fabrieken liggen stil.",
+    "voorwaarde": {
+      "na_dag": 200,
+      "kans_per_dag": 0.0016
+    },
+    "keuzes": [
+      {
+        "tekst": "Loonsverhoging toezeggen",
+        "effect": {
+          "kapitaal": -90,
+          "stabiliteit": 6
+        }
+      },
+      {
+        "tekst": "Doorzetten",
+        "effect": {
+          "productie_factor": 0.85,
+          "duur_dagen": 20,
+          "stabiliteit": -5
+        }
+      }
+    ]
+  },
+  {
+    "id": "vluchtelingen",
+    "titel": "Mensen op de vlucht",
+    "afkoeling": 300,
+    "tekst": "Na een droogte in het zuiden kloppen duizenden mensen aan bij je grenzen.",
+    "voorwaarde": {
+      "na_dag": 350,
+      "kans_per_dag": 0.0014
+    },
+    "keuzes": [
+      {
+        "tekst": "Opnemen en laten werken",
+        "effect": {
+          "bevolking": 1.04,
+          "voedsel": -50,
+          "loyaliteit_zwevend": 3
+        }
+      },
+      {
+        "tekst": "Grenzen sluiten",
+        "effect": {
+          "stabiliteit": 2,
+          "loyaliteit_zwevend": -3
+        }
+      }
+    ]
+  },
+  {
+    "id": "incident",
+    "titel": "Diplomatiek incident",
+    "afkoeling": 150,
+    "tekst": "De spanning rond je blok loopt op. Een diplomaat is uitgewezen en de pers wil een reactie.",
+    "voorwaarde": {
+      "spanning_boven": 25
+    },
+    "keuzes": [
+      {
+        "tekst": "Excuses aanbieden",
+        "effect": {
+          "kapitaal": -40,
+          "spanning": -12
+        }
+      },
+      {
+        "tekst": "Voet bij stuk houden",
+        "effect": {
+          "stabiliteit": 3,
+          "spanning": 6
+        }
+      }
+    ]
+  },
+  {
+    "id": "koorts_bereikt",
+    "titel": "De Grijze koorts is er",
+    "afkoeling": 400,
+    "tekst": "De eerste besmettingen in je land zijn bevestigd. Op sociale media gaan de wildste verhalen rond over waar het virus vandaan komt.",
+    "voorwaarde": {
+      "besmet": true
+    },
+    "keuzes": [
+      {
+        "tekst": "Quarantaine en sluiting",
+        "effect": {
+          "quarantaine": 50,
+          "productie_factor": 0.8,
+          "duur_dagen": 50,
+          "stabiliteit": -4,
+          "complot": 6
+        }
+      },
+      {
+        "tekst": "Open voorlichting, alles blijft open",
+        "effect": {
+          "kapitaal": -70,
+          "complot": -6,
+          "bevolking": 0.985
+        }
+      },
+      {
+        "tekst": "Mediaregie: geruststellen en de oorsprong in het buitenland leggen",
+        "effect": {
+          "controle": 10,
+          "stabiliteit": 4,
+          "complot": 8,
+          "spanning": 5
+        }
+      }
+    ]
+  },
+  {
+    "id": "massaprotest",
+    "titel": "Massaprotest tegen 'de elite'",
+    "afkoeling": 150,
+    "tekst": "Complottheorieën zijn mainstream geworden. Tienduizenden demonstranten eisen 'de waarheid' over een geheime elite die het land zou sturen.",
+    "voorwaarde": {
+      "complot_boven": 55
+    },
+    "keuzes": [
+      {
+        "tekst": "Onafhankelijk onderzoek instellen",
+        "effect": {
+          "kapitaal": -120,
+          "complot": -20,
+          "stabiliteit": 2
+        }
+      },
+      {
+        "tekst": "Mediacampagne: de demonstranten belachelijk maken",
+        "effect": {
+          "controle": 8,
+          "complot": 6,
+          "stabiliteit": 3
+        }
+      },
+      {
+        "tekst": "Hard optreden",
+        "effect": {
+          "stabiliteit": 4,
+          "complot": 10,
+          "loyaliteit_zwevend": -4
+        }
+      }
+    ]
+  },
+  {
+    "id": "buitenlands_netwerk",
+    "titel": "Een besloten genootschap",
+    "afkoeling": 200,
+    "tekst": "Inlichtingendiensten melden een besloten netwerk van topambtenaren en andere invloedrijke figuren dat contacten onderhoudt met een buitenlandse mogendheid.",
+    "voorwaarde": {
+      "netwerk_boven": 35
+    },
+    "keuzes": [
+      {
+        "tekst": "Oprollen, met alle risico's van dien",
+        "effect": {
+          "kapitaal": -100,
+          "netwerk_oprollen": 50,
+          "stabiliteit": -3
+        }
+      },
+      {
+        "tekst": "Laten bestaan en zelf meeluisteren",
+        "effect": {
+          "controle": 6
+        }
+      },
+      {
+        "tekst": "Naar buiten brengen",
+        "effect": {
+          "netwerk_oprollen": 30,
+          "complot": 12,
+          "spanning": 6
+        }
+      }
+    ]
+  },
+  {
+    "id": "oorlogsmoeheid",
+    "titel": "Rouwstoeten",
+    "afkoeling": 120,
+    "tekst": "De verliezen aan het front worden zichtbaar. Families eisen antwoorden.",
+    "voorwaarde": {
+      "in_oorlog": true,
+      "na_dag": 900,
+      "kans_per_dag": 0.02
+    },
+    "keuzes": [
+      {
+        "tekst": "Herdenken en beloven het snel af te ronden",
+        "effect": {
+          "stabiliteit": 3,
+          "kapitaal": -40
+        }
+      },
+      {
+        "tekst": "Censuur op beelden van het front",
+        "effect": {
+          "controle": 8,
+          "complot": 5,
+          "stabiliteit_doel": 4,
+          "duur_dagen": 40
+        }
+      }
+    ]
+  },
+  {
+    "id": "generaal_budget",
+    "titel": "De opperbevelhebber wil meer",
+    "eenmalig": true,
+    "afkoeling": 500,
+    "tekst": "De opperbevelhebber eist een fors hoger defensiebudget. 'Zonder geld kan ik niets garanderen', zegt hij voor de camera's.",
+    "voorwaarde": {
+      "na_dag": 280,
+      "kans_per_dag": 0.0015
+    },
+    "keuzes": [
+      {
+        "tekst": "Budget verhogen",
+        "effect": {
+          "kapitaal": -100,
+          "moraal": 4,
+          "duur_dagen": 90
+        },
+        "vereist": {
+          "kapitaal": 100
+        }
+      },
+      {
+        "tekst": "Weigeren",
+        "effect": {
+          "stabiliteit": 1
+        },
+        "vervolg": {
+          "event": "generaal_geruchten",
+          "na_dagen": 40
+        }
+      },
+      {
+        "tekst": "Met eer ontslaan en een loyale opvolger benoemen",
+        "effect": {
+          "moraal": -5,
+          "duur_dagen": 60,
+          "stabiliteit": -3,
+          "controle": 4
+        }
+      }
+    ]
+  },
+  {
+    "id": "generaal_geruchten",
+    "titel": "Geruchten over een staatsgreep",
+    "alleen_als_vervolg": true,
+    "tekst": "Officieren komen 's nachts bij elkaar in de kazerne van de hoofdstad. De opperbevelhebber neemt zijn telefoon niet meer op.",
+    "keuzes": [
+      {
+        "tekst": "Zuiveren: de top van het leger vervangen",
+        "effect": {
+          "moraal": -6,
+          "duur_dagen": 60,
+          "controle": 6,
+          "stabiliteit": -4,
+          "complot": 5
+        }
+      },
+      {
+        "tekst": "Alsnog betalen, met rente",
+        "vereist": {
+          "kapitaal": 140
+        },
+        "effect": {
+          "kapitaal": -140,
+          "moraal": 6,
+          "duur_dagen": 60
+        }
+      },
+      {
+        "tekst": "Laten lopen en afwachten",
+        "effect": {},
+        "vervolg": {
+          "event": "generaal_coup",
+          "na_dagen": 30
+        }
+      }
+    ]
+  },
+  {
+    "id": "generaal_coup",
+    "titel": "Pantserwagens bij het parlement",
+    "alleen_als_vervolg": true,
+    "tekst": "Bij zonsopgang staan pantserwagens rond het parlement. De opperbevelhebber wil praten, maar alleen over zijn voorwaarden.",
+    "keuzes": [
+      {
+        "tekst": "Toegeven: hij wordt minister van Defensie",
+        "effect": {
+          "stabiliteit": -6,
+          "controle": 10,
+          "moraal": 10,
+          "duur_dagen": 120,
+          "loyaliteit_zwevend": -3
+        }
+      },
+      {
+        "tekst": "Het volk de straat op roepen",
+        "vereist": {
+          "stabiliteit": 45
+        },
+        "effect": {
+          "stabiliteit": -10,
+          "complot": -6,
+          "loyaliteit_zwevend": 4,
+          "moraal": -6,
+          "duur_dagen": 60
+        }
+      },
+      {
+        "tekst": "Buitenlandse vrienden om hulp vragen",
+        "effect": {
+          "spanning": 10,
+          "stabiliteit": -4,
+          "kapitaal": -60
+        },
+        "vereist": {
+          "kapitaal": 60
+        }
+      }
+    ]
+  },
+  {
+    "id": "wondermiddel",
+    "titel": "Een wondermiddel?",
+    "eenmalig": true,
+    "tekst": "Een klein laboratorium claimt een middel tegen de Grijze koorts. Er zijn nog geen proeven gedaan, maar het nieuws gaat al rond.",
+    "voorwaarde": {
+      "besmet": true
+    },
+    "keuzes": [
+      {
+        "tekst": "Eerst grondig testen",
+        "effect": {
+          "kapitaal": -50,
+          "complot": 3
+        },
+        "vervolg": {
+          "event": "wondermiddel_proef",
+          "na_dagen": 40
+        },
+        "vereist": {
+          "kapitaal": 50
+        }
+      },
+      {
+        "tekst": "Meteen uitrollen",
+        "effect": {
+          "stabiliteit": 5,
+          "complot": -4
+        },
+        "vervolg": {
+          "event": "wondermiddel_bijwerking",
+          "na_dagen": 25
+        }
+      },
+      {
+        "tekst": "Afdoen als kwakzalverij",
+        "effect": {
+          "complot": 6,
+          "controle": 3
+        }
+      }
+    ]
+  },
+  {
+    "id": "wondermiddel_proef",
+    "titel": "De proef slaagt",
+    "alleen_als_vervolg": true,
+    "tekst": "Het middel werkt. Het lab kan het maken, maar niet goedkoop. Buitenlandse fondsen bieden al voor het patent.",
+    "keuzes": [
+      {
+        "tekst": "Patent verkopen aan het buitenland",
+        "effect": {
+          "kapitaal": 60,
+          "loyaliteit_zwevend": -1,
+          "complot": 3
+        }
+      },
+      {
+        "tekst": "Gratis voor iedereen in eigen land",
+        "vereist": {
+          "kapitaal": 130
+        },
+        "effect": {
+          "kapitaal": -130,
+          "stabiliteit": 6,
+          "bevolking": 1.01,
+          "complot": -8
+        }
+      },
+      {
+        "tekst": "Delen met de buurlanden",
+        "effect": {
+          "kapitaal": -70,
+          "loyaliteit_blok": 6
+        },
+        "vereist": {
+          "kapitaal": 70
+        }
+      }
+    ]
+  },
+  {
+    "id": "wondermiddel_bijwerking",
+    "titel": "Bijwerkingen",
+    "alleen_als_vervolg": true,
+    "tekst": "Ziekenhuizen melden ernstige bijwerkingen van het middel. De pers wil weten wie het heeft goedgekeurd.",
+    "keuzes": [
+      {
+        "tekst": "Terugroepen en excuses maken",
+        "effect": {
+          "kapitaal": -40,
+          "stabiliteit": -4,
+          "complot": 4
+        },
+        "vereist": {
+          "kapitaal": 40
+        }
+      },
+      {
+        "tekst": "Ontkennen en de berichten wegdrukken",
+        "effect": {
+          "controle": 6,
+          "complot": 12,
+          "stabiliteit": 2
+        }
+      }
+    ]
+  },
+  {
+    "id": "verkiezingsbelofte",
+    "titel": "Een belofte op het podium",
+    "afkoeling": 600,
+    "tekst": "Het is campagnetijd. Je adviseurs willen één grote belofte die blijft hangen. Wat je belooft, moet je later waarmaken.",
+    "voorwaarde": {
+      "regime": "democratie",
+      "na_dag": 150,
+      "kans_per_dag": 0.002
+    },
+    "keuzes": [
+      {
+        "tekst": "Beloven: lagere belastingen",
+        "effect": {
+          "stabiliteit": 3
+        },
+        "vervolg": {
+          "event": "belofte_belasting",
+          "na_dagen": 120
+        }
+      },
+      {
+        "tekst": "Beloven: een nieuw ziekenhuis in elke provincie",
+        "effect": {
+          "stabiliteit": 2
+        },
+        "vervolg": {
+          "event": "belofte_ziekenhuizen",
+          "na_dagen": 120
+        }
+      },
+      {
+        "tekst": "Niets beloven wat je niet kunt waarmaken",
+        "effect": {
+          "stabiliteit": -4
+        }
+      }
+    ]
+  },
+  {
+    "id": "belofte_belasting",
+    "titel": "De rekening van de belofte",
+    "alleen_als_vervolg": true,
+    "tekst": "Je beloofde lagere belastingen. De kiezers wachten. Het ministerie van Financiën waarschuwt voor een gat in de begroting.",
+    "keuzes": [
+      {
+        "tekst": "Nakomen",
+        "effect": {
+          "kapitaal": -110,
+          "stabiliteit": 2,
+          "stabiliteit_doel": 1,
+          "duur_dagen": 60
+        },
+        "vereist": {
+          "kapitaal": 110
+        }
+      },
+      {
+        "tekst": "Breken en de crisis de schuld geven",
+        "effect": {
+          "stabiliteit": -6,
+          "complot": 6
+        }
+      }
+    ]
+  },
+  {
+    "id": "belofte_ziekenhuizen",
+    "titel": "Waar blijven de ziekenhuizen?",
+    "alleen_als_vervolg": true,
+    "tekst": "De eerste bouwplaatsen staan er nog leeg bij. Lokale kranten tellen de dagen sinds je belofte.",
+    "keuzes": [
+      {
+        "tekst": "Echt bouwen",
+        "effect": {
+          "kapitaal": -90,
+          "grondstoffen": -40,
+          "stabiliteit_doel": 4,
+          "duur_dagen": 120
+        },
+        "vereist": {
+          "kapitaal": 90,
+          "grondstoffen": 40
+        }
+      },
+      {
+        "tekst": "Eén ziekenhuis openen voor de camera's",
+        "effect": {
+          "kapitaal": -40,
+          "controle": 4,
+          "complot": 5
+        },
+        "vereist": {
+          "kapitaal": 40
+        }
+      },
+      {
+        "tekst": "Uitstellen tot na de volgende verkiezing",
+        "effect": {
+          "stabiliteit": -6
+        }
+      }
+    ]
+  },
+  {
+    "id": "klokkenluider",
+    "titel": "Een klokkenluider",
+    "afkoeling": 600,
+    "tekst": "Een ambtenaar lekt dat je eigen geheime dienst in het buitenland journalisten betaalt. Hij heeft documenten.",
+    "voorwaarde": {
+      "na_dag": 380,
+      "kans_per_dag": 0.0015
+    },
+    "keuzes": [
+      {
+        "tekst": "Ontkennen en hem laten vervolgen",
+        "effect": {
+          "controle": 6,
+          "complot": 5
+        },
+        "vervolg": {
+          "event": "klokkenluider_dossier",
+          "na_dagen": 30
+        }
+      },
+      {
+        "tekst": "Openheid geven en de dienst inperken",
+        "effect": {
+          "stabiliteit": 3,
+          "media": -10,
+          "loyaliteit_zwevend": 2
+        }
+      },
+      {
+        "tekst": "Hem stil afkopen",
+        "vereist": {
+          "kapitaal": 100
+        },
+        "effect": {
+          "kapitaal": -100
+        }
+      }
+    ]
+  },
+  {
+    "id": "klokkenluider_dossier",
+    "titel": "Het hele dossier ligt op straat",
+    "alleen_als_vervolg": true,
+    "tekst": "Een buitenlandse krant publiceert alle documenten. Namen, bedragen, data. Je buren eisen opheldering.",
+    "keuzes": [
+      {
+        "tekst": "Volhouden: het is buitenlandse propaganda",
+        "effect": {
+          "complot": 8,
+          "spanning": 2,
+          "loyaliteit_zwevend": -1
+        }
+      },
+      {
+        "tekst": "Een minister laten vallen",
+        "effect": {
+          "stabiliteit": -5,
+          "spanning": -4,
+          "loyaliteit_zwevend": 2
+        }
+      }
+    ]
+  },
+  {
+    "id": "omroep_te_koop",
+    "titel": "Een bod op de omroep",
+    "afkoeling": 500,
+    "tekst": "Een buitenlandse investeerder wil de grootste omroep van het land kopen. Het bod is hoog. Zijn vrienden zitten in een rivaliserend blok.",
+    "voorwaarde": {
+      "na_dag": 240,
+      "kans_per_dag": 0.0015
+    },
+    "keuzes": [
+      {
+        "tekst": "Verkopen",
+        "effect": {
+          "kapitaal": 60,
+          "media_vreemd": 6,
+          "controle": -3
+        }
+      },
+      {
+        "tekst": "Weigeren en zelf investeren",
+        "vereist": {
+          "kapitaal": 110
+        },
+        "effect": {
+          "kapitaal": -110,
+          "controle": 6,
+          "factcheck": 10
+        }
+      },
+      {
+        "tekst": "Weigeren zonder uitleg",
+        "effect": {
+          "spanning": 4,
+          "loyaliteit_zwevend": -2
+        }
+      }
+    ]
+  },
+  {
+    "id": "ertsvondst",
+    "titel": "Erts onder het natuurgebied",
+    "afkoeling": 400,
+    "tekst": "Geologen vinden een rijke ertslaag onder een geliefd natuurgebied. Bedrijven staan al in de rij; wandelaars en boeren ook, maar met spandoeken.",
+    "voorwaarde": {
+      "na_dag": 120,
+      "kans_per_dag": 0.0015
+    },
+    "keuzes": [
+      {
+        "tekst": "Zelf openbreken en delven",
+        "effect": {
+          "grondstoffen": 50,
+          "kapitaal": -20,
+          "stabiliteit": -2
+        },
+        "vereist": {
+          "kapitaal": 20
+        }
+      },
+      {
+        "tekst": "Concessie aan een buitenlands mijnbedrijf",
+        "effect": {
+          "kapitaal": 90,
+          "media_vreemd": 6,
+          "stabiliteit": -2
+        }
+      },
+      {
+        "tekst": "Beschermen en er een nationaal park van maken",
+        "effect": {
+          "kapitaal": -30,
+          "stabiliteit": 3
+        },
+        "vereist": {
+          "kapitaal": 30
+        }
+      }
+    ]
+  },
+  {
+    "id": "soldaten_over_grens",
+    "titel": "Soldaten over de grens",
+    "afkoeling": 400,
+    "tekst": "Elders is oorlog. Een uitgeput legeronderdeel van een van de strijdende partijen steekt jouw grens over, legt de wapens neer en vraagt onderdak.",
+    "voorwaarde": {
+      "wereld_in_oorlog": true,
+      "na_dag": 300,
+      "kans_per_dag": 0.004
+    },
+    "keuzes": [
+      {
+        "tekst": "Onderbrengen in een kamp tot de oorlog voorbij is",
+        "effect": {
+          "voedsel": -40,
+          "spanning": -2,
+          "loyaliteit_zwevend": 1
+        },
+        "vereist": {
+          "voedsel": 40
+        }
+      },
+      {
+        "tekst": "Terugsturen naar hun eigen land",
+        "effect": {
+          "stabiliteit": 1,
+          "loyaliteit_zwevend": -3
+        }
+      },
+      {
+        "tekst": "Ze opnemen in je eigen leger",
+        "effect": {
+          "eenheid": "infanterie",
+          "spanning": 6,
+          "loyaliteit_zwevend": -2
+        }
+      }
+    ]
+  },
+  {
+    "id": "chantagedossier",
+    "titel": "Een dossier dat niet had mogen bestaan",
+    "afkoeling": 500,
+    "tekst": "Je inlichtingendienst bezorgt dossiers over de leiders van je buurlanden. Genoeg om ze te laten vallen of te laten buigen.",
+    "voorwaarde": {
+      "na_dag": 220,
+      "kans_per_dag": 0.0012
+    },
+    "keuzes": [
+      {
+        "tekst": "Chanteren: hun landen moeten jouw blok steunen",
+        "effect": {
+          "loyaliteit_blok": 2,
+          "spanning": 5,
+          "complot": 4
+        }
+      },
+      {
+        "tekst": "Doorspelen aan de pers bij de buren",
+        "effect": {
+          "media": 8,
+          "spanning": 4,
+          "loyaliteit_zwevend": -2
+        }
+      },
+      {
+        "tekst": "Vernietigen",
+        "effect": {
+          "controle": -4,
+          "loyaliteit_zwevend": 2
+        }
+      }
+    ]
+  },
+  {
+    "id": "grensincident",
+    "titel": "Schoten bij de grens",
+    "afkoeling": 300,
+    "tekst": "Bij een grenspost vallen schoten. Er is één dode. Beide kanten zeggen dat de ander begon.",
+    "voorwaarde": {
+      "spanning_boven": 15,
+      "na_dag": 200,
+      "kans_per_dag": 0.004
+    },
+    "keuzes": [
+      {
+        "tekst": "Excuses en schadevergoeding",
+        "effect": {
+          "kapitaal": -80,
+          "spanning": -3,
+          "moraal": -2,
+          "duur_dagen": 40
+        },
+        "vereist": {
+          "kapitaal": 80
+        }
+      },
+      {
+        "tekst": "Troepen naar de grens",
+        "effect": {
+          "eenheid": "infanterie",
+          "spanning": 6,
+          "moraal": 8,
+          "duur_dagen": 40
+        }
+      },
+      {
+        "tekst": "Zwijgen",
+        "effect": {
+          "loyaliteit_blok": -3
+        }
+      }
+    ]
+  },
+  {
+    "id": "factcheck_schandaal",
+    "titel": "Schandaal bij de factcheckers",
+    "afkoeling": 500,
+    "tekst": "Je eigen factcheckers blijken geld te hebben aangenomen van een partij. Wie controleert de controleurs?",
+    "voorwaarde": {
+      "na_dag": 300,
+      "kans_per_dag": 0.0015
+    },
+    "keuzes": [
+      {
+        "tekst": "Het bureau opdoeken",
+        "effect": {
+          "factcheck": -30,
+          "complot": 5
+        }
+      },
+      {
+        "tekst": "Hervormen onder streng toezicht",
+        "vereist": {
+          "kapitaal": 80
+        },
+        "effect": {
+          "kapitaal": -80,
+          "factcheck": 10,
+          "complot": -3
+        }
+      },
+      {
+        "tekst": "Ze publiekelijk verdedigen",
+        "effect": {
+          "complot": 8,
+          "controle": 4
+        }
+      }
+    ]
+  },
+  {
+    "id": "twijfel_aan_front",
+    "titel": "Twijfel in de kazernes",
+    "afkoeling": 300,
+    "tekst": "De strijdbereidheid is laag. Soldaten melden zich ziek en ouders halen hun zonen weg bij de keuringen.",
+    "voorwaarde": {
+      "moraal_onder": 30,
+      "na_dag": 300,
+      "kans_per_dag": 0.01
+    },
+    "keuzes": [
+      {
+        "tekst": "Soldij verhogen",
+        "effect": {
+          "kapitaal": -90,
+          "moraal": 5,
+          "duur_dagen": 60
+        },
+        "vereist": {
+          "kapitaal": 90
+        }
+      },
+      {
+        "tekst": "Strenge discipline",
+        "effect": {
+          "moraal": 4,
+          "duur_dagen": 60,
+          "stabiliteit": -4,
+          "complot": 3
+        }
+      },
+      {
+        "tekst": "Laten gaan wie wil",
+        "effect": {
+          "moraal": -4,
+          "duur_dagen": 30,
+          "stabiliteit": 3
+        }
+      }
+    ]
+  },
+  {
+    "id": "bescherming_gevraagd",
+    "titel": "Bevriende landen vragen bescherming",
+    "afkoeling": 400,
+    "tekst": "De zwevende landen die jouw blok al lang welgezind zijn, vragen samen om een veiligheidsbelofte. Een ja maakt je rivalen nerveus, een nee maakt de twijfelaars koeler.",
+    "voorwaarde": {
+      "loyaliteit_boven": 62,
+      "na_dag": 200,
+      "kans_per_dag": 0.003
+    },
+    "keuzes": [
+      {
+        "tekst": "Bescherming beloven",
+        "effect": {
+          "loyaliteit_zwevend": 2,
+          "spanning": 3,
+          "kapitaal": -60
+        },
+        "vereist": {
+          "kapitaal": 60
+        }
+      },
+      {
+        "tekst": "Vriendelijk afhouden",
+        "effect": {
+          "loyaliteit_zwevend": -3
+        }
+      }
+    ]
+  }
+]

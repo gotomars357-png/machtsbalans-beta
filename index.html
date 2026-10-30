@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0f15">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Machtsbalans">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/icoon-192.png">
+  <title>Machtsbalans</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230a0f15'/%3E%3Cpath d='M8 2v12M3 6h10M3 6l-1.5 4h3zM13 6l-1.5 4h3z' stroke='%23f0b429' stroke-width='1.2' fill='none'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- Startscherm: wereld kiezen, validatie zien, instellingen -->
+  <section id="start" class="screen">
+    <div class="start-inner">
+      <header class="start-head">
+        <div class="logo">MACHTSBALANS</div>
+        <p class="tagline">Bouw eerst een economie. Koop dan invloed. Geweld is de duurste optie.</p>
+        <p class="proto">Prototype economielus · engine <span id="engine-versie"></span></p>
+      </header>
+      <!-- Dagelijkse uitdaging: gevuld door src/ui/uitdaging.js -->
+      <div id="uitdaging" class="uitdaging-kaart" hidden></div>
+      <div class="start-grid">
+        <div class="start-col">
+          <h2>1 · Wereld</h2>
+          <div id="pack-lijst" class="pack-lijst"></div>
+          <div id="pack-rapport" class="pack-rapport"></div>
+        </div>
+        <div class="start-col">
+          <h2>2 · Startland</h2>
+          <div id="land-lijst" class="land-lijst"></div>
+          <h2>3 · Instellingen</h2>
+          <div class="instellingen">
+            <label>Moeilijkheid
+              <select id="opt-moeilijkheid">
+                <option value="makkelijk">Makkelijk</option>
+                <option value="normaal" selected>Normaal</option>
+                <option value="moeilijk">Moeilijk</option>
+              </select>
+            </label>
+            <label>Seed <input id="opt-seed" type="number" value="2026"></label>
+            <label class="check"><input id="opt-onboarding" type="checkbox" checked> Fasen en onboarding</label>
+            <label class="check"><input id="opt-events" type="checkbox" checked> Gebeurtenissen</label>
+            <label class="check"><input id="opt-schokken" type="checkbox" checked> Wereldschokken</label>
+            <label class="check"><input id="opt-escalatie" type="checkbox" checked> Escalatieladder</label>
+          </div>
+          <div class="start-acties">
+            <button id="start-knop" class="knop primair" disabled>Start</button>
+            <button id="verder-knop" class="knop" hidden>Verder spelen</button>
+            <label class="knop">Opslag of replay openen<input id="replay-bestand" type="file" accept=".json,application/json" hidden></label>
+          </div>
+          <p class="hint">Spatie pauzeert. Op pauze kun je gewoon orders geven. 1 seconde is 1 dag op tempo 1×.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Spelscherm -->
+  <section id="spel" class="screen" hidden>
+    <header id="topbalk">
+      <div class="merk">MACHTSBALANS</div>
+      <div class="datum"><span id="datum"></span><span id="fase" class="pil"></span></div>
+      <div class="tempo" id="tempo">
+        <button data-tempo="0" title="Pauze (spatie)">❚❚</button>
+        <button data-tempo="1" title="1 dag per seconde (1)">1×</button>
+        <button data-tempo="2" title="(2)">2×</button>
+        <button data-tempo="4" title="(3)">4×</button>
+        <button data-tempo="8" title="(4)">8×</button>
+      </div>
+      <div id="resources" class="resources"></div>
+    </header>
+    <main id="hoofd">
+      <div id="kaart-wrap">
+        <canvas id="kaart"></canvas>
+        <div class="kaart-knoppen">
+          <button data-kaart="in" title="Inzoomen (scrollwiel)">+</button>
+          <button data-kaart="uit" title="Uitzoomen">−</button>
+          <button data-kaart="thuis" title="Naar je eigen land (H)">⌂</button>
+          <button data-kaart="wereld" title="Hele wereld (W)">⤢</button>
+        </div>
+        <div id="bouwbalk" class="bouwbalk" hidden></div>
+        <div id="tutorial" class="tutorial" hidden></div>
+        <div id="doelbalk" class="doelbalk" hidden></div>
+        <div id="kaart-tip" class="tip" hidden></div>
+        <div id="context" class="context" hidden></div>
+        <div id="legenda" class="legenda"></div>
+        <div id="schok-banner" class="schok-banner" hidden></div>
+      </div>
+      <aside id="zij">
+        <nav id="tabs">
+          <button data-tab="economie" class="actief">Economie</button>
+          <button data-tab="volk">Volk</button>
+          <button data-tab="invloed">Invloed</button>
+          <button data-tab="leger">Leger</button>
+          <button data-tab="blokken">Blokken</button>
+          <button data-tab="commandanten" title="Commandanten">Cmd</button>
+          <button data-tab="log">Log</button>
+        </nav>
+        <div class="paneel" data-paneel="economie">
+          <div data-zone="doelen"></div>
+          <section class="blok">
+            <h3>Productie en technologie <span class="uitleg" title="Y = A · K^α · L^β. A groeit met investering in chips en AI: A(t+1) = A(t) · (1 + g · C/Y).">ⓘ</span></h3>
+            <canvas id="grafiek-groei" class="grafiek"></canvas>
+            <div data-zone="kern"></div>
+          </section>
+          <section class="blok">
+            <h3>De afweging <span class="uitleg" title="Wat je de afgelopen weken met je inkomen deed. Te veel van één soort laat het systeem kantelen.">ⓘ</span></h3>
+            <div data-zone="balans"></div>
+          </section>
+          <section class="blok">
+            <h3>Beleid</h3>
+            <label class="slider">Belasting <span id="v-belasting"></span>
+              <input id="s-belasting" type="range" min="8" max="40" step="1">
+            </label>
+            <label class="slider">Sociale verdeling <span id="v-verdeling"></span>
+              <input id="s-verdeling" type="range" min="0" max="40" step="1">
+            </label>
+            <div data-zone="stabiliteit"></div>
+          </section>
+          <section class="blok">
+            <h3>Bouwen</h3>
+            <div data-zone="gebouwen"></div>
+          </section>
+          <section class="blok">
+            <h3>Voorraden</h3>
+            <div data-zone="voorraden"></div>
+          </section>
+        </div>
+        <div class="paneel" data-paneel="volk" hidden>
+          <div data-zone="regime"></div>
+          <div data-zone="volk"></div>
+          <div data-zone="thuisfront"></div>
+          <div data-zone="campagnes"></div>
+          <section class="blok">
+            <h3>Voorzieningen bouwen</h3>
+            <div data-zone="gebouwen-volk"></div>
+          </section>
+        </div>
+        <div class="paneel" data-paneel="leger" hidden>
+          <div data-zone="oorlogen"></div>
+          <div data-zone="leger-overzicht"></div>
+          <div data-zone="training"></div>
+          <section class="blok">
+            <h3>Militaire gebouwen</h3>
+            <div data-zone="gebouwen-leger"></div>
+          </section>
+        </div>
+        <div class="paneel" data-paneel="invloed" hidden>
+          <div data-zone="land"></div>
+          <div data-zone="zwevend"></div>
+        </div>
+        <div class="paneel" data-paneel="blokken" hidden>
+          <div data-zone="blokken"></div>
+          <section class="blok">
+            <h3>Aandeel in de wereldproductie</h3>
+            <canvas id="grafiek-blokken" class="grafiek"></canvas>
+          </section>
+          <div data-zone="overwinning"></div>
+        </div>
+        <div class="paneel" data-paneel="commandanten" hidden>
+          <section class="blok">
+            <h3>Nieuwe commandant <span class="uitleg" title="Stel een doel en een budget. De commandant voert zelf uit, rapporteert en kan fouten maken.">ⓘ</span></h3>
+            <div data-zone="cmd-slot"></div>
+            <div id="cmd-form" class="cmd-form">
+              <label>Doel <select id="cmd-doel"></select></label>
+              <label>Budget <input id="cmd-budget" type="range" min="100" max="2000" step="50" value="500"> <span id="cmd-budget-v">500</span></label>
+              <label>Stijl
+                <select id="cmd-stijl">
+                  <option value="zuinig">Zuinig: beste loyaliteit per kapitaal</option>
+                  <option value="gedurfd">Gedurfd: grootste stappen, ook druk, meer fouten</option>
+                </select>
+              </label>
+              <button id="cmd-knop" class="knop primair">Aanstellen</button>
+            </div>
+          </section>
+          <div data-zone="commandanten"></div>
+        </div>
+        <div class="paneel" data-paneel="log" hidden>
+          <div data-zone="log"></div>
+        </div>
+      </aside>
+    </main>
+    <footer id="ticker"></footer>
+  </section>
+
+  <div id="modal" class="modal" hidden><div class="modal-kaart" id="modal-inhoud"></div></div>
+  <div id="toasts"></div>
+
+  <script type="module" src="src/ui/main.js"></script>
+</body>
+</html>

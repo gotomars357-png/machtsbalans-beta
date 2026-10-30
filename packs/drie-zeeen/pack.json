@@ -1,0 +1,11 @@
+{
+  "id": "drie-zeeen",
+  "naam": "De Drie Zeeën",
+  "versie": "0.1.0",
+  "auteur": "Go To Mars",
+  "licentie": "CC-BY-4.0",
+  "classificatie": "fictief",
+  "engine_min": "0.1.0",
+  "beschrijving": "Basiswereld. Een licht gestileerd heden rond drie binnenzeeën: energie, chips en AI-capaciteit bepalen wie groeit. Drie blokken, acht zwevende landen.",
+  "tijd": { "startjaar": 2026 }
+}

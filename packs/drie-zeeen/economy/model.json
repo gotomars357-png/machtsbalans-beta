@@ -1,0 +1,6 @@
+{
+  "_toelichting": "Ontwerpuitgangspunten, geen gemeten data. Y = A * K^alpha * L^beta en A(t+1) = A(t) * (1 + g * C/Y).",
+  "alpha": 0.6,
+  "beta": 0.4,
+  "g": 0.006
+}

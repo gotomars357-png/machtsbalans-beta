@@ -1,0 +1,8 @@
+[
+  {"id":"infanterie","naam":"Infanterie","icoon":"🪖","gebouw":"kazerne","kosten":{"kapitaal":45},"bouwtijd":6,"hp":100,"aanval":10,"bereik":1,"snelheid":0.6,"onderhoud":0.3,"beschrijving":"Goedkoop en taai in bos en bergen."},
+  {"id":"pantser","naam":"Pantser","icoon":"🛡","gebouw":"wapenfabriek","kosten":{"kapitaal":120,"grondstoffen":30},"bouwtijd":10,"hp":220,"aanval":20,"bereik":1,"snelheid":0.9,"onderhoud":0.8,"beschrijving":"Sterk en snel op vlak terrein."},
+  {"id":"artillerie","naam":"Artillerie","icoon":"💥","gebouw":"wapenfabriek","kosten":{"kapitaal":110,"grondstoffen":25},"bouwtijd":10,"hp":70,"aanval":24,"bereik":3,"snelheid":0.45,"onderhoud":0.6,"beschrijving":"Groot bereik, kwetsbaar van dichtbij."},
+  {"id":"drone","naam":"Drones","icoon":"🛸","gebouw":"dronebasis","kosten":{"kapitaal":70,"chips":6},"bouwtijd":8,"vliegt":true,"hp":50,"aanval":14,"bereik":2,"snelheid":1.6,"onderhoud":0.5,"beschrijving":"Snel en vliegend, maar kan geen gebied innemen."},
+  {"id":"kolonistenschip","naam":"Kolonistenschip","icoon":"⛵","gebouw":"haven","kosten":{"kapitaal":150,"voedsel":40},"bouwtijd":10,"vaart":true,"kolonist":true,"hp":60,"aanval":0,"bereik":1,"snelheid":1.2,"onderhoud":0.4,"beschrijving":"Stuur het naar een onbewoond eiland om er een kolonie te stichten."},
+  {"id":"fregat","naam":"Fregat","icoon":"🚢","gebouw":"haven","kosten":{"kapitaal":160,"grondstoffen":40},"bouwtijd":12,"vaart":true,"hp":160,"aanval":16,"bereik":2,"snelheid":1.4,"onderhoud":0.7,"beschrijving":"Oorlogsschip: beschermt kolonies en beschiet kusten."}
+]

@@ -1,0 +1,14 @@
+{
+  "_toelichting": "De beslisfase en overwinning worden per wereld afgestemd; overige regels komen uit de engine.",
+  "fasen": [
+    { "id": "opbouwen", "naam": "Opbouwen", "dag": 0, "ontgrendelt": [], "tekst": "Bouw je economie op." },
+    { "id": "invloed", "naam": "Invloed kopen", "dag": 300, "ontgrendelt": ["invloed", "commandanten", "netwerken", "cybercentrum"], "tekst": "Blokken worden actief." },
+    { "id": "beslissen", "naam": "Beslissen", "dag": 450, "ontgrendelt": ["escalatie"], "tekst": "De escalatieladder gaat open." }
+  ],
+  "overwinning": [
+    { "type": "aandeel_productie", "naam": "Economisch overwicht", "drempel": 0.62, "duur_dagen": 45, "min_dag": 500 },
+    { "type": "aantal_landen", "naam": "Blokvorming", "drempel": 7, "min_dag": 650 },
+    { "type": "tech_factor", "naam": "Technologische wedloop", "drempel": 2.6, "min_dag": 750 }
+  ],
+  "dag_limiet": 2400
+}

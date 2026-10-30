@@ -1,0 +1,11 @@
+[
+  { "id": "olie", "naam": "Olie", "rol": "energie", "icoon": "🛢", "kleur": "#d9a441", "start": 120, "opslag_max": 500,
+    "tekort_effect": { "stabiliteit": -18, "productie_factor": 0.35 } },
+  { "id": "staal", "naam": "Staal", "rol": "grondstof", "icoon": "⚙", "kleur": "#a3a9b3", "start": 150, "opslag_max": 500,
+    "tekort_effect": { "stabiliteit": -4 } },
+  { "id": "graan", "naam": "Graan", "rol": "voedsel", "icoon": "🌾", "kleur": "#c9b458", "start": 120, "opslag_max": 500,
+    "tekort_effect": { "stabiliteit": -30, "productie_factor": 0.8 } },
+  { "id": "kapitaal", "naam": "Kapitaal", "rol": "geld", "icoon": "◈", "kleur": "#e8d7a5", "start": 300 },
+  { "id": "ruimtevaart", "naam": "Raketten & rekenkracht", "rol": "tech", "icoon": "🚀", "kleur": "#9fc5ff", "start": 0, "opslag_max": 300 },
+  { "id": "stabiliteit", "naam": "Stabiliteit", "rol": "stabiliteit", "icoon": "⚖", "kleur": "#d6a2e8", "start": 62 }
+]

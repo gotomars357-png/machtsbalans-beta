@@ -1,0 +1,363 @@
+{
+  "hefbomen": [
+    {
+      "id": "handelsakkoord",
+      "naam": "Handelsakkoord",
+      "hefboom": "handel",
+      "kosten": {
+        "kapitaal": 80
+      },
+      "loyaliteit": 6,
+      "duur": 30,
+      "afkoeling": 60,
+      "handel": {
+        "inkomen_per_dag": 0.8,
+        "dagen": 180
+      },
+      "beschrijving": "Markttoegang en tariefverlaging. Levert beide landen inkomen op."
+    },
+    {
+      "id": "lening",
+      "naam": "Lening",
+      "hefboom": "kapitaal",
+      "kosten": {
+        "kapitaal": 200
+      },
+      "loyaliteit": 9,
+      "duur": 20,
+      "afkoeling": 90,
+      "lening": {
+        "totaal": 230,
+        "dagen": 150
+      },
+      "beschrijving": "Kapitaal nu, terugbetaling met rente later. Kost je reserve."
+    },
+    {
+      "id": "technologiedeal",
+      "naam": "Technologiedeal",
+      "hefboom": "technologie",
+      "kosten": {
+        "chips": 25
+      },
+      "loyaliteit": 8,
+      "duur": 25,
+      "afkoeling": 75,
+      "tech_overdracht": 1.005,
+      "beschrijving": "Chips en AI-capaciteit delen. Versnelt hun technologie."
+    },
+    {
+      "id": "veiligheidsgarantie",
+      "naam": "Veiligheidsgarantie",
+      "hefboom": "veiligheid",
+      "kosten": {
+        "kapitaal": 130
+      },
+      "loyaliteit": 10,
+      "duur": 30,
+      "afkoeling": 120,
+      "eigen_stabiliteit": -2,
+      "spanning": 3,
+      "beschrijving": "Garanties en aanwezigheid. Sterk, maar verhoogt spanning."
+    },
+    {
+      "id": "cultuur",
+      "naam": "Cultuur & diplomatie",
+      "hefboom": "invloed",
+      "kosten": {
+        "kapitaal": 40
+      },
+      "loyaliteit": 3,
+      "duur": 40,
+      "afkoeling": 40,
+      "beschrijving": "Goedkoop en traag. Steun in internationale organisaties."
+    }
+  ],
+  "escalatie": [
+    {
+      "trede": 1,
+      "id": "economische_druk",
+      "naam": "Economische druk",
+      "kosten": {
+        "kapitaal": 70
+      },
+      "beschikbaar": true,
+      "doel_loyaliteit_blok": -12,
+      "doel_stabiliteit": -6,
+      "derden_loyaliteit": -1.5,
+      "spanning": 8,
+      "afkoeling": 50,
+      "beschrijving": "Tarieven en exportbeperkingen. Goedkoop, omkeerbaar, werkt traag."
+    },
+    {
+      "trede": 2,
+      "id": "informatiecampagne",
+      "naam": "Informatie & invloed",
+      "kosten": {
+        "kapitaal": 100,
+        "chips": 10
+      },
+      "beschikbaar": true,
+      "doel_loyaliteit_blok": -10,
+      "doel_stabiliteit": -12,
+      "derden_loyaliteit": -2,
+      "spanning": 12,
+      "afkoeling": 70,
+      "ontdekkans": 0.3,
+      "ontdekt_loyaliteit": -7,
+      "beschrijving": "Campagnes en steun aan oppositie. Kan uitkomen."
+    },
+    {
+      "trede": 2,
+      "id": "complot_zaaien",
+      "naam": "Complottheorie zaaien",
+      "type": "complot",
+      "kosten": {
+        "kapitaal": 90,
+        "chips": 5
+      },
+      "beschikbaar": true,
+      "complot": 25,
+      "doel_stabiliteit": -4,
+      "derden_loyaliteit": -1,
+      "spanning": 8,
+      "afkoeling": 60,
+      "ontdekkans": 0.2,
+      "ontdekt_loyaliteit": -6,
+      "beschrijving": "Wantrouwen aanwakkeren. Verspreidt zich langs handelsroutes, ook terug naar jou."
+    },
+    {
+      "trede": 3,
+      "id": "cyber",
+      "naam": "Cyberaanval",
+      "type": "cyber",
+      "beschikbaar": true,
+      "kans": 0.8,
+      "weerbaarheid_schaal": 40,
+      "verdediging": 0.5,
+      "verdediging_ontdekking": 0.6,
+      "spanning": 4,
+      "afkoeling": 45,
+      "derden_loyaliteit": -1.5,
+      "ontdekt_loyaliteit": -6,
+      "ontdekt_doel_loyaliteit": -10,
+      "ontdekt_spanning": 8,
+      "casus_belli": 120,
+      "gericht": {
+        "kosten_factor": 1.3,
+        "duur": 30
+      },
+      "varianten": [
+        {
+          "id": "stroomnet",
+          "naam": "Stroomnet",
+          "kosten": {
+            "kapitaal": 110,
+            "chips": 8
+          },
+          "duur": 15,
+          "ontdekkans": 0.25,
+          "aandeel": 0.35,
+          "energie_voorraad": 0.5,
+          "doel_stabiliteit": -3,
+          "beschrijving": "Een derde van hun centrales valt uit en hun energievoorraad lekt weg."
+        },
+        {
+          "id": "financien",
+          "naam": "Financiën",
+          "kosten": {
+            "kapitaal": 130,
+            "chips": 10
+          },
+          "duur": 25,
+          "ontdekkans": 0.3,
+          "kapitaal": 0.08,
+          "kapitaal_max": 200,
+          "productie": 0.95,
+          "beschrijving": "Banken en betalingsverkeer liggen plat: kapitaal weg en minder inkomen."
+        },
+        {
+          "id": "communicatie",
+          "naam": "Communicatie",
+          "kosten": {
+            "kapitaal": 90,
+            "chips": 6
+          },
+          "duur": 25,
+          "ontdekkans": 0.2,
+          "moraal": -6,
+          "beschrijving": "Hun omroep valt stil: geen factcheck en geen eigen mediacampagnes. Strijdbereidheid daalt wat."
+        }
+      ],
+      "beschrijving": "Aanval op stroomnet, financiën of communicatie, of gericht op één gebouw. Komt het uit, dan krijgt het doelwit een casus belli."
+    },
+    {
+      "trede": 4,
+      "id": "valse_vlag",
+      "naam": "Valse-vlagoperatie",
+      "type": "valse_vlag",
+      "kosten": {
+        "kapitaal": 160
+      },
+      "beschikbaar": true,
+      "beschuldigd_loyaliteit": -8,
+      "eigen_stabiliteit": 5,
+      "casus_belli": 150,
+      "spanning": 10,
+      "afkoeling": 120,
+      "ontdekkans": 0.25,
+      "ontdekt_loyaliteit": -12,
+      "ontdekt_complot": 20,
+      "beschrijving": "Een incident ensceneren en dit land de schuld geven. Levert een casus belli op. Komt het uit, dan is de schade groot."
+    },
+    {
+      "trede": 5,
+      "id": "oorlog",
+      "naam": "Oorlog verklaren",
+      "type": "oorlog",
+      "kosten": {
+        "kapitaal": 150
+      },
+      "beschikbaar": true,
+      "eigen_stabiliteit": -10,
+      "derden_loyaliteit": -6,
+      "spanning": 30,
+      "afkoeling": 60,
+      "beschrijving": "Je leger mag hun grondgebied in. Kost stabiliteit en loyaliteit bij derden, minder met een casus belli."
+    },
+    {
+      "trede": 6,
+      "id": "afschrikking",
+      "naam": "Strategische afschrikking",
+      "beschikbaar": false,
+      "beschrijving": "Plafond van de ladder. Gebruik betekent verlies voor iedereen."
+    }
+  ],
+  "deescalatie": {
+    "naam": "De-escalatie",
+    "kosten": {
+      "kapitaal": 50
+    },
+    "spanning": -15,
+    "zwevend_loyaliteit": 3,
+    "afkoeling": 90
+  },
+  "campagnes": [
+    {
+      "id": "feelgood",
+      "naam": "Feelgood-campagne",
+      "kosten": {
+        "kapitaal": 60
+      },
+      "afkoeling": 40,
+      "vereist_controle": 10,
+      "effect": {
+        "stabiliteit": 3,
+        "controle": 6
+      },
+      "beschrijving": "Successen breed uitmeten. Klein, veilig effect."
+    },
+    {
+      "id": "afleiding",
+      "naam": "Brood en spelen",
+      "kosten": {
+        "kapitaal": 90
+      },
+      "afkoeling": 60,
+      "vereist_controle": 10,
+      "effect": {
+        "stabiliteit_doel": 6,
+        "duur_dagen": 40,
+        "controle": 8,
+        "complot": 3
+      },
+      "ontdekkans": 0.15,
+      "ontdekt": {
+        "complot": 12,
+        "stabiliteit": -6
+      },
+      "beschrijving": "De aandacht verleggen naar vermaak en schandaaltjes. Werkt, tot mensen het doorzien."
+    },
+    {
+      "id": "zondebok",
+      "naam": "Zondebok aanwijzen",
+      "kosten": {
+        "kapitaal": 110
+      },
+      "afkoeling": 90,
+      "vereist_controle": 15,
+      "effect": {
+        "stabiliteit": 6,
+        "oorlogssteun": 90,
+        "complot": 4,
+        "spanning": 8
+      },
+      "ontdekkans": 0.2,
+      "ontdekt": {
+        "complot": 15,
+        "stabiliteit": -8
+      },
+      "beschrijving": "Een buitenlandse vijand de schuld geven. Maakt een oorlog 90 dagen lang veel goedkoper in stabiliteit."
+    },
+    {
+      "id": "ontkrachten",
+      "naam": "Complotten ontkrachten",
+      "kosten": {
+        "kapitaal": 80
+      },
+      "afkoeling": 40,
+      "effect": {
+        "complot": -15
+      },
+      "beschrijving": "Feiten, voorlichting en transparantie. Werkt ook zonder omroep."
+    }
+  ],
+  "netwerken": [
+    {
+      "id": "loge",
+      "naam": "Netwerk uitbouwen",
+      "type": "loge",
+      "kosten": {
+        "kapitaal": 120
+      },
+      "afkoeling": 30,
+      "groei": 20,
+      "beschrijving": "Een besloten genootschap van invloedrijke mensen. Trekt het land langzaam naar je blok."
+    },
+    {
+      "id": "chantage",
+      "naam": "Dossier gebruiken",
+      "type": "chantage",
+      "kosten": {
+        "kapitaal": 150
+      },
+      "afkoeling": 90,
+      "vereist_netwerk": 40,
+      "loyaliteit": 18,
+      "doel_stabiliteit": -4,
+      "ontdekkans": 0.3,
+      "ontdekt_loyaliteit": -20,
+      "ontdekt_complot": 15,
+      "beschrijving": "Druk via compromitterende dossiers. Snel en krachtig, maar als het lekt, is het netwerk weg."
+    },
+    {
+      "id": "oprollen",
+      "naam": "Netwerken oprollen",
+      "type": "oprollen",
+      "kosten": {
+        "kapitaal": 100
+      },
+      "afkoeling": 60,
+      "vereist_weerbaarheid": 6,
+      "verlaging": 40,
+      "beschrijving": "Buitenlandse netwerken in je eigen land opsporen en ontmantelen."
+    }
+  ],
+  "overname": [
+    { "id": "aansluiting", "naam": "Vreedzame aansluiting", "type": "aansluiting", "kosten": { "@geld": 200 }, "afkoeling": 90,
+      "vereist": { "loyaliteit": 50, "media": 20, "moraal_max": 55 },
+      "beschrijving": "Win zonder oorlog: overtuig een land met diplomatie en media, terwijl zijn strijdbereidheid afneemt." },
+    { "id": "ultimatum", "naam": "Ultimatum stellen", "type": "ultimatum", "kosten": { "@geld": 100 }, "afkoeling": 120,
+      "vereist": { "overmacht": 1.8, "moraal_max": 55 },
+      "beschrijving": "Overmacht bij een buurland met zwakke strijdwil. Afwijzing verhoogt spanning en hun strijdbereidheid." }
+  ]
+}

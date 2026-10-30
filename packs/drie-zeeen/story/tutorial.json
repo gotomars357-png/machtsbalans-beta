@@ -1,0 +1,113 @@
+{
+  "stappen": [
+    {
+      "id": "hoofdstad",
+      "titel": "Dit is je hoofdstad",
+      "tekst": "Je regeert Valdoria. Klik op je hoofdstad om te zien wat je land maakt en wat het kost.",
+      "doel": { "soort": "land", "bij": "hoofdstad" },
+      "klaar": { "ui": "klik", "doel": "hoofdstad" },
+      "hint": "Zoek de grootste stad van je land en klik erop. De knop ⌂ brengt je er terug."
+    },
+    {
+      "id": "mijn",
+      "titel": "Bouw een mijn",
+      "tekst": "Grondstoffen heb je voor alles nodig. Kies Mijn in het tabblad Economie en plaats hem op een berg.",
+      "tab": "economie",
+      "doel": { "soort": "tegel", "gebouw": "mijn", "bij": "hoofdstad" },
+      "klaar": { "gebouw": "mijn", "minimaal": 2 },
+      "hint": "Een mijn kan alleen op een berg. Hoe dichter bij je hoofdstad, hoe beter het rendement."
+    },
+    {
+      "id": "woonwijk",
+      "titel": "Bouw een woonwijk",
+      "tekst": "Mensen zijn je arbeid. Een woonwijk laat je bevolking groeien. Je vindt hem in het tabblad Volk.",
+      "tab": "volk",
+      "doel": { "soort": "tegel", "gebouw": "woonwijk", "bij": "hoofdstad" },
+      "klaar": { "gebouw": "woonwijk", "minimaal": 1 },
+      "hint": "Kies Woonwijk in Volk en klik op een vrije tegel naast je hoofdstad."
+    },
+    {
+      "id": "tijd",
+      "titel": "Laat de tijd lopen",
+      "tekst": "Gebouwen hebben bouwtijd. Zet het tempo op 2× en wacht tot je mijn en woonwijk klaar zijn.",
+      "doel": { "soort": "knop", "knop": "[data-tempo=\"2\"]" },
+      "klaar": { "ui": "dagen", "dagen": 5 },
+      "hint": "Spatie zet het spel op pauze of weer aan."
+    },
+    {
+      "id": "centrale",
+      "titel": "Bouw een derde centrale",
+      "tekst": "Zonder energie staat alles stil. Bouw een derde centrale, dan houdt je voorraad het vol.",
+      "tab": "economie",
+      "doel": { "soort": "tegel", "gebouw": "centrale", "bij": "hoofdstad" },
+      "klaar": { "gebouw": "centrale", "minimaal": 3 },
+      "hint": "Een centrale kost kapitaal en grondstoffen. Kijk bovenin of je genoeg hebt."
+    },
+    {
+      "id": "volk",
+      "titel": "Houd je volk tevreden",
+      "tekst": "Open het tabblad Volk en kijk naar stabiliteit. Valt die te laag, dan valt je regering.",
+      "doel": { "soort": "knop", "knop": "[data-tab=volk]" },
+      "klaar": { "ui": "tab", "tab": "volk" },
+      "hint": "Klik bovenaan op Volk."
+    },
+    {
+      "id": "afsluiting",
+      "titel": "Je bent op weg",
+      "tekst": "Bouw door en groei. Op dag 120 komen chips, scholen en een omroep; op dag 300 gaat Invloed open. Het tabblad Economie toont je doelen.",
+      "tab": "economie",
+      "doel": { "soort": "knop", "knop": "[data-tab=economie]" },
+      "klaar": { "ui": "tab", "tab": "economie" },
+      "hint": "Klik op Economie om je doelen te zien."
+    }
+  ],
+  "tips": [
+    {
+      "id": "contract-aanbod",
+      "dringend": true,
+      "wanneer": { "soort": "contract_aanbod" },
+      "titel": "Een land biedt je een contract aan",
+      "tekst": "Een ander land wil met je handelen. Open 🤝 in de bovenbalk om het aanbod te lezen en te aanvaarden of af te wijzen. Een afgerond contract levert jullie allebei credits op.",
+      "doel": { "soort": "knop", "knop": "[data-actie=\"contracten\"]" },
+      "klaar": { "ui": "actie", "actie": "contracten", "of": "aanbod_weg" },
+      "hint": "Klik op 🤝 bovenin, naast je voorraden. Het aanbod blijft 10 dagen staan."
+    },
+    {
+      "id": "contract-zelf",
+      "wanneer": { "soort": "dagen", "dagen": 60, "zonder": "contract" },
+      "titel": "Sluit zelf een handelscontract",
+      "tekst": "Niemand biedt je iets aan? Klik op de hoofdstad van een buurland en kies in het blok Handel 'Contract aanbieden'. Ruil wat je over hebt tegen wat je tekortkomt.",
+      "doel": { "soort": "land", "bij": "buurland" },
+      "klaar": { "ui": "klik", "doel": "buurland" },
+      "hint": "De hoofdstad met de gloed is een buurland. Klik erop; het blok Handel staat onderaan het paneel."
+    },
+    {
+      "id": "versnellen",
+      "wanneer": { "soort": "fase", "fase": "versnellen" },
+      "titel": "Nieuwe fase: Versnellen",
+      "tekst": "Vrijgekomen: chipfabriek, zonnepark, haven, scholen, ziekenhuis, politie, rechtbank, omroep en kazerne. Chips voeden je technologie; begin met een chipfabriek in het tabblad Economie.",
+      "doel": { "soort": "tegel", "gebouw": "chipfabriek", "bij": "hoofdstad" },
+      "klaar": { "gebouw": "chipfabriek", "minimaal": 1 },
+      "hint": "Een chipfabriek kost 255 kapitaal en 65 grondstoffen en vraagt 4 energie per dag. Bouw eerst een extra centrale als je energie krap is."
+    },
+    {
+      "id": "invloed",
+      "wanneer": { "soort": "fase", "fase": "invloed" },
+      "titel": "Nieuwe fase: Invloed",
+      "tekst": "De andere blokken worden actief. In het tabblad Invloed trek je zwevende landen naar je toe en zie je wat buitenlandse media bij jou doen. Een eigen omroep beschermt je verhaal.",
+      "doel": { "soort": "knop", "knop": "[data-tab=invloed]" },
+      "klaar": { "ui": "tab", "tab": "invloed" },
+      "hint": "Klik bovenaan op Invloed. Het slotje is weg."
+    },
+    {
+      "id": "dreiging",
+      "dringend": true,
+      "wanneer": { "soort": "dreiging" },
+      "titel": "Een blok zet je onder druk",
+      "tekst": "Een ander blok escaleert tegen jou. Kijk in het tabblad Leger naar je sterkte en strijdbereidheid, en in Invloed wie nog aan jouw kant staat. Een moedeloos leger vecht half.",
+      "doel": { "soort": "knop", "knop": "[data-tab=leger]" },
+      "klaar": { "ui": "tab", "tab": "leger" },
+      "hint": "Klik bovenaan op Leger. Vrede sluiten kan via de hoofdstad van de tegenstander."
+    }
+  ]
+}

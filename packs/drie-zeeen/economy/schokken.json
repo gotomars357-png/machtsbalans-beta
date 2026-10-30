@@ -1,0 +1,57 @@
+[
+  {
+    "id": "energieprijs",
+    "naam": "Energieprijsschok",
+    "na_dag": 200,
+    "kans_per_dag": 0.0018,
+    "duur": 45,
+    "tekst": "Centrales draaien op 70%. Zonneparken merken niets.",
+    "effect": {
+      "productie": {
+        "energie": 0.7
+      },
+      "uitgezonderd": [
+        "zonnepark"
+      ]
+    }
+  },
+  {
+    "id": "handelsblokkade",
+    "naam": "Blokkade in de Straat van Quillon",
+    "na_dag": 400,
+    "kans_per_dag": 0.0012,
+    "duur": 40,
+    "tekst": "Handel stokt. Belasting- en handelsinkomsten dalen.",
+    "effect": {
+      "inkomen_factor": 0.8
+    }
+  },
+  {
+    "id": "chiptekort",
+    "naam": "Wereldwijd chiptekort",
+    "na_dag": 500,
+    "kans_per_dag": 0.001,
+    "duur": 60,
+    "tekst": "Chipfabrieken halen de helft van hun output.",
+    "effect": {
+      "productie": {
+        "chips": 0.5
+      }
+    }
+  },
+  {
+    "id": "grijze_koorts",
+    "type": "pandemie",
+    "naam": "Grijze koorts",
+    "na_dag": 450,
+    "kans_per_dag": 0.0012,
+    "duur": 160,
+    "besmetting": 0.05,
+    "tekst": "Een nieuw virus verspreidt zich langs handelsroutes. Ziekenhuizen beperken de schade; quarantaine remt de verspreiding.",
+    "effect": {
+      "productie_factor": 0.85,
+      "sterfte": 0.0005,
+      "complot": 0.12
+    }
+  }
+]

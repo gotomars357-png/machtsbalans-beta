@@ -1,0 +1,6 @@
+{
+  "_toelichting": "De AI begint eerder met koloniseren zodat de eilanden geen vanzelfsprekende opbrengst voor een speler zijn.",
+  "ai_kolonie_start": 240,
+  "ai_max_kolonies": 2,
+  "ai_oorlog_kans": 0.06
+}

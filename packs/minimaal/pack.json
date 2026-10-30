@@ -1,0 +1,12 @@
+{
+  "id": "minimaal",
+  "naam": "Minimaal voorbeeld",
+  "versie": "0.1.0",
+  "auteur": "Go To Mars",
+  "licentie": "CC0-1.0",
+  "classificatie": "fictief",
+  "beschrijving": "Het kleinste speelbare pack: alleen een kaart met drie landen. Alles anders komt uit de standaardwaarden van de engine. Startpunt voor makers.",
+  "bestanden": {
+    "kaart": "map/kaart.json"
+  }
+}

@@ -1,0 +1,12 @@
+[
+  {"id": "arden", "naam": "Arden", "blok": "westpact", "kern": true, "speelbaar": true, "persoonlijkheid": "voorzichtig", "bevolking": 60, "start": {"kapitaal": 360}, "regime": "democratie"},
+  {"id": "halvoort", "naam": "Halvoort", "blok": "westpact", "kern": true, "persoonlijkheid": "voorzichtig", "bevolking": 34, "regime": "monarchie"},
+  {"id": "sarkovie", "naam": "Sarkovië", "blok": "oostraad", "kern": true, "speelbaar": true, "persoonlijkheid": "agressief", "bevolking": 70, "start": {"gebouwen": {"olieveld": 3, "staalfabriek": 2, "landbouw": 2, "zware_industrie": 2}, "kapitaal": 260}, "regime": "eenpartijstaat"},
+  {"id": "drevna", "naam": "Drevna", "blok": "oostraad", "kern": true, "persoonlijkheid": "opportunistisch", "bevolking": 38, "regime": "eenpartijstaat"},
+  {"id": "maranta", "naam": "Maranta", "persoonlijkheid": "opportunistisch", "bevolking": 30, "regime": "monarchie"},
+  {"id": "kesh", "naam": "Kesh", "persoonlijkheid": "agressief", "bevolking": 42, "regime": "militair"},
+  {"id": "solvej", "naam": "Solvej", "persoonlijkheid": "isolationistisch", "bevolking": 22, "regime": "democratie"},
+  {"id": "turath", "naam": "Torvan", "persoonlijkheid": "opportunistisch", "bevolking": 58, "regime": "theocratie"},
+  {"id": "ombria", "naam": "Ombria", "persoonlijkheid": "voorzichtig", "bevolking": 36, "regime": "democratie"},
+  {"id": "vellum", "naam": "Vellum", "persoonlijkheid": "isolationistisch", "bevolking": 44, "regime": "militair"}
+]

@@ -1,0 +1,277 @@
+{
+  "breedte": 1000,
+  "hoogte": 620,
+  "zeeen": [
+    {
+      "naam": "IJzerzee",
+      "x": 275,
+      "y": 285
+    },
+    {
+      "naam": "Glaszee",
+      "x": 540,
+      "y": 355
+    },
+    {
+      "naam": "Zilverzee",
+      "x": 805,
+      "y": 385
+    }
+  ],
+  "regios": [
+    {
+      "land": "valdoria",
+      "x": 170,
+      "y": 130,
+      "gewicht": 1.15
+    },
+    {
+      "land": "valdoria",
+      "x": 110,
+      "y": 210,
+      "gewicht": 0.9
+    },
+    {
+      "land": "brennmark",
+      "x": 330,
+      "y": 105,
+      "gewicht": 1.05
+    },
+    {
+      "land": "kharazan",
+      "x": 810,
+      "y": 120,
+      "gewicht": 1.2
+    },
+    {
+      "land": "kharazan",
+      "x": 900,
+      "y": 200,
+      "gewicht": 0.9
+    },
+    {
+      "land": "tsurev",
+      "x": 930,
+      "y": 310,
+      "gewicht": 0.9
+    },
+    {
+      "land": "lumeria",
+      "x": 130,
+      "y": 430,
+      "gewicht": 1.1
+    },
+    {
+      "land": "castiva",
+      "x": 270,
+      "y": 525,
+      "gewicht": 1.05
+    },
+    {
+      "land": "selmara",
+      "x": 520,
+      "y": 150,
+      "gewicht": 1.2
+    },
+    {
+      "land": "veskar",
+      "x": 670,
+      "y": 140,
+      "gewicht": 0.95
+    },
+    {
+      "land": "odrevia",
+      "x": 420,
+      "y": 270,
+      "gewicht": 0.95
+    },
+    {
+      "land": "tamaru",
+      "x": 700,
+      "y": 290,
+      "gewicht": 1.0
+    },
+    {
+      "land": "quillon",
+      "x": 420,
+      "y": 420,
+      "gewicht": 0.7
+    },
+    {
+      "land": "ishandra",
+      "x": 560,
+      "y": 535,
+      "gewicht": 1.2
+    },
+    {
+      "land": "pallavia",
+      "x": 750,
+      "y": 545,
+      "gewicht": 0.95
+    },
+    {
+      "land": "nerath",
+      "x": 920,
+      "y": 520,
+      "gewicht": 0.9
+    }
+  ],
+  "zee": [
+    {
+      "x": 250,
+      "y": 300,
+      "gewicht": 1.15
+    },
+    {
+      "x": 290,
+      "y": 360,
+      "gewicht": 0.8
+    },
+    {
+      "x": 210,
+      "y": 290,
+      "gewicht": 0.8
+    },
+    {
+      "x": 560,
+      "y": 390,
+      "gewicht": 1.15
+    },
+    {
+      "x": 510,
+      "y": 330,
+      "gewicht": 0.6
+    },
+    {
+      "x": 630,
+      "y": 420,
+      "gewicht": 0.75
+    },
+    {
+      "x": 840,
+      "y": 410,
+      "gewicht": 1.0
+    },
+    {
+      "x": 800,
+      "y": 380,
+      "gewicht": 0.7
+    }
+  ],
+  "handelsroutes": [
+    [
+      "valdoria",
+      "brennmark"
+    ],
+    [
+      "valdoria",
+      "lumeria"
+    ],
+    [
+      "brennmark",
+      "selmara"
+    ],
+    [
+      "brennmark",
+      "odrevia"
+    ],
+    [
+      "lumeria",
+      "castiva"
+    ],
+    [
+      "lumeria",
+      "odrevia"
+    ],
+    [
+      "castiva",
+      "quillon"
+    ],
+    [
+      "quillon",
+      "odrevia"
+    ],
+    [
+      "quillon",
+      "ishandra"
+    ],
+    [
+      "odrevia",
+      "selmara"
+    ],
+    [
+      "selmara",
+      "veskar"
+    ],
+    [
+      "veskar",
+      "kharazan"
+    ],
+    [
+      "veskar",
+      "tamaru"
+    ],
+    [
+      "tamaru",
+      "tsurev"
+    ],
+    [
+      "tamaru",
+      "ishandra"
+    ],
+    [
+      "kharazan",
+      "tsurev"
+    ],
+    [
+      "tsurev",
+      "nerath"
+    ],
+    [
+      "nerath",
+      "pallavia"
+    ],
+    [
+      "pallavia",
+      "ishandra"
+    ],
+    [
+      "tamaru",
+      "pallavia"
+    ]
+  ],
+  "knelpunten": [
+    {
+      "id": "straat_quillon",
+      "naam": "Straat van Quillon",
+      "x": 470,
+      "y": 455
+    },
+    {
+      "id": "kaap_tamaru",
+      "naam": "Kaap Tamaru",
+      "x": 760,
+      "y": 360
+    }
+  ],
+  "eilanden": [
+    {
+      "naam": "Varnholm",
+      "x": 222,
+      "y": 345,
+      "straal": 36
+    },
+    {
+      "naam": "Glasrots",
+      "x": 600,
+      "y": 405,
+      "straal": 38
+    },
+    {
+      "naam": "Zilvereiland",
+      "x": 855,
+      "y": 425,
+      "straal": 30
+    }
+  ]
+}

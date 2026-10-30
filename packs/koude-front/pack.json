@@ -1,0 +1,25 @@
+{
+  "id": "koude-front",
+  "naam": "Koude Front 1962",
+  "versie": "0.1.0",
+  "auteur": "Go To Mars",
+  "licentie": "CC-BY-4.0",
+  "classificatie": "historisch",
+  "engine_min": "0.1.0",
+  "beschrijving": "Gestileerde koude oorlog met fictieve landen. Geen chips: olie, staal en raketten. Laat bewust schokken, persoonlijkheden en regimes weg om te tonen dat de engine standaardwaarden invult.",
+  "tijd": {
+    "startjaar": 1962
+  },
+  "bestanden": {
+    "kaart": "map/kaart.json",
+    "resources": "economy/resources.json",
+    "model": "economy/model.json",
+    "gebouwen": "economy/gebouwen.json",
+    "landen": "actors/landen.json",
+    "blokken": "actors/blokken.json",
+    "acties": "actions/acties.json",
+    "verhaal": "story/verhaal.json",
+    "eenheden": "military/eenheden.json",
+    "events": "events/events.json"
+  }
+}

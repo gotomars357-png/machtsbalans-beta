@@ -1,0 +1,5 @@
+[
+  { "id": "noord", "naam": "Noordelijk Verbond", "kleur": "#4c8ef7" },
+  { "id": "oost", "naam": "Oostelijke Unie", "kleur": "#e5534b" },
+  { "id": "kust", "naam": "Kustliga", "kleur": "#2bb5a0" }
+]

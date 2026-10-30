@@ -1,0 +1,7 @@
+{
+  "regios": [
+    { "land": "noordheim", "naam": "Noordheim", "x": 300, "y": 180 },
+    { "land": "zuidwaard", "naam": "Zuidwaard", "x": 380, "y": 460 },
+    { "land": "oostmark", "naam": "Oostmark", "x": 720, "y": 300 }
+  ]
+}

@@ -1,0 +1,160 @@
+{
+  "fasen": [
+    {
+      "id": "opbouwen",
+      "naam": "Opbouwen",
+      "dag": 0,
+      "ontgrendelt": [
+        "energie",
+        "grondstoffen",
+        "voedsel",
+        "kapitaal",
+        "centrale",
+        "mijn",
+        "houtkap",
+        "boerderij",
+        "industrie",
+        "opslag",
+        "woonwijk"
+      ],
+      "tekst": "Eén land, drie resources, geen vijanden. Plaats gebouwen op je eigen grond: mijnen op bergen, landbouw op vlaktes. Hoe verder van je hoofdstad of een depot, hoe lager het rendement."
+    },
+    {
+      "id": "versnellen",
+      "naam": "Versnellen",
+      "dag": 120,
+      "ontgrendelt": [
+        "chips",
+        "stabiliteit",
+        "chipfabriek",
+        "zonnepark",
+        "haven",
+        "school",
+        "ziekenhuis",
+        "politie",
+        "rechtbank",
+        "omroep",
+        "media",
+        "leger",
+        "kazerne",
+        "infanterie",
+        "kolonistenschip",
+        "fregat"
+      ],
+      "tekst": "Chips voeden je technologiefactor. Scholen, zorg en orde houden je samenleving overeind; een omroep geeft je grip op het verhaal. Je kunt nu ook een kazerne bouwen."
+    },
+    {
+      "id": "invloed",
+      "naam": "Invloed kopen",
+      "dag": 300,
+      "ontgrendelt": [
+        "invloed",
+        "blokken",
+        "commandanten",
+        "netwerken",
+        "universiteit",
+        "wapenfabriek",
+        "dronebasis",
+        "pantser",
+        "artillerie",
+        "drone",
+        "cybercentrum"
+      ],
+      "tekst": "De andere blokken worden actief. Trek zwevende landen over met handel, kapitaal, technologie, veiligheid of geheime netwerken. Zwaar materieel komt beschikbaar."
+    },
+    {
+      "id": "beslissen",
+      "naam": "Beslissen",
+      "dag": 500,
+      "ontgrendelt": [
+        "escalatie"
+      ],
+      "tekst": "De escalatieladder gaat open, tot en met valse vlaggen en oorlog. Druk werkt, maar kost loyaliteit bij derden en stabiliteit thuis."
+    }
+  ],
+  "doelen": [
+    {
+      "id": "centrales",
+      "tekst": "Bouw een derde centrale",
+      "voorwaarde": {
+        "gebouw": "centrale",
+        "minimaal": 3
+      }
+    },
+    {
+      "id": "industrie",
+      "tekst": "Breid uit naar vier keer industrie",
+      "voorwaarde": {
+        "gebouw": "industrie",
+        "minimaal": 4
+      }
+    },
+    {
+      "id": "wonen",
+      "tekst": "Bouw een woonwijk (tabblad Volk) zodat je bevolking kan groeien",
+      "voorwaarde": {
+        "gebouw": "woonwijk",
+        "minimaal": 1
+      }
+    },
+    {
+      "id": "chips",
+      "tekst": "Bouw je eerste chipfabriek",
+      "voorwaarde": {
+        "gebouw": "chipfabriek",
+        "minimaal": 1
+      }
+    },
+    {
+      "id": "verdubbel",
+      "tekst": "Verdubbel je productie",
+      "voorwaarde": {
+        "productie_x": 2
+      }
+    },
+    {
+      "id": "tech",
+      "tekst": "Breng je technologiefactor naar 1,25",
+      "voorwaarde": {
+        "tech_factor": 1.25
+      }
+    },
+    {
+      "id": "blok",
+      "tekst": "Haal vijf landen in je blok",
+      "voorwaarde": {
+        "aantal_landen": 5
+      }
+    },
+    {
+      "id": "orde",
+      "tekst": "Bouw een politiebureau (tabblad Volk)",
+      "voorwaarde": {
+        "gebouw": "politie",
+        "minimaal": 1
+      }
+    }
+  ],
+  "overwinning": [
+    {
+      "type": "aandeel_productie",
+      "naam": "Economisch overwicht",
+      "drempel": 0.48,
+      "duur_dagen": 40,
+      "min_dag": 650
+    },
+    {
+      "type": "aantal_landen",
+      "naam": "Coalitie van zes",
+      "drempel": 6,
+      "min_dag": 750
+    },
+    {
+      "type": "tech_factor",
+      "naam": "Technologische voorsprong",
+      "drempel": 3.5,
+      "min_dag": 600
+    }
+  ],
+  "dag_limiet": 2400
+}

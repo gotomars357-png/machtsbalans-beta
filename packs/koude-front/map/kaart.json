@@ -1,0 +1,168 @@
+{
+  "breedte": 1000,
+  "hoogte": 620,
+  "zeeen": [
+    {
+      "naam": "Grijze Zee",
+      "x": 500,
+      "y": 255
+    }
+  ],
+  "regios": [
+    {
+      "land": "arden",
+      "x": 150,
+      "y": 160,
+      "gewicht": 1.25
+    },
+    {
+      "land": "halvoort",
+      "x": 230,
+      "y": 380,
+      "gewicht": 1.0
+    },
+    {
+      "land": "sarkovie",
+      "x": 820,
+      "y": 150,
+      "gewicht": 1.35
+    },
+    {
+      "land": "sarkovie",
+      "x": 900,
+      "y": 260,
+      "gewicht": 0.9
+    },
+    {
+      "land": "drevna",
+      "x": 760,
+      "y": 360,
+      "gewicht": 1.0
+    },
+    {
+      "land": "maranta",
+      "x": 380,
+      "y": 120,
+      "gewicht": 0.9
+    },
+    {
+      "land": "kesh",
+      "x": 610,
+      "y": 110,
+      "gewicht": 1.0
+    },
+    {
+      "land": "solvej",
+      "x": 380,
+      "y": 470,
+      "gewicht": 0.85
+    },
+    {
+      "land": "turath",
+      "x": 560,
+      "y": 500,
+      "gewicht": 1.2
+    },
+    {
+      "land": "ombria",
+      "x": 160,
+      "y": 540,
+      "gewicht": 0.9
+    },
+    {
+      "land": "vellum",
+      "x": 830,
+      "y": 530,
+      "gewicht": 1.05
+    }
+  ],
+  "zee": [
+    {
+      "x": 500,
+      "y": 300,
+      "gewicht": 1.4
+    },
+    {
+      "x": 440,
+      "y": 290,
+      "gewicht": 0.9
+    },
+    {
+      "x": 580,
+      "y": 310,
+      "gewicht": 0.9
+    }
+  ],
+  "handelsroutes": [
+    [
+      "arden",
+      "halvoort"
+    ],
+    [
+      "arden",
+      "maranta"
+    ],
+    [
+      "maranta",
+      "kesh"
+    ],
+    [
+      "kesh",
+      "sarkovie"
+    ],
+    [
+      "sarkovie",
+      "drevna"
+    ],
+    [
+      "halvoort",
+      "solvej"
+    ],
+    [
+      "halvoort",
+      "ombria"
+    ],
+    [
+      "solvej",
+      "turath"
+    ],
+    [
+      "turath",
+      "drevna"
+    ],
+    [
+      "turath",
+      "vellum"
+    ],
+    [
+      "drevna",
+      "vellum"
+    ]
+  ],
+  "eilanden": [
+    {
+      "naam": "Grijs eiland",
+      "x": 505,
+      "y": 305,
+      "straal": 34
+    },
+    {
+      "naam": "Noordrif",
+      "x": 470,
+      "y": 215,
+      "straal": 28
+    },
+    {
+      "naam": "Zuidrif",
+      "x": 405,
+      "y": 375,
+      "straal": 28
+    },
+    {
+      "naam": "Oostrots",
+      "x": 625,
+      "y": 255,
+      "straal": 28
+    }
+  ]
+}

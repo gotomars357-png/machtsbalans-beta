@@ -1,0 +1,10 @@
+{
+  "overname": [
+    { "id": "aansluiting", "naam": "Vreedzame aansluiting", "type": "aansluiting", "kosten": { "@geld": 200 }, "afkoeling": 90,
+      "vereist": { "loyaliteit": 50, "media": 20, "moraal_max": 55 },
+      "beschrijving": "Win zonder oorlog: overtuig een land met diplomatie en media, terwijl zijn strijdbereidheid afneemt." },
+    { "id": "ultimatum", "naam": "Ultimatum stellen", "type": "ultimatum", "kosten": { "@geld": 100 }, "afkoeling": 120,
+      "vereist": { "overmacht": 1.8, "moraal_max": 55 },
+      "beschrijving": "Overmacht bij een buurland met zwakke strijdwil. Afwijzing verhoogt spanning en hun strijdbereidheid." }
+  ]
+}

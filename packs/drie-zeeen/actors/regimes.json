@@ -1,0 +1,79 @@
+{
+  "democratie": {
+    "naam": "Liberale democratie",
+    "icoon": "🗳",
+    "bouwstijl": "democratie",
+    "revolutie_naar": "militair",
+    "verkiezingen": 600,
+    "effecten": {
+      "productiviteit": 0.06,
+      "handel_bonus": 0.25,
+      "tech_groei": 0.00004,
+      "oorlog_moeheid": 1.5,
+      "complot_gevoeligheid": 1.3,
+      "informatiecontrole_max": 45,
+      "moraal": -5
+    },
+    "beschrijving": "Vrije markt en vrije pers: meer handel en innovatie. Oorlog is impopulair, de pers laat geruchten vrij circuleren en elke 600 dagen zijn er verkiezingen."
+  },
+  "eenpartijstaat": {
+    "naam": "Communistische eenpartijstaat",
+    "icoon": "⭐",
+    "bouwstijl": "eenpartijstaat",
+    "revolutie_naar": "democratie",
+    "effecten": {
+      "productiviteit": -0.03,
+      "bouw_korting": 0.2,
+      "informatiecontrole": 25,
+      "weerbaarheid": 6,
+      "tech_groei": -0.00002,
+      "handel_bonus": -0.15,
+      "moraal": 5
+    },
+    "beschrijving": "Planeconomie: 20% goedkoper bouwen en veel grip op informatie, maar minder innovatie en handel."
+  },
+  "theocratie": {
+    "naam": "Theocratie",
+    "icoon": "🕯",
+    "bouwstijl": "theocratie",
+    "revolutie_naar": "militair",
+    "effecten": {
+      "stabiliteit": 5,
+      "weerbaarheid": 8,
+      "informatiecontrole": 15,
+      "oorlog_moeheid": 0.5,
+      "tech_groei": -0.00004,
+      "handel_bonus": -0.1,
+      "moraal": 12
+    },
+    "beschrijving": "Religieus gezag: stabiel, weerbaar en met brede steun voor oorlog, maar trage technologische vooruitgang en minder handel."
+  },
+  "militair": {
+    "naam": "Militair bewind",
+    "icoon": "🎖",
+    "bouwstijl": "militair",
+    "revolutie_naar": "democratie",
+    "staatsgreep": 0.004,
+    "effecten": {
+      "leger_korting": 0.3,
+      "informatiecontrole": 20,
+      "stabiliteit": -4,
+      "productiviteit": -0.03,
+      "oorlog_moeheid": 0.7,
+      "moraal": 6
+    },
+    "beschrijving": "Een leger dat 30% goedkoper is en harde controle. Bij onrust ligt een staatsgreep op de loer."
+  },
+  "monarchie": {
+    "naam": "Constitutionele monarchie",
+    "icoon": "👑",
+    "bouwstijl": "monarchie",
+    "revolutie_naar": "democratie",
+    "effecten": {
+      "stabiliteit": 3,
+      "handel_bonus": 0.1,
+      "productiviteit": 0.02
+    },
+    "beschrijving": "Gematigd en stabiel: kleine voordelen overal, geen grote zwaktes."
+  }
+}
