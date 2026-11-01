@@ -9,6 +9,8 @@ import { TerreinLaag } from './terrein.js';
 import { zoekPad } from '../engine/leger.js';
 import { tekenUitval, tekenCyberFlits, CYBER_KLEUR } from './cyber.js';
 import { LevenLaag } from './leven.js';
+import { InfraLaag } from './infra.js';
+import { SfeerLaag } from './sfeer.js';
 
 // Vanaf deze zoom tekent de kaart vakjes als echte plekken: huizen, akkers, fabrieken, bomen.
 const DIEP = 4;
@@ -44,6 +46,8 @@ export class KaartView {
     this.wolk = maakWolk();
     this.terreinLaag = new TerreinLaag();
     this.levenLaag = new LevenLaag();
+    this.infraLaag = new InfraLaag();
+    this.sfeerLaag = new SfeerLaag();
     this.bron = document.createElement('canvas');
     this.bron.width = 1000;
     this.bron.height = 620;
@@ -221,6 +225,8 @@ export class KaartView {
     this.begrens();
     this.terreinLaag.laad(this);
     this.levenLaag.laad(this);
+    this.infraLaag.laad(this);
+    this.sfeerLaag.laad(this);
   }
 
   // Het overzichtsbeeld. Staand vult de brede kaart de hoogte, met je eigen land in beeld;
@@ -436,13 +442,17 @@ export class KaartView {
     this.tekenTerrein(c, sc);
     if (this.bouwModus) this.tekenBouwRaster(c, sc);
     if (detail) this.tekenWegen(c, sc);
+    this.infraLaag.teken(c, this, sc, nu, dt, tempo);
     this.tekenKoopvaardij(c, sc, nu);
     this.tekenGebouwen(c, sc, detail);
     this.levenLaag.teken(c, this, sc, nu, dt, tempo);
+    this.sfeerLaag.tekenGrond(c, this, sc, nu, frac);
     this.tekenEenheden(c, sc, detail, frac);
+    this.infraLaag.tekenLucht(c, this, sc, nu);
     this.tekenNacht(c, sc, nu);
     this.levenLaag.tekenLichten(c, this, sc, nu);
-    this.tekenWolken(c, sc, nu);
+    this.infraLaag.tekenLichten(c, this, sc, nu);
+    this.sfeerLaag.tekenLucht(c, this, sc, nu);
     this.tekenGolven(c, sc, nu);
     this.tekenStrategisch(c, sc);
     this.tekenMarkeringen(c);
@@ -558,24 +568,6 @@ export class KaartView {
     }
     for (const k of s.kolonies) gloei(k.t, 0.5, 0.6);
     c.restore();
-  }
-
-  tekenWolken(c, sc, nu) {
-    const a = clamp(1 - (this.zoom - 1) / 2.2, 0, 1);
-    if (a <= 0) return;
-    for (let i = 0; i < 9; i++) {
-      const x0 = ((i * 397) % 1000);
-      const y0 = 40 + ((i * 263) % 540);
-      const x = ((x0 + nu / 1000 * (4 + (i % 3))) % 1200) - 100;
-      const [sx, sy] = this.naarScherm(x, y0);
-      const w = (90 + (i % 4) * 30) * sc;
-      c.globalAlpha = a * 0.18;
-      c.drawImage(this.wolk, sx - w / 2 + 14 * sc, sy - w / 4 + 18 * sc, w, w / 2);
-      c.globalAlpha = a * 0.55;
-      c.filter = 'none';
-      c.drawImage(this.wolk, sx - w / 2, sy - w / 4, w, w / 2);
-    }
-    c.globalAlpha = 1;
   }
 
   // Koopvaardij tussen havens: puur decor, routes over water berekend met dezelfde padvinder als het leger.
@@ -906,7 +898,7 @@ export class KaartView {
       if (h && this.zichtbaar(h)) {
         const [x, y] = this.naarScherm(h.x, h.y);
         if (this.zoom >= DIEP) {
-          tekenGebouwDetail(c, 'hoofdstad', x, y, T, { regime: land.regime, kleur: rand, tijd: performance.now() / 1000, seed: h.i, actief: true, nacht: this.nacht ?? 0, stab: land.stab, welvaart: land.Y / Math.max(1, s.wereldY / s.landen.length), oorlog: s.oorlogen.length > 0, L: land.L, capaciteit: this.woningenVan(land), basis: land.basisWoningen });
+          tekenGebouwDetail(c, 'hoofdstad', x, y, T, { regime: land.regime, kleur: rand, tijd: performance.now() / 1000, seed: h.i, actief: true, nacht: this.nacht ?? 0, dag: s.dag, stab: land.stab, welvaart: land.Y / Math.max(1, s.wereldY / s.landen.length), oorlog: s.oorlogen.length > 0, L: land.L, capaciteit: this.woningenVan(land), basis: land.basisWoningen });
         } else if (detail) {
           this.vakje(c, x, y, T, rand, 1);
           c.font = `${Math.round(T * 0.6)}px ${EMOJI}`;
@@ -921,7 +913,7 @@ export class KaartView {
         const kt = this.geo.tegels[k.t];
         if (!this.zichtbaar(kt)) continue;
         const [x, y] = this.naarScherm(kt.x, kt.y);
-        if (this.zoom >= DIEP) tekenGebouwDetail(c, 'kolonie', x, y, T, { regime: land.regime, kleur: rand, seed: k.t, nacht: this.nacht ?? 0, tijd: performance.now() / 1000 });
+        if (this.zoom >= DIEP) tekenGebouwDetail(c, 'kolonie', x, y, T, { regime: land.regime, kleur: rand, seed: k.t, nacht: this.nacht ?? 0, dag: s.dag, tijd: performance.now() / 1000 });
         else if (detail) { this.vakje(c, x, y, T, rand, 1); c.font = `${Math.round(T * 0.56)}px ${EMOJI}`; c.fillText('🚩', x, y + 1); }
         else { c.fillStyle = rand; c.fillRect(x - 2, y - 2, 4, 4); }
       }
@@ -956,7 +948,7 @@ export class KaartView {
       const gelukt = tekenGebouwDetail(c, soort, x, y, T, {
         regime: land.regime, kleur: rand, tijd: performance.now() / 1000, seed: t,
         actief: voortgang == null && (eff ?? 1) > 0, voortgang: voortgang == null ? null : clamp(voortgang, 0, 1),
-        eff: eff ?? 1, aantal: land.gebouwen[gebouwId] ?? 1, niveau: p?.niveau ?? null, L: land.L, capaciteit: this.woningenVan(land), basis: land.basisWoningen, uit: (p?.uit ?? 0) > this.state.dag, nacht: this.nacht ?? 0, stab: land.stab, welvaart: land.Y / Math.max(1, this.state.wereldY / this.state.landen.length),
+        eff: eff ?? 1, aantal: land.gebouwen[gebouwId] ?? 1, niveau: p?.niveau ?? null, L: land.L, capaciteit: this.woningenVan(land), basis: land.basisWoningen, uit: (p?.uit ?? 0) > this.state.dag, nacht: this.nacht ?? 0, dag: this.state.dag, stab: land.stab, welvaart: land.Y / Math.max(1, this.state.wereldY / this.state.landen.length),
       });
       if (gelukt) {
         if (voortgang == null && eff < 0.95 && land.idx === this.state.speler) {
