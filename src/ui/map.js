@@ -3,9 +3,12 @@
 // Grenzen en vakjes komen uit src/engine/geografie.js, dus de kaart toont precies wat de bouwregels gebruiken.
 
 import { tegelOp } from '../engine/geografie.js';
-import { tekenGebouwDetail, tekenTerreinDetail } from './detail.js';
+import { woningCapaciteit } from '../engine/samenleving.js';
+import { tekenGebouwDetail } from './detail.js';
+import { TerreinLaag } from './terrein.js';
 import { zoekPad } from '../engine/leger.js';
 import { tekenUitval, tekenCyberFlits, CYBER_KLEUR } from './cyber.js';
+import { LevenLaag } from './leven.js';
 
 // Vanaf deze zoom tekent de kaart vakjes als echte plekken: huizen, akkers, fabrieken, bomen.
 const DIEP = 4;
@@ -39,6 +42,8 @@ export class KaartView {
     this.gloed = null; // tutorial- of doelgloed: { t }
     this.lichtSprite = maakGloed();
     this.wolk = maakWolk();
+    this.terreinLaag = new TerreinLaag();
+    this.levenLaag = new LevenLaag();
     this.bron = document.createElement('canvas');
     this.bron.width = 1000;
     this.bron.height = 620;
@@ -214,6 +219,8 @@ export class KaartView {
     this.zoom = b.zoom;
     this.cx = b.x;
     this.begrens();
+    this.terreinLaag.laad(this);
+    this.levenLaag.laad(this);
   }
 
   // Het overzichtsbeeld. Staand vult de brede kaart de hoogte, met je eigen land in beeld;
@@ -324,6 +331,13 @@ export class KaartView {
 
   // ---------- tekenen ----------
 
+  // Woningcapaciteit per land, één keer per dag berekend (voor het bouwniveau van woonwijk en hoofdstad).
+  woningenVan(land) {
+    const s = this.state;
+    if (this._woningDag !== s.dag || this._woningState !== s) { this._woningDag = s.dag; this._woningState = s; this._woningen = []; }
+    return (this._woningen[land.idx] ??= woningCapaciteit(s, land));
+  }
+
   kleurVan(c) {
     const s = this.state;
     if (c.alignment && c.alignment !== 'zwevend') return s.blokken.find((b) => b.id === c.alignment).kleur;
@@ -413,18 +427,21 @@ export class KaartView {
     c.fillRect(0, 0, this.w, this.h);
     const sc = this.schaal();
     const [x0, y0] = this.naarScherm(0, 0);
+    const nu = performance.now();
     c.imageSmoothingEnabled = true;
     c.drawImage(this.bron, x0, y0, 1000 * sc, 620 * sc);
+    this.terreinLaag.teken(c, this, sc, nu);
 
     const detail = this.zoom >= 1.5;
-    const nu = performance.now();
     this.tekenTerrein(c, sc);
     if (this.bouwModus) this.tekenBouwRaster(c, sc);
     if (detail) this.tekenWegen(c, sc);
     this.tekenKoopvaardij(c, sc, nu);
     this.tekenGebouwen(c, sc, detail);
+    this.levenLaag.teken(c, this, sc, nu, dt, tempo);
     this.tekenEenheden(c, sc, detail, frac);
     this.tekenNacht(c, sc, nu);
+    this.levenLaag.tekenLichten(c, this, sc, nu);
     this.tekenWolken(c, sc, nu);
     this.tekenGolven(c, sc, nu);
     this.tekenStrategisch(c, sc);
@@ -520,12 +537,15 @@ export class KaartView {
     const T = this.geo.T * sc;
     c.save();
     c.globalCompositeOperation = 'lighter';
+    // Ingezoomd geven lantaarns, koplampen en ramen het licht; de brede gloed wijkt dan, anders wordt de stad één witte vlek.
+    const diepte = clamp((this.zoom - 4) / 4, 0, 1);
+    const demp = 1 - 0.7 * diepte * diepte * (3 - 2 * diepte);
     const gloei = (t, schaal, sterkte) => {
       const tg = this.geo.tegels[t];
       if (!tg || !this.zichtbaar(tg, 2)) return;
       const [x, y] = this.naarScherm(tg.x, tg.y);
       const r = Math.max(3, T * schaal);
-      c.globalAlpha = nacht * sterkte;
+      c.globalAlpha = nacht * sterkte * demp;
       c.drawImage(this.lichtSprite, x - r, y - r, r * 2, r * 2);
     };
     for (const land of s.landen) {
@@ -722,15 +742,10 @@ export class KaartView {
   tekenTerrein(c, sc) {
     if (this.zoom < 1.7) return;
     if (this.zoom >= DIEP) {
-      const T = this.geo.T * sc;
-      for (const t of this.geo.tegels) {
-        if (t.terrein === 'water' || !this.zichtbaar(t) || this.state.bezet[t.i]) continue;
-        const [x, y] = this.naarScherm(t.x, t.y);
-        tekenTerreinDetail(c, t.terrein, x, y, T, t.i);
-      }
-      return;
+      this.terreinLaag.tekenKenmerken(c, this, sc, performance.now()); return;
     }
-    const a = clamp((this.zoom - 1.7) / 0.8, 0, 1);
+    const a = clamp((this.zoom - 1.7) / 0.8, 0, 1) * (1 - this.terreinLaag.dekking(this.zoom));
+    if (a <= 0) return;
     const T = this.geo.T * sc;
     c.save();
     c.globalAlpha = a;
@@ -891,7 +906,7 @@ export class KaartView {
       if (h && this.zichtbaar(h)) {
         const [x, y] = this.naarScherm(h.x, h.y);
         if (this.zoom >= DIEP) {
-          tekenGebouwDetail(c, 'hoofdstad', x, y, T, { regime: land.regime, kleur: rand, tijd: performance.now() / 1000, seed: h.i, actief: true });
+          tekenGebouwDetail(c, 'hoofdstad', x, y, T, { regime: land.regime, kleur: rand, tijd: performance.now() / 1000, seed: h.i, actief: true, nacht: this.nacht ?? 0, stab: land.stab, welvaart: land.Y / Math.max(1, s.wereldY / s.landen.length), oorlog: s.oorlogen.length > 0, L: land.L, capaciteit: this.woningenVan(land), basis: land.basisWoningen });
         } else if (detail) {
           this.vakje(c, x, y, T, rand, 1);
           c.font = `${Math.round(T * 0.6)}px ${EMOJI}`;
@@ -906,12 +921,12 @@ export class KaartView {
         const kt = this.geo.tegels[k.t];
         if (!this.zichtbaar(kt)) continue;
         const [x, y] = this.naarScherm(kt.x, kt.y);
-        if (this.zoom >= DIEP) tekenGebouwDetail(c, 'kolonie', x, y, T, { regime: land.regime, kleur: rand, tijd: 0, seed: k.t });
+        if (this.zoom >= DIEP) tekenGebouwDetail(c, 'kolonie', x, y, T, { regime: land.regime, kleur: rand, seed: k.t, nacht: this.nacht ?? 0, tijd: performance.now() / 1000 });
         else if (detail) { this.vakje(c, x, y, T, rand, 1); c.font = `${Math.round(T * 0.56)}px ${EMOJI}`; c.fillText('🚩', x, y + 1); }
         else { c.fillStyle = rand; c.fillRect(x - 2, y - 2, 4, 4); }
       }
       for (const p of land.plaatsingen) {
-        this.tekenGebouw(c, land, p.t, p.g, T, rand, detail, null, p.eff);
+        this.tekenGebouw(c, land, p.t, p.g, T, rand, detail, null, p.eff, p);
         if ((p.uit ?? 0) > s.dag && p.t >= 0 && this.zichtbaar(this.geo.tegels[p.t])) tekenUitval(c, ...this.naarScherm(this.geo.tegels[p.t].x, this.geo.tegels[p.t].y), Math.max(4, T), performance.now());
       }
       for (const b of land.bouw) this.tekenGebouw(c, land, b.tegel, b.gebouw, T, rand, detail, (s.dag - b.start) / Math.max(1, b.klaar - b.start), 1);
@@ -931,7 +946,7 @@ export class KaartView {
     c.globalAlpha = 1;
   }
 
-  tekenGebouw(c, land, t, gebouwId, T, rand, detail, voortgang, eff) {
+  tekenGebouw(c, land, t, gebouwId, T, rand, detail, voortgang, eff, p) {
     const tegel = this.geo.tegels[t];
     if (!tegel || !this.zichtbaar(tegel)) return;
     const g = this.state.pack.gebouwIndex[gebouwId];
@@ -941,6 +956,7 @@ export class KaartView {
       const gelukt = tekenGebouwDetail(c, soort, x, y, T, {
         regime: land.regime, kleur: rand, tijd: performance.now() / 1000, seed: t,
         actief: voortgang == null && (eff ?? 1) > 0, voortgang: voortgang == null ? null : clamp(voortgang, 0, 1),
+        eff: eff ?? 1, aantal: land.gebouwen[gebouwId] ?? 1, niveau: p?.niveau ?? null, L: land.L, capaciteit: this.woningenVan(land), basis: land.basisWoningen, uit: (p?.uit ?? 0) > this.state.dag, nacht: this.nacht ?? 0, stab: land.stab, welvaart: land.Y / Math.max(1, this.state.wereldY / this.state.landen.length),
       });
       if (gelukt) {
         if (voortgang == null && eff < 0.95 && land.idx === this.state.speler) {
