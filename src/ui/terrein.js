@@ -23,6 +23,19 @@
 //   vlekkerige sneeuw, herfstbos, kale bomen, bloesem, rijp graan, bevroren meren.
 // - Wind (wind(dag)): golven over het graan, gras en bomen buigen mee; glinsteringen drijven stroomafwaarts.
 // - Vanaf zoom 9,5 kleine dingen: bloemen, paddenstoelen, waterlelies, steentjes, molshopen, kringen op plassen.
+//
+// Natuur (C8):
+// - Bomen als echte kronen in sprites per seizoensstap (één drawImage per boom): loofbomen uit lobben met een lichte
+//   noordwestkant en een donkere zuidoostkant, sparren als spitse sterren, dennen als plukken, berken, populieren met
+//   een lange schaduw en struiken. Soort en kleur volgen trage ruis, zodat een bos in de herfst in vlekken oker,
+//   olijf en goudbruin kleurt; in de winter kale takken (sommige eiken houden hun bruine blad) en sneeuw op de sparren.
+// - Bosranden met struiken en jonge berken, open plekken met gras, omgevallen stammen; vanaf zoom 11,5 varens,
+//   paddenstoelen, mos en takjes op de bosgrond.
+// - Bergen met leesbaar reliëf: kammen en zijkammen, graten als lijnen, rotswanden en puin, bruingrijze rots met
+//   lagen; bergbos tot de boomgrens, alpenweiden, kale rots, sneeuw boven een sneeuwgrens die met het seizoen stijgt
+//   en daalt, eeuwige sneeuw en gletsjers op de hoogste toppen en bergmeertjes in vlakke kommen.
+// - Bakken in stappen (grond, water, akkers, de rest, bomen, politiek) met een werkbudget per frame, zodat een
+//   seizoenswissel niet hapert; geheugen ruim onder de grens (lege maskers worden niet bewaard).
 
 import { seizoen, wind } from './seizoen.js';
 
@@ -37,7 +50,10 @@ const RM = 4; // marge van het eigenaarrooster in monsters: gladgestreken grenze
 const ON = CH * OR + 2 * RM; // 136
 const LODS = [3, 6, 12]; // pixels per wereldeenheid in een gebakken brok
 const MAX_CANVASSEN = 40;
-const MAX_BYTES = 64 * 1024 * 1024;
+const MAX_BYTES = 64 * 1024 * 1024; // harde grens
+const DOEL_BYTES = 38 * 1024 * 1024; // hierheen ruimt de LRU op, zodat er naast pool, werkbrok en atlas ruimte overblijft
+const POOL_BYTES = 5 * 1024 * 1024; // herbruikbare canvassen
+const BAK_BUDGET = 1.5; // werk per frame aan bakken, in geschatte milliseconden; één stap gaat altijd door
 const MAX_PRIMITIEVEN = 1500; // scherpe kenmerken per frame
 const PATROON_SPAN = CH / 6; // wereldeenheden per herhaling van een detailpatroon; 6 passen precies in een brok
 
@@ -49,7 +65,20 @@ const SOORTEN = 5;
 const STAP = 6;
 const BOOM = 1, LOSBOOM = 2, ROTS = 3, GRUIS = 4, PLUK = 5, PERCEEL = 6, KIEZEL = 7, DRIJFHOUT = 8;
 const RIET = 9, PLAS = 10, BOERDERIJ = 11, STEEN = 12, HELM = 13, BAAL = 14;
-const TYPES = 15;
+// GRAAT: stuk van een kamlijn [x1, y1, x2, y2, hoogte (+10 voor een zijkam)];
+// BERGMEER [x, y, r, hoek, hoogte]; STAM (omgevallen boom) [x, y, lengte, hoek, zaad]; OPENPLEK (gras) [x, y, r, hoek].
+const GRAAT = 15, BERGMEER = 16, STAM = 17, OPENPLEK = 18;
+const TYPES = 19;
+// Boomsoorten; de variant van BOOM en LOSBOOM is soort | vorm << 3 | kleur << 5.
+const SPAR = 0, LOOF = 1, LINDE = 2, BERK = 3, POPULIER = 4, STRUIK = 5, DEN = 6;
+const BOOM_VORMEN = [3, 3, 2, 2, 1, 2, 2], BOOM_KLEUREN = [1, 5, 5, 2, 2, 3, 1];
+const boomCode = (soort, vorm, kleur) => soort | (vorm << 3) | (kleur << 5);
+const NAALD = (soort) => soort === SPAR || soort === DEN;
+// Hoogtezones in de bergen, op de schaal van hoogteOp (bergen lopen van ongeveer 0,8 tot 2,3).
+export const BOOMGRENS = 1.27, ALMGRENS = 1.5, SNEEUW_VAST = 1.78, GLETSJER = 1.98;
+// Sneeuwgrens van het seizoen: midden in de winter tot in de dalen, in de zomer alleen de eeuwige sneeuw
+// (de zomergrens ligt boven de hoogste toppen, anders liggen er witte aders over elke kam).
+export function sneeuwLijn(sz) { return 1.95 - 1.01 * smooth(0.3, 0.97, sz.koud); }
 // Perceelsoorten (variant & 15); bit 16 = rijen dwars, (variant >> 5) = randsoort.
 const GRAAN = 0, GROEN = 1, PLOEG = 2, KOOLZAAD = 3, WEI = 4, BOOMGAARD = 5, WIJN = 6, KAS = 7, MAIS = 8, BRAAK = 9;
 const PSOORTEN = 10;
@@ -101,6 +130,10 @@ const K = {
   moeras: hex('#56623a'), veen: hex('#5e5236'), duin: hex('#ddd0a2'), helm: hex('#a9a66c'),
   oeverGroen: hex('#5a8c44'), modder: hex('#6f6648'), meerOndiep: hex('#4d8780'), meerDiep: hex('#2a5a6c'),
   grasWinter: hex('#7d7f62'), grasLente: hex('#76a648'), bosHerfst: hex('#7d5a2a'), bosWinter: hex('#4a4a3c'), ijs: hex('#c6d8de'),
+  // bergen: warm bruin en koel grijs gesteente, wanden, puin, bergbos, alpenweide, gletsjerijs
+  rotsWarm: hex('#8a7660'), rotsKoel: hex('#77736c'), wand: hex('#4a4038'), puin: hex('#a69c8a'),
+  bergBos: hex('#2f4430'), alm: hex('#8c9a54'), almDroog: hex('#a39a5c'), almHerfst: hex('#a8864a'),
+  gletsjer: hex('#d4e4ee'), spleet: hex('#8eb2c8'),
 };
 
 // ---------- basis per wereld ----------
@@ -695,13 +728,16 @@ function hoogteOp(b, x, y, berg) {
   const c = t[i + geo.kol].hoogte + (t[i + geo.kol + 1].hoogte - t[i + geo.kol].hoogte) * fu;
   const bg = smooth(0.2, 0.55, berg);
   let h = a + (c - a) * fv + berg * 0.12;
-  h += 0.06 * (ruis(x * 0.21 + 13, y * 0.21 + 7) - 0.5) * (1 + 2 * bg);
-  h += bg * Math.abs(ruis(x * 0.35 + 71, y * 0.35 + 13) - 0.5) * 0.5;
-  // bergkammen van zo'n 12 eenheden: grote vormen met een lichte noordwestflank en een schaduwkant
-  // plus kleinere zijkammen, zodat een massief uit meerdere toppen bestaat
+  // fijne ruis zwakker dan voorheen: die gaf een verfrommeld beeld in plaats van leesbare bergen
+  h += 0.04 * (ruis(x * 0.21 + 13, y * 0.21 + 7) - 0.5) * (1 + bg);
+  // geulen en ribben op de flanken
+  h += bg * Math.abs(ruis(x * 0.3 + 71, y * 0.3 + 13) - 0.5) * 0.2;
+  // bergkammen van zo'n 12 eenheden met een scherpe graat (steiler vlak onder de top), plus zijkammen,
+  // zodat een massief uit meerdere toppen en dalen bestaat; de graten liggen waar de kamruis precies 0,5 is
   const kam = Math.max(-1, Math.min(1, (ruis(x * 0.075 + 5, y * 0.075 + 9) - 0.5) * 5));
   const zij = Math.max(-1, Math.min(1, (ruis(x * 0.17 + 23, y * 0.17 + 41) - 0.5) * 5));
-  h += bg * (0.75 * (1 - Math.abs(kam)) + 0.22 * (1 - Math.abs(zij)));
+  const k1 = 1 - Math.abs(kam);
+  h += bg * (0.8 * k1 * (0.55 + 0.45 * k1) + 0.24 * (1 - Math.abs(zij)));
   return h;
 }
 
@@ -743,6 +779,8 @@ export function bakGrondData(b, ck, cr) {
   const zee = new Uint8ClampedArray(NN * 4); // waterkleur overal (op land: ondiep)
   const sneeuw = new Float32Array(NN);
   const sneeuwBasis = new Float32Array(NN), licht = new Float32Array(NN).fill(1), meerA = new Float32Array(NN).fill(VER);
+  // voor de seizoenssneeuw in de bergen: hoogte (x100), steilte en alpenweide (x255) per monster
+  const hoogte8 = new Uint8Array(NN), steil8 = new Uint8Array(NN), alm8 = new Uint8Array(NN);
   const c = [0, 0, 0], tmp = [0, 0, 0], tmp2 = [0, 0, 0];
   // zon uit het noordwesten
   const ll = Math.hypot(1, 1, 1.4), Lx = -1 / ll, Ly = -1 / ll, Lz = 1.4 / ll;
@@ -760,9 +798,14 @@ export function bakGrondData(b, ck, cr) {
       const hl = hoogte[j * N + Math.max(0, i - 1)], hr = hoogte[j * N + Math.min(N - 1, i + 1)];
       const hu = hoogte[Math.max(0, j - 1) * N + i], hd = hoogte[Math.min(N - 1, j + 1) * N + i];
       const hx = (hr - hl) / 2, hy = (hd - hu) / 2;
-      let nx = -hx * 6, ny = -hy * 6, nz = 1;
+      const wB0 = gewicht[BERG * NN + m];
+      // in de bergen een sterker reliëf: de kammen en dalen moeten op zoom 5 al te lezen zijn
+      const relief = 6 + 3 * smooth(0.2, 0.7, wB0);
+      let nx = -hx * relief, ny = -hy * relief, nz = 1;
       const nl = Math.sqrt(nx * nx + ny * ny + 1); nx /= nl; ny /= nl; nz /= nl;
-      const schaduw = 0.62 + 0.55 * Math.max(0, nx * Lx + ny * Ly + nz * Lz);
+      let schaduw = 0.62 + 0.55 * Math.max(0, nx * Lx + ny * Ly + nz * Lz);
+      // kamlicht en dalschaduw (kromming): graten iets lichter, geulen en dalbodems iets donkerder
+      if (wB0 > 0.05) schaduw *= 1 - Math.max(-0.1, Math.min(0.14, (hl + hr + hu + hd - 4 * hoogte[m]) * 1.6)) * smooth(0.1, 0.6, wB0);
       const helling = Math.sqrt(hx * hx + hy * hy);
       const wg = (s) => gewicht[s * NN + m];
       c[0] = c[1] = c[2] = 0;
@@ -777,10 +820,25 @@ export function bakGrondData(b, ck, cr) {
         const bv = 0.9 + 0.2 * ruis(x * 0.3 + 2, y * 0.3 + 5);
         c[0] += K.bos[0] * bv * wg(BOS); c[1] += K.bos[1] * bv * wg(BOS); c[2] += K.bos[2] * bv * wg(BOS);
       }
+      let steil = 0, almF = 0;
       if (wg(BERG) > 0.002) {
-        // dalen donker, toppen licht: dat maakt de vorm van het massief leesbaar; een beetje ruis voor gesteente
-        const toon = smooth(1.0, 1.7, hoogte[m]) + (ruis(x * 0.3 + 3, y * 0.3 + 8) - 0.5) * 0.35;
-        meng(K.rotsDonker, K.rots, smooth(0, 0.5, toon), tmp); meng(tmp, K.rotsLicht, smooth(0.5, 1, toon), tmp);
+        const hm = hoogte[m];
+        // gesteente: per massief warmer bruin of koeler grijs, lagen op hoogte, dalen donker en toppen licht
+        const massief = ruis(x * 0.035 + 3, y * 0.035 + 8), korrel = ruis(x * 0.3 + 3, y * 0.3 + 8);
+        meng(K.rotsWarm, K.rotsKoel, smooth(0.38, 0.62, massief), tmp2);
+        const toon = smooth(0.95, 1.85, hm) + (korrel - 0.5) * 0.16 + 0.07 * Math.sin(hm * 28 + massief * 7);
+        meng(K.rotsDonker, tmp2, smooth(0, 0.45, toon), tmp); meng(tmp, K.rotsLicht, smooth(0.55, 1.1, toon) * 0.75, tmp);
+        // rotswand: donker en gestreept; puin: lichte waaiers op de matige hellingen boven het bos
+        steil = smooth(0.17, 0.36, helling);
+        if (steil > 0.01) { meng(K.wand, K.rotsDonker, ruis(x * 1.2 + 9, y * 0.3 + 4), tmp2); meng(tmp, tmp2, steil * 0.7, tmp); }
+        const puin = smooth(0.07, 0.14, helling) * (1 - steil) * smooth(BOOMGRENS, BOOMGRENS + 0.15, hm) * smooth(0.48, 0.66, ruis(x * 0.22 + 61, y * 0.22 + 29));
+        if (puin > 0.01) meng(tmp, K.puin, puin * 0.55, tmp);
+        // zones: bergbos tot de boomgrens, daarboven alpenweide, dan kale rots; de grenzen rafelen met ruis
+        const rafel = (ruis(x * 0.21 + 5, y * 0.21 + 3) - 0.5) * 0.1;
+        const bosZ = (1 - smooth(BOOMGRENS - 0.08, BOOMGRENS + 0.02, hm - rafel)) * (1 - steil * 0.7);
+        almF = smooth(BOOMGRENS - 0.07, BOOMGRENS + 0.03, hm - rafel) * (1 - smooth(ALMGRENS - 0.07, ALMGRENS + 0.05, hm + rafel * 1.4)) * (1 - steil);
+        if (almF > 0.01) { meng(K.alm, K.almDroog, smooth(0.45, 0.7, korrel), tmp2); meng(tmp, tmp2, almF * 0.85, tmp); }
+        if (bosZ > 0.01) meng(tmp, K.bergBos, bosZ * 0.8, tmp);
         c[0] += tmp[0] * wg(BERG); c[1] += tmp[1] * wg(BERG); c[2] += tmp[2] * wg(BERG);
       }
       meng(K.zandNat, K.zand, smooth(0.25, 0.9, Math.max(0, -sd[m])), tmp);
@@ -813,25 +871,35 @@ export function bakGrondData(b, ck, cr) {
       const rz = veldOp(b.water.rivier, x, y), mz = veldOp(b.water.meer, x, y);
       if (rz < 3.5) meng(c, K.oeverGroen, 0.38 * (1 - smooth(0.2, 3.5, rz)) * (1 - wg(BERG)) * (1 - wg(ZAND)), c);
       if (mz < 1.8) meng(c, K.modder, 0.55 * (1 - smooth(0, 1.8, mz)), c);
-      // reliëf, plus een lichte warme toon in het zonlicht (minder blauw)
+      // reliëf, plus een lichte warme toon in het zonlicht (minder blauw); schaduwflanken in de bergen koeler
       c[0] *= schaduw; c[1] *= schaduw; c[2] *= schaduw * 0.9;
+      if (wB0 > 0.05 && schaduw < 0.95) { const k = (0.95 - schaduw) * 40 * smooth(0.1, 0.6, wB0); c[0] -= k * 0.6; c[2] = Math.max(c[2], Math.min(c[1] - 1, c[2] + k)); }
       licht[m] = schaduw;
       meerA[m] = mz;
-      // sneeuwgevoeligheid: in de bergen hoog, in het laagland vlekkerig, weinig op zand en steile hellingen
-      const bergF = smooth(0.3, 0.7, wg(BERG));
+      // sneeuwgevoeligheid: in het laagland vlekkerig, weinig op zand en steile hellingen;
+      // in de bergen telt de sneeuwgrens (seizoensGrond), daar is dit alleen de rafel langs die grens
       const vlekS = ruis(x * 0.045 + 201, y * 0.045 + 77) * 0.6 + ruis(x * 0.12 + 13, y * 0.12 + 91) * 0.28 + ruis(x * 0.4 + 7, y * 0.4 + 3) * 0.12;
       // opgerekt rond het midden: de ruis zelf heeft weinig spreiding, zo worden het duidelijke plekken
       let sb = 0.08 + 0.7 * Math.max(0, Math.min(1, 0.5 + (vlekS - 0.5) * 1.9));
-      sb += (0.66 + 0.34 * vlekS - sb) * bergF;
       sb += 0.2 * smooth(0.9, 1.4, hoogte[m]);
       sb *= (1 - 0.5 * smooth(0.12, 0.35, helling)) * (1 - 0.65 * wg(ZAND)) * (1 - 0.5 * fk);
       sneeuwBasis[m] = Math.max(0, Math.min(1, sb));
-      // sneeuw op hoge, vlakke plekken in de bergen
-      const sn = 0.92 * smooth(1.58, 1.74, hoogte[m]) * (1 - smooth(0.12, 0.3, helling)) * smooth(0.5, 0.8, wg(BERG));
+      hoogte8[m] = Math.max(0, Math.min(255, Math.round(hoogte[m] * 100)));
+      steil8[m] = Math.round(steil * 255);
+      alm8[m] = Math.round(almF * wg(BERG) * 255);
+      // eeuwige sneeuw op de hoogste, niet te steile plekken; gletsjerijs op de allerhoogste, met spleten.
+      // Pas boven SNEEUW_VAST: lager lag hij in de zomer als smalle witte aders op elke kam.
+      const sn = 0.94 * smooth(SNEEUW_VAST + 0.03, SNEEUW_VAST + 0.12, hoogte[m]) * (1 - smooth(0.2, 0.42, helling)) * smooth(0.45, 0.8, wg(BERG));
       sneeuw[m] = sn;
       if (sn > 0) {
         const f = 0.8 + 0.2 * Math.min(1.15, schaduw);
-        tmp2[0] = K.sneeuw[0] * f; tmp2[1] = K.sneeuw[1] * f; tmp2[2] = K.sneeuw[2] * f;
+        tmp2[0] = K.sneeuw[0] * f; tmp2[1] = K.sneeuw[1] * f; tmp2[2] = Math.min(255, K.sneeuw[2] * f + 8 * (1 - schaduw));
+        const gl = smooth(GLETSJER - 0.06, GLETSJER + 0.05, hoogte[m]) * (1 - smooth(0.1, 0.26, helling));
+        if (gl > 0.01) {
+          meng(K.gletsjer, K.spleet, smooth(0.6, 0.72, ruis(x * 0.9 + 17, y * 0.24 + 5)) * 0.8, tmp);
+          tmp[0] *= f; tmp[1] *= f; tmp[2] *= f;
+          meng(tmp2, tmp, gl, tmp2);
+        }
         meng(c, tmp2, sn, c);
       }
       land[p] = c[0]; land[p + 1] = c[1]; land[p + 2] = c[2]; land[p + 3] = 255;
@@ -847,7 +915,10 @@ export function bakGrondData(b, ck, cr) {
       kleur[p] = bron[p]; kleur[p + 1] = bron[p + 1]; kleur[p + 2] = bron[p + 2]; kleur[p + 3] = 255;
     }
   }
-  return { ck, cr, x0, y0, n: N, gewicht, water, sd, hoogte, sneeuw, kleur, land, zee, vlag, sneeuwBasis, licht, meer: meerA };
+  // heeftWater: zit er in dit brok ergens water of een meer (anders hoeft de waterstap niet)
+  let heeftWater = false;
+  for (let m = 0; m < NN && !heeftWater; m++) if (water[m] || meerA[m] < 1.2 || sd[m] > -1.5) heeftWater = true;
+  return { ck, cr, x0, y0, n: N, gewicht, water, sd, hoogte, sneeuw, kleur, land, zee, vlag, sneeuwBasis, licht, meer: meerA, hoogte8, steil8, alm8, heeftWater };
 }
 
 // Seizoen over de gebakken grondkleuren: gras dof in de winter en droog in de nazomer, herfsttinten in het bos,
@@ -857,6 +928,7 @@ export function seizoensGrond(g, sz, uitLand, uitZee) {
   const A = 0.3 * smooth(0.45, 0.85, sz.koud) + 0.28 * sz.sneeuw; // sneeuwhoeveelheid, 0..0,58
   const drempel = 1 - A;
   const ijs = smooth(0.86, 0.97, sz.koud);
+  const lijn = sneeuwLijn(sz);
   const tmp = [0, 0, 0], c = [0, 0, 0];
   for (let m = 0; m < NN; m++) {
     const p = m * 4;
@@ -873,12 +945,26 @@ export function seizoensGrond(g, sz, uitLand, uitZee) {
       if (sz.blad > 0) meng(c, K.bosHerfst, sz.blad * 0.5 * wB, c);
       if (sz.winter > 0) meng(c, K.bosWinter, sz.winter * 0.35 * wB, c);
     }
+    // alpenweide: fris in het voorjaar, goudbruin in de herfst, dof in de winter
+    const al = g.alm8 ? g.alm8[m] / 255 : 0;
+    if (al > 0.02) {
+      if (sz.blad > 0) meng(c, K.almHerfst, sz.blad * 0.55 * al, c);
+      if (sz.lente > 0) meng(c, K.grasLente, sz.lente * 0.3 * al, c);
+      if (sz.winter > 0) meng(c, K.grasWinter, sz.winter * 0.4 * al, c);
+    }
     const sb = g.sneeuwBasis[m];
-    if (A > 0.01 && sb > drempel - 0.12) {
-      const dek = smooth(drempel, drempel + 0.12, sb);
+    // laagland: vlekkerige sneeuw in hartje winter; bergen: alles boven de sneeuwgrens, steile wanden blijven kaal
+    let dek = A > 0.01 && sb > drempel - 0.12 ? smooth(drempel, drempel + 0.12, sb) : 0;
+    if (wR > 0.02 && g.hoogte8) {
+      const h = g.hoogte8[m] / 100 + (sb - 0.5) * 0.2, st = g.steil8[m] / 255;
+      const dekB = smooth(lijn - 0.07, lijn + 0.07, h) * (1 - 0.8 * st);
+      const bf = smooth(0.15, 0.6, wR);
+      dek = Math.max(dek * (1 - 0.6 * bf), dekB * bf);
+    }
+    if (dek > 0.005) {
       const f = 0.8 + 0.2 * Math.min(1.15, g.licht[m]);
       tmp[0] = K.sneeuw[0] * f; tmp[1] = K.sneeuw[1] * f; tmp[2] = Math.min(255, K.sneeuw[2] * f + 6);
-      meng(c, tmp, dek * 0.93, c);
+      meng(c, tmp, Math.min(1, dek) * 0.93, c);
     }
     uitLand[p] = c[0]; uitLand[p + 1] = c[1]; uitLand[p + 2] = c[2]; uitLand[p + 3] = 255;
     uitZee[p] = g.zee[p]; uitZee[p + 1] = g.zee[p + 1]; uitZee[p + 2] = g.zee[p + 2]; uitZee[p + 3] = 255;
@@ -899,6 +985,7 @@ export function bakMaskerData(b, ck, cr, bezet = null) {
   const x0 = ck * CH - MARGE, y0 = cr * CH - MARGE;
   const water = new Uint8ClampedArray(MN * MN * 4), schuim1 = new Uint8ClampedArray(MN * MN * 4), schuim2 = new Uint8ClampedArray(MN * MN * 4);
   const meer = b.water.meer;
+  let heeftWater = false, heeftSchuim = false;
   for (let j = 0; j < MN; j++) {
     for (let i = 0; i < MN; i++) {
       const x = x0 + (i + 0.5) / M, y = y0 + (j + 0.5) / M, p = (j * MN + i) * 4;
@@ -912,15 +999,17 @@ export function bakMaskerData(b, ck, cr, bezet = null) {
         wa = Math.max(wa, la);
       }
       water[p] = water[p + 1] = water[p + 2] = 255; water[p + 3] = wa * 255;
+      if (wa > 0.002) heeftWater = true;
       if (sd < -0.12 || sd > 1.15) continue; // geen schuim: maskers blijven leeg
       const breuk = 0.5 + 0.5 * ruis(x * 0.9 + 11, y * 0.9 + 3);
       const s1 = smooth(-0.12, 0.06, sd) * (1 - smooth(0.25, 0.55, sd)) * (0.55 + 0.45 * breuk);
       const s2 = smooth(0.42, 0.62, sd) * (1 - smooth(0.88, 1.15, sd)) * breuk;
+      if (s1 > 0.002 || s2 > 0.002) heeftSchuim = true;
       schuim1[p] = 236; schuim1[p + 1] = 246; schuim1[p + 2] = 248; schuim1[p + 3] = s1 * 255;
       schuim2[p] = 236; schuim2[p + 1] = 246; schuim2[p + 2] = 248; schuim2[p + 3] = s2 * 255;
     }
   }
-  return { water, schuim1, schuim2 };
+  return { water, schuim1, schuim2, heeftWater, heeftSchuim };
 }
 
 // Eigenaar op 2 monsters per eenheid, 136x136 met 4 monsters marge. Monster i ligt op x = ck*64 + (i - 4 + 0.5) / 2.
@@ -1091,44 +1180,55 @@ export function kenmerkenVoorTegel(t, b) {
   const moeras = b.moeras[t.i];
   if (akkerBuur && t.eig >= 0 && t.terrein !== 'berg') percelen(t, b, zet, g);
   if (bosBuur) {
-    // dicht bladerdak: een verschoven rooster van 1,6 eenheid
+    // dicht bladerdak: een verschoven rooster van 1,6 eenheid; aan de bosrand struiken en jonge berken,
+    // op open plekken gras met hier en daar een struik
     const cel = 1.6, n = Math.round(geo.T / cel);
     for (let cj = 0; cj < n; cj++) {
       for (let ci = 0; ci < n; ci++) {
         const q = ci * 31 + cj;
-        if (hash(t.i, q, 3) >= 0.85) continue;
+        if (hash(t.i, q, 3) >= 0.88) continue;
         const x = -half + (ci + 0.5) * cel + (hash(t.i, q, 1) - 0.5) * 1.3;
         const y = -half + (cj + 0.5) * cel + (hash(t.i, q, 2) - 0.5) * 1.3;
-        if (isWater(b, t.x + x, t.y + y) || gew(x, y)[BOS] <= 0.5 || !droog(x, y, 0.5)) continue;
-        // variant 0 is een naaldboom (blijft groen), 1 en 2 zijn loofbomen; hoger in de bergen meer naald
-        const naald = hash(t.i, q, 7) < 0.25 + 0.5 * smooth(0.55, 0.75, t.hoogte);
-        zet(BOOM, x, y, 0.62 + hash(t.i, q, 4) * 0.42, naald ? 0 : 1 + Math.floor(hash(t.i, q, 5) * 2), hash(t.i, q, 6));
+        const wx = t.x + x, wy = t.y + y;
+        if (isWater(b, wx, wy)) continue;
+        const wB = gew(x, y)[BOS];
+        if (wB <= 0.3 || g[BERG] > 0.5 || !droog(x, y, 0.5)) continue;
+        const h = hash(t.i, q, 4), h6 = hash(t.i, q, 6), open = openPlekOp(b, wx, wy);
+        if (open > 0.5 && wB > 0.5) {
+          if (hash(t.i, q, 8) < 0.1) zet(BOOM, x, y, 0.4 + 0.2 * h, boomCode(STRUIK, Math.floor(hash(t.i, q, 5) * 2), boomKleurVan(STRUIK, b, wx, wy, h6)), h6);
+          continue;
+        }
+        if (wB <= 0.5) {
+          const k = hash(t.i, q, 9);
+          if (k < 0.5) zet(BOOM, x, y, 0.38 + 0.22 * h, boomCode(STRUIK, Math.floor(hash(t.i, q, 5) * 2), boomKleurVan(STRUIK, b, wx, wy, h6)), h6);
+          else if (k < 0.66) zet(BOOM, x, y, 0.5 + 0.16 * h, boomCode(BERK, Math.floor(hash(t.i, q, 5) * 2), boomKleurVan(BERK, b, wx, wy, h6)), h6);
+          continue;
+        }
+        const soort = bosSoort(b, t, wx, wy, hash(t.i, q, 7), hash(t.i, q, 10));
+        const oud = hash(t.i, q, 11) < 0.05 ? 1.22 : 1;
+        const vorm = Math.floor(hash(t.i, q, 5) * BOOM_VORMEN[soort]);
+        zet(BOOM, x, y, (0.62 + h * 0.42) * BOOM_MAAT[soort] * oud * (open > 0.3 ? 0.85 : 1), boomCode(soort, vorm, boomKleurVan(soort, b, wx, wy, h6)), h6);
+      }
+    }
+    if (t.terrein === 'bos') {
+      // open plekken: grasvlekken die samen een open plek vormen; omgevallen stammen, liefst aan de rand ervan
+      for (let q = 0; q < 16; q++) {
+        const x = -half + ((q & 3) + 0.5) * (geo.T / 4) + (hash(t.i, q, 12) - 0.5) * 2, y = -half + ((q >> 2) + 0.5) * (geo.T / 4) + (hash(t.i, q, 13) - 0.5) * 2;
+        const open = openPlekOp(b, t.x + x, t.y + y);
+        if (open > 0.55 && gew(x, y)[BOS] > 0.55 && droog(x, y, 1)) zet(OPENPLEK, x, y, 1.8 + 1.4 * open + hash(t.i, q, 14), hash(t.i, q, 15), hash(t.i, q, 16) * Math.PI);
+      }
+      const stammen = hash(t.i, 17) < 0.7 ? 1 + (hash(t.i, 18) < 0.4 ? 1 : 0) : 0;
+      for (let q = 0, gezet = 0; q < 8 && gezet < stammen; q++) {
+        const x = (hash(t.i, q, 19) - 0.5) * geo.T * 0.85, y = (hash(t.i, q, 20) - 0.5) * geo.T * 0.85;
+        const open = openPlekOp(b, t.x + x, t.y + y);
+        if ((open < 0.3 && q < 5) || !droog(x, y, 1.5) || gew(x, y)[BOS] < 0.5) continue;
+        zet(STAM, x, y, 1.1 + hash(t.i, q, 21) * 0.9, hash(t.i, q, 22) * Math.PI * 2, hash(t.i, q, 23));
+        gezet++;
       }
     }
   }
-  if (t.terrein === 'berg') {
-    const clusters = 4 + Math.floor(r() * 5);
-    for (let c = 0; c < clusters; c++) {
-      let x = 0, y = 0;
-      for (let poging = 0; poging < 4; poging++) {
-        x = (r() - 0.5) * geo.T * 0.85; y = (r() - 0.5) * geo.T * 0.85;
-        if (gew(x, y)[BERG] > 0.4 && !isWater(b, t.x + x, t.y + y)) break;
-      }
-      if (g[BERG] <= 0.4 || isWater(b, t.x + x, t.y + y) || !droog(x, y, 0.8)) continue;
-      const rotsen = 2 + Math.floor(r() * 3);
-      for (let q = 0; q < rotsen; q++) {
-        const rx = x + (r() - 0.5) * 2.4, ry = y + (r() - 0.5) * 2.4, rr = 0.5 + r() * 0.8, v = r();
-        if (!droog(rx, ry, rr * 0.6)) continue; // de groep ligt op het droge, maar een losse kei kan in een beek rollen
-        const hoog = hoogteOp(b, t.x + rx, t.y + ry, gew(rx, ry)[BERG]) > 1.66 ? 1 : 0;
-        zet(ROTS, rx, ry, rr, v, hoog);
-      }
-      const gruis = 2 + Math.floor(r() * 4);
-      for (let q = 0; q < gruis; q++) {
-        const gx = x + 0.6 + r() * 2.2, gy = y + 0.6 + r() * 2.2, gr = 0.12 + r() * 0.14, v = r();
-        if (droog(gx, gy, 0.1)) zet(GRUIS, gx, gy, gr, v);
-      }
-    }
-  } else if (t.terrein !== 'bos') {
+  if (t.terrein === 'berg') bergKenmerken(t, b, zet, r, g);
+  else if (t.terrein !== 'bos') {
     // vlakte, kust en onbewoonde eilanden: losse bomen en graspollen op open grasland
     if (!b.akker[t.i]) {
       const bomen = Math.floor(r() * (moeras ? 2 : 4));
@@ -1137,7 +1237,8 @@ export function kenmerkenVoorTegel(t, b) {
         if (sdOp(b, t.x + x, t.y + y) > -1.5 || !droog(x, y, 1)) continue;
         gew(x, y);
         if (g[ZAND] > 0.35 || g[BOS] > 0.4 || g[AKKER] > 0.4) continue;
-        zet(LOSBOOM, x, y, 0.7 + r() * 0.4, 1 + Math.floor(r() * 2), r());
+        const rr = 0.7 + r() * 0.4, k = r(), zaad = r(), soort = moeras ? (k < 0.6 ? BERK : STRUIK) : k < 0.55 ? LOOF : k < 0.8 ? LINDE : k < 0.9 ? BERK : STRUIK;
+        zet(LOSBOOM, x, y, rr * (soort === STRUIK ? 0.6 : 1), boomCode(soort, Math.floor(zaad * BOOM_VORMEN[soort]), boomKleurVan(soort, b, t.x + x, t.y + y, zaad)), zaad);
       }
       // rotspartij: een groepje keien in het gras
       if (!moeras && hash(t.i, 41) < 0.14) {
@@ -1215,6 +1316,143 @@ export function kenmerkenVoorTegel(t, b) {
   return b.kenmerken[t.i];
 }
 
+// ---------- bos en bergen ----------
+
+// Kroongrootte per soort ten opzichte van een gewone loofboom.
+const BOOM_MAAT = [0.85, 1, 1, 0.72, 0.6, 0.6, 0.92];
+
+// Open plek in het bos: 0 dicht bos, 1 midden op een open plek. Trage ruis, plekken van 5 tot 10 eenheden.
+function openPlekOp(b, wx, wy) { return smooth(0.64, 0.74, b.geo.ruis(wx * 0.085 + 211, wy * 0.085 + 63)); }
+
+// Soort van een boom midden in het bos: naaldbos in vlekken (meer naarmate het hoger ligt), dennen in eigen
+// groepen, berken en populieren bij water, verder eik/beuk (loof) en linde in grote vlekken.
+function bosSoort(b, t, wx, wy, h7, h10) {
+  const ruis = b.geo.ruis;
+  const vlek = ruis(wx * 0.065 + 151, wy * 0.065 + 29);
+  const naald = Math.max(0, Math.min(0.95, 0.18 + 0.55 * smooth(0.55, 0.75, t.hoogte) + (vlek - 0.5) * 1.6));
+  if (h7 < naald) return ruis(wx * 0.09 + 17, wy * 0.09 + 5) > 0.56 ? DEN : SPAR;
+  if (h10 < 0.5 && zoetOp(b, wx, wy) < 3.5) return h10 < 0.3 ? BERK : POPULIER;
+  if (h10 > 0.93) return BERK;
+  return ruis(wx * 0.08 + 41, wy * 0.08 + 13) > 0.53 ? LINDE : LOOF;
+}
+
+// Kleurslot van een boom: trage ruis plus een beetje toeval, zodat bomen in groepen dezelfde herfstkleur krijgen
+// (geen confetti); slot 4 van loof en linde is de zeldzame felle boom.
+function boomKleurVan(soort, b, wx, wy, h) {
+  const nk = BOOM_KLEUREN[soort];
+  if (nk === 1) return 0;
+  const v = 0.75 * b.geo.ruis(wx * 0.11 + 77, wy * 0.11 + 19) + 0.25 * h;
+  if (nk === 5) return h < 0.05 ? 4 : v < 0.36 ? 0 : v < 0.52 ? 1 : v < 0.68 ? 2 : 3;
+  if (nk === 3) return v < 0.45 ? 0 : v < 0.62 ? 1 : 2;
+  return v < 0.5 ? 0 : 1;
+}
+
+// Bergvakje: bergmeertje in een vlakke kom, bergbos tot de boomgrens, rotspartijen met puin, en de graten.
+function bergKenmerken(t, b, zet, r, g) {
+  const geo = b.geo, half = geo.T / 2, ruis = geo.ruis;
+  const gew = (x, y) => gewichtenOp(b, t.x + x, t.y + y, g);
+  const droog = (x, y, marge) => zoetOp(b, t.x + x, t.y + y) > marge;
+  const hOp = (x, y) => hoogteOp(b, t.x + x, t.y + y, gew(x, y)[BERG]);
+  const helOp = (x, y, h) => Math.hypot(hOp(x + 0.7, y) - h, hOp(x, y + 0.7) - h) / 0.7;
+  // 1. bergmeertje: in de vlakste van een paar kandidaten tussen boomgrens en eeuwige sneeuw
+  let meer = null;
+  if (hash(t.i, 61) < 0.3) {
+    let best = 0.075;
+    for (let q = 0; q < 10; q++) {
+      const x = (hash(t.i, q, 62) - 0.5) * geo.T * 0.7, y = (hash(t.i, q, 63) - 0.5) * geo.T * 0.7;
+      if (gew(x, y)[BERG] < 0.6) continue;
+      const h = hOp(x, y);
+      if (h < BOOMGRENS + 0.04 || h > SNEEUW_VAST + 0.15) continue;
+      const hel = helOp(x, y, h);
+      if (hel < best && droog(x, y, 3)) { best = hel; meer = [x, y, h]; }
+    }
+    if (meer) zet(BERGMEER, meer[0], meer[1], 0.8 + hash(t.i, 64) * 0.8, hash(t.i, 65) * Math.PI, meer[2]);
+  }
+  const bijMeer = (x, y, m) => meer && Math.hypot(x - meer[0], y - meer[1]) < 2.4 + m;
+  // 2. bergbos: sparren en dennen tot de (rafelige) boomgrens, dunner en kleiner naar boven, niet op steile wanden
+  const cel = 1.75, n = Math.floor(geo.T / cel);
+  for (let cj = 0; cj < n; cj++) {
+    for (let ci = 0; ci < n; ci++) {
+      const q = ci * 37 + cj;
+      const x = -half + (ci + 0.5) * cel + (hash(t.i, q, 66) - 0.5) * 1.3, y = -half + (cj + 0.5) * cel + (hash(t.i, q, 67) - 0.5) * 1.3;
+      const gB = gew(x, y)[BERG];
+      if (gB < 0.25 || g[BOS] > 0.3) continue;
+      const wx = t.x + x, wy = t.y + y, h = hoogteOp(b, wx, wy, gB);
+      const grens = BOOMGRENS + (ruis(wx * 0.21 + 5, wy * 0.21 + 3) - 0.5) * 0.1;
+      if (h > grens) continue;
+      const dicht = smooth(0, 0.14, grens - h);
+      if (hash(t.i, q, 68) > 0.3 + 0.62 * dicht || isWater(b, wx, wy) || !droog(x, y, 0.5) || bijMeer(x, y, 0)) continue;
+      if (helOp(x, y, h) > 0.3) continue;
+      const k = hash(t.i, q, 69), zaad = hash(t.i, q, 70);
+      const soort = h < BOOMGRENS - 0.22 && k < 0.14 ? (k < 0.07 ? BERK : LOOF) : k < 0.62 ? SPAR : DEN;
+      zet(BOOM, x, y, (0.5 + 0.35 * hash(t.i, q, 71)) * (0.65 + 0.35 * dicht) * BOOM_MAAT[soort], boomCode(soort, Math.floor(zaad * BOOM_VORMEN[soort]), boomKleurVan(soort, b, wx, wy, zaad)), zaad);
+    }
+  }
+  // 3. rotspartijen, vooral boven de boomgrens, met puin dat naar beneden is gerold; de hoogte gaat mee voor de sneeuw
+  const clusters = 4 + Math.floor(r() * 5);
+  for (let c = 0; c < clusters; c++) {
+    let x = 0, y = 0;
+    for (let poging = 0; poging < 4; poging++) {
+      x = (r() - 0.5) * geo.T * 0.85; y = (r() - 0.5) * geo.T * 0.85;
+      if (gew(x, y)[BERG] > 0.4 && !isWater(b, t.x + x, t.y + y)) break;
+    }
+    const laag = r() < 0.7;
+    if (g[BERG] <= 0.4 || isWater(b, t.x + x, t.y + y) || !droog(x, y, 0.8) || bijMeer(x, y, 0.5)) continue;
+    if (laag && hoogteOp(b, t.x + x, t.y + y, g[BERG]) < BOOMGRENS - 0.05) continue;
+    const rotsen = 2 + Math.floor(r() * 3);
+    for (let q = 0; q < rotsen; q++) {
+      const rx = x + (r() - 0.5) * 2.4, ry = y + (r() - 0.5) * 2.4, rr = 0.5 + r() * 0.8, v = r();
+      if (!droog(rx, ry, rr * 0.6)) continue; // de groep ligt op het droge, maar een losse kei kan in een beek rollen
+      zet(ROTS, rx, ry, rr, v, hOp(rx, ry));
+    }
+    const gruis = 3 + Math.floor(r() * 5);
+    for (let q = 0; q < gruis; q++) {
+      const gx = x + 0.6 + r() * 2.6, gy = y + 0.6 + r() * 2.6, gr = 0.12 + r() * 0.14, v = r();
+      if (droog(gx, gy, 0.1)) zet(GRUIS, gx, gy, gr, v);
+    }
+  }
+  // 4. graten
+  graten(t, b, zet, g, meer);
+}
+
+// Graten: de kamlijnen van hoogteOp (daar is de kamruis precies 0,5) als korte lijnstukken, via marching squares
+// op een rooster van één eenheid per vakje. Hoofdkam boven de boomgrens, zijkammen alleen hoog in het massief.
+// GRAAT: [x1, y1, x2, y2, hoogte + 10 voor een zijkam].
+const GR_N = 16, GR_V = new Float32Array((GR_N + 1) * (GR_N + 1)), GR_P = new Float32Array(8);
+const MS_TABEL = [null, [3, 0], [0, 1], [3, 1], [1, 2], [3, 0, 1, 2], [0, 2], [3, 2], [2, 3], [0, 2], [0, 1, 2, 3], [1, 2], [1, 3], [0, 1], [3, 0], null];
+function graten(t, b, zet, g, meer) {
+  const geo = b.geo, ruis = geo.ruis, half = geo.T / 2, d = geo.T / GR_N, n1 = GR_N + 1;
+  for (let zij = 0; zij < 2; zij++) {
+    const f = zij ? 0.17 : 0.075, ox = zij ? 23 : 5, oy = zij ? 41 : 9;
+    for (let j = 0; j <= GR_N; j++) for (let i = 0; i <= GR_N; i++) GR_V[j * n1 + i] = ruis((t.x - half + i * d) * f + ox, (t.y - half + j * d) * f + oy) - 0.5;
+    for (let j = 0; j < GR_N; j++) {
+      for (let i = 0; i < GR_N; i++) {
+        const a = GR_V[j * n1 + i], bb = GR_V[j * n1 + i + 1], c = GR_V[(j + 1) * n1 + i + 1], e = GR_V[(j + 1) * n1 + i];
+        const tab = MS_TABEL[(a > 0 ? 1 : 0) | (bb > 0 ? 2 : 0) | (c > 0 ? 4 : 0) | (e > 0 ? 8 : 0)];
+        if (!tab) continue;
+        // snijpunten op de vier randen van de cel (boven, rechts, onder, links)
+        GR_P[0] = i + a / (a - bb); GR_P[1] = j;
+        GR_P[2] = i + 1; GR_P[3] = j + bb / (bb - c);
+        GR_P[4] = i + e / (e - c); GR_P[5] = j + 1;
+        GR_P[6] = i; GR_P[7] = j + a / (a - e);
+        for (let s = 0; s < tab.length; s += 2) {
+          const ax = -half + GR_P[tab[s] * 2] * d, ay = -half + GR_P[tab[s] * 2 + 1] * d;
+          const bx = -half + GR_P[tab[s + 1] * 2] * d, by = -half + GR_P[tab[s + 1] * 2 + 1] * d;
+          const mx = (ax + bx) / 2, my = (ay + by) / 2;
+          if (!Number.isFinite(ax + ay + bx + by)) continue;
+          const gB = gewichtenOp(b, t.x + mx, t.y + my, g)[BERG];
+          if (gB < (zij ? 0.7 : 0.55)) continue;
+          const h = hoogteOp(b, t.x + mx, t.y + my, gB);
+          if (h < (zij ? ALMGRENS - 0.05 : BOOMGRENS + 0.03)) continue;
+          if (zoetOp(b, t.x + mx, t.y + my) < 1 || zoetOp(b, t.x + ax, t.y + ay) < 0.6 || isWater(b, t.x + ax, t.y + ay)) continue;
+          if (meer && Math.hypot(mx - meer[0], my - meer[1]) < 3) continue;
+          zet(GRAAT, ax, ay, bx, by, h + (zij ? 10 : 0));
+        }
+      }
+    }
+  }
+}
+
 // Riet langs rivieroevers en meren in dit vakje, om en om aan beide kanten.
 function oeverRiet(t, b, zet) {
   const geo = b.geo, half = geo.T / 2, w = b.water;
@@ -1259,8 +1497,9 @@ function boerderij(t, b, zet, r) {
     if (!ok) continue;
     zet(BOERDERIJ, x, y, 1, r(), hoek);
     for (let q = 0; q < 3; q++) {
-      const u = (r() < 0.5 ? -1 : 1) * (2.4 + r() * 0.8), v = (r() - 0.5) * 3.6;
-      zet(LOSBOOM, x + u * co - v * si, y + u * si + v * co, 0.6 + r() * 0.35, 1 + Math.floor(r() * 2), r());
+      const u = (r() < 0.5 ? -1 : 1) * (2.4 + r() * 0.8), v = (r() - 0.5) * 3.6, rr = 0.6 + r() * 0.35, k = r(), zaad = r();
+      const soort = k < 0.5 ? LINDE : LOOF;
+      zet(LOSBOOM, x + u * co - v * si, y + u * si + v * co, rr, boomCode(soort, Math.floor(zaad * BOOM_VORMEN[soort]), boomKleurVan(soort, b, t.x + x, t.y + y, zaad)), zaad);
     }
     return;
   }
@@ -1333,6 +1572,134 @@ function percelen(t, b, zet, g) {
       }
     }
   }
+}
+
+// ---------- boomsprites ----------
+
+// Kleuren per boomsoort en kleurslot: [winter, lente, zomer, herfst], of één kleur voor het hele jaar (naaldbomen).
+// Herfst in vlekken oker, olijf en goudbruin, wat roest en af en toe een felle boom; lente fris lichtgroen.
+const BOOM_TINT = [
+  [['#21402c']], // spar
+  [['#6e5a40', '#7cab4c', '#3d6a33', '#a8843a'], ['#6a5a44', '#8ab554', '#4a7838', '#7f7a38'], ['#6e5840', '#71a046', '#355f30', '#b38c45'],
+    ['#6a5440', '#93bd5c', '#527f3c', '#9c5a2e'], ['#6e5a42', '#eeece2', '#5f8a3a', '#d26a26']], // loof
+  [['#6a5a46', '#8cba58', '#4f7f3c', '#c9a032'], ['#6c5c48', '#9ac462', '#5a8a44', '#b89a3a'], ['#685844', '#84b052', '#477638', '#a08a38'],
+    ['#6a5a46', '#a2c86a', '#62904a', '#c8a84a'], ['#6c5a44', '#90bc5a', '#4a7a3a', '#8a7a2e']], // linde
+  [['#7a6458', '#a8d070', '#6f9a48', '#d8b83a'], ['#76604f', '#b4d67a', '#7aa652', '#c8a83a']], // berk
+  [['#6a5a48', '#88b458', '#4f7a3a', '#d0b040'], ['#6c5c4a', '#94bc60', '#5a8440', '#b89a38']], // populier
+  [['#6a5a48', '#6e9a44', '#4a6a32', '#8a6a30'], ['#665846', '#7aa24c', '#56763a', '#9a5a2a'], ['#6a5848', '#f2f0e6', '#5a7038', '#7a5a2a']], // struik
+  [['#2a4e40']], // den
+];
+const BOOM_START = [];
+let BOOM_TOTAAL = 0;
+for (let s = 0; s < 7; s++) { BOOM_START[s] = BOOM_TOTAAL; BOOM_TOTAAL += BOOM_VORMEN[s] * BOOM_KLEUREN[s]; }
+// sprite per variantcode: index in de atlas (of -1)
+const BOOM_SLOT = new Int16Array(256).fill(-1);
+for (let s = 0; s < 7; s++) for (let v = 0; v < BOOM_VORMEN[s]; v++) for (let k = 0; k < BOOM_KLEUREN[s]; k++) BOOM_SLOT[boomCode(s, v, k)] = BOOM_START[s] + v * BOOM_KLEUREN[s] + k;
+const BS = 72; // pixels per sprite in de atlas
+const BS_SPAN = 2.7; // breedte van een sprite in kroonstralen
+const ATLAS_KOL = 9;
+export const BOOM_SPRITES = BOOM_TOTAAL;
+
+// Tekent één boom van boven in een cel van de atlas: kroon met lichte noordwestkant en donkere zuidoostkant,
+// in de winter kale takken (sommige eiken houden hun bruine blad) en sneeuw op de naaldbomen.
+function tekenBoomSprite(c, soort, vorm, kleur, pal, cx, cy) {
+  const rr = BS / BS_SPAN, R = rnd(soort * 977 + vorm * 131 + kleur * 17 + 5);
+  const basis = pal.boomRgb[soort][Math.min(kleur, pal.boomRgb[soort].length - 1)];
+  const donker = [basis[0] * 0.58, basis[1] * 0.62, basis[2] * 0.66];
+  const licht = meng(basis, [236, 244, 196], 0.32, [0, 0, 0]);
+  const kaal = NAALD(soort) ? 0 : pal.kaal, kap = pal.kap;
+  const rondje = (x, y, r) => { c.moveTo(x + r, y); c.arc(x, y, r, 0, Math.PI * 2); };
+  const vulKleur = (k, a) => { c.fillStyle = css(k, a); c.fill(); };
+  c.save();
+  c.lineCap = 'round';
+  if (NAALD(soort)) {
+    if (soort === SPAR) {
+      // spar: spitse sterren in lagen, donker naar licht, de top iets naar het noordwesten
+      for (let L = 0; L < 3; L++) {
+        const rl = rr * (1.02 - L * 0.3) * (vorm === 2 ? 0.92 : 1), punten = 9 - L * 2 + (vorm === 1 ? 1 : 0), rot = R() * Math.PI;
+        const ox = cx - L * rr * 0.07 + (L === 0 ? rr * 0.05 : 0), oy = cy - L * rr * 0.08 + (L === 0 ? rr * 0.06 : 0);
+        c.beginPath();
+        for (let q = 0; q < punten * 2; q++) {
+          const a = rot + (q * Math.PI) / punten, d = q % 2 ? rl * (0.5 + R() * 0.12) : rl * (0.9 + R() * 0.1);
+          if (q) c.lineTo(ox + Math.cos(a) * d, oy + Math.sin(a) * d); else c.moveTo(ox + Math.cos(a) * d, oy + Math.sin(a) * d);
+        }
+        c.closePath();
+        vulKleur(L === 0 ? donker : L === 1 ? basis : meng(basis, licht, 0.7, [0, 0, 0]), 1);
+      }
+      if (kap > 0.04) {
+        // sneeuw op de takken: witte vlokken op de buitenste punten en in het midden
+        c.beginPath();
+        for (let q = 0; q < 9; q++) { const a = q * 0.698 + R() * 0.3, d = rr * (0.45 + R() * 0.4); rondje(cx + Math.cos(a) * d - rr * 0.06, cy + Math.sin(a) * d - rr * 0.07, rr * (0.09 + R() * 0.05)); }
+        rondje(cx - rr * 0.12, cy - rr * 0.14, rr * 0.2);
+        vulKleur([244, 247, 250], 0.92 * kap);
+      }
+    } else {
+      // den: losse plukken naalden met een blauwgroene glans
+      const n = vorm === 0 ? 6 : 5, plukken = [];
+      for (let q = 0; q < n; q++) { const a = (q / n) * Math.PI * 2 + R() * 0.6, d = rr * (0.36 + R() * 0.2); plukken.push(cx + Math.cos(a) * d, cy + Math.sin(a) * d, rr * (0.36 + R() * 0.12)); }
+      plukken.push(cx, cy, rr * 0.4);
+      c.beginPath(); for (let q = 0; q < plukken.length; q += 3) rondje(plukken[q] + rr * 0.07, plukken[q + 1] + rr * 0.09, plukken[q + 2]); vulKleur(donker, 1);
+      c.beginPath(); for (let q = 0; q < plukken.length; q += 3) rondje(plukken[q], plukken[q + 1], plukken[q + 2] * 0.86); vulKleur(basis, 1);
+      c.beginPath(); for (let q = 0; q < plukken.length; q += 3) rondje(plukken[q] - rr * 0.08, plukken[q + 1] - rr * 0.09, plukken[q + 2] * 0.45); vulKleur(meng(basis, [150, 196, 180], 0.45, [0, 0, 0]), 0.9);
+      if (kap > 0.04) { c.beginPath(); for (let q = 0; q < plukken.length; q += 3) rondje(plukken[q] - rr * 0.06, plukken[q + 1] - rr * 0.08, plukken[q + 2] * 0.42); vulKleur([244, 247, 250], 0.9 * kap); }
+    }
+    c.restore();
+    return;
+  }
+  // loofbomen, berk, populier, struik: lobben rond het midden
+  const berk = soort === BERK, struik = soort === STRUIK, pop = soort === POPULIER, linde = soort === LINDE;
+  const n = berk ? 10 : struik ? 5 : pop ? 6 : linde ? 8 : vorm === 1 ? 9 : 7;
+  const lobR = berk ? 0.3 : struik ? 0.44 : pop ? 0.4 : linde ? 0.46 : 0.42, lobD = berk ? 0.55 : struik ? 0.4 : pop ? 0.36 : linde ? 0.44 : 0.46;
+  const lobben = [];
+  for (let q = 0; q < n; q++) {
+    const a = (q / n) * Math.PI * 2 + R() * (linde ? 0.2 : 0.6), d = rr * (lobD + R() * 0.16 - 0.04), lr = rr * (lobR + R() * 0.14);
+    lobben.push(cx + Math.cos(a) * d, cy + Math.sin(a) * d * (vorm === 2 && !linde ? 0.85 : 0.96), lr, Math.cos(a) + Math.sin(a));
+  }
+  lobben.push(cx, cy, rr * (berk ? 0.36 : 0.5), 0);
+  // kroondichtheid: in de winter kaal; sommige eiken (loof, vorm 2) houden hun bruine blad
+  let kroonA = 1 - smooth(0.3, 0.85, kaal);
+  if (soort === LOOF && vorm === 2) kroonA = Math.max(kroonA, 0.5 * kaal);
+  if (berk) kroonA *= 0.9;
+  const takA = smooth(0.12, 0.55, kaal);
+  if (takA > 0.01) {
+    // kale kruin: een waas van twijgjes en kromme hoofdtakken vanuit de stam
+    const twijg = berk ? [138, 112, 104] : [104, 86, 70];
+    const g = c.createRadialGradient(cx, cy, rr * 0.1, cx, cy, rr * 1.02);
+    g.addColorStop(0, css(twijg, 0.5 * takA)); g.addColorStop(0.7, css(twijg, 0.32 * takA)); g.addColorStop(1, css(twijg, 0));
+    c.fillStyle = g; c.beginPath(); rondje(cx, cy, rr * 1.02); c.fill();
+    const takken = struik ? 7 : 6;
+    c.beginPath();
+    for (let q = 0; q < takken; q++) {
+      const a = (q / takken) * Math.PI * 2 + R() * 0.7, l = rr * (struik ? 0.75 : 0.92), bocht = (R() - 0.5) * 0.8;
+      const mx = cx + Math.cos(a + bocht) * l * 0.5, my = cy + Math.sin(a + bocht) * l * 0.5, ex = cx + Math.cos(a) * l, ey = cy + Math.sin(a) * l;
+      c.moveTo(cx, cy); c.quadraticCurveTo(mx, my, ex, ey);
+      for (const zij of [-0.6, 0.55]) { const sx = (cx + mx) / 2 + (mx - cx) * 0.5, sy = (cy + my) / 2 + (my - cy) * 0.5; c.moveTo(sx, sy); c.lineTo(sx + Math.cos(a + zij) * l * 0.42, sy + Math.sin(a + zij) * l * 0.42); }
+    }
+    c.strokeStyle = berk ? css([228, 222, 210], 0.95 * takA) : css([82, 64, 50], 0.9 * takA);
+    c.lineWidth = rr * (struik ? 0.05 : 0.065);
+    c.stroke();
+    if (kap > 0.05) {
+      // sneeuw op de takken aan de noordwestkant
+      c.beginPath();
+      for (let q = 0; q < 6; q++) { const a = Math.PI * 1.25 + (R() - 0.5) * 1.6, d = rr * (0.25 + R() * 0.6); c.moveTo(cx + Math.cos(a) * d, cy + Math.sin(a) * d); c.lineTo(cx + Math.cos(a) * d + rr * 0.12, cy + Math.sin(a) * d + rr * 0.05); }
+      c.strokeStyle = css([246, 248, 250], 0.85 * kap * takA); c.lineWidth = rr * 0.08; c.stroke();
+    }
+  }
+  if (kroonA > 0.02) {
+    c.globalAlpha = kroonA;
+    const kl = soort === LOOF && vorm === 2 && kaal > 0.3 ? meng(basis, [122, 84, 48], kaal, [0, 0, 0]) : basis;
+    const dk = [kl[0] * 0.58, kl[1] * 0.62, kl[2] * 0.66], lk = meng(kl, [236, 244, 196], berk ? 0.4 : 0.3, [0, 0, 0]);
+    c.beginPath(); for (let q = 0; q < lobben.length; q += 4) rondje(lobben[q] + rr * 0.07, lobben[q + 1] + rr * 0.09, lobben[q + 2]); vulKleur(dk, 1);
+    c.beginPath(); for (let q = 0; q < lobben.length; q += 4) rondje(lobben[q], lobben[q + 1], lobben[q + 2] * 0.9); vulKleur(kl, 1);
+    c.beginPath(); for (let q = 0; q < lobben.length; q += 4) if (lobben[q + 3] < 0.3) rondje(lobben[q] - rr * 0.1, lobben[q + 1] - rr * 0.12, lobben[q + 2] * 0.58); vulKleur(lk, berk ? 0.8 : 0.75);
+    // bladstructuur: lichte stipjes aan de zonkant, donkere aan de schaduwkant
+    c.beginPath(); for (let q = 0; q < 12; q++) { const a = Math.PI * 1.25 + (R() - 0.5) * 2.4, d = rr * R() * 0.8; rondje(cx + Math.cos(a) * d, cy + Math.sin(a) * d, rr * (0.05 + R() * 0.04)); } vulKleur(meng(lk, [250, 250, 220], 0.3, [0, 0, 0]), 0.6);
+    c.beginPath(); for (let q = 0; q < 10; q++) { const a = Math.PI * 0.25 + (R() - 0.5) * 2.4, d = rr * (0.3 + R() * 0.6); rondje(cx + Math.cos(a) * d, cy + Math.sin(a) * d, rr * (0.06 + R() * 0.05)); } vulKleur(dk, 0.55);
+    // meidoorn: rode bessen in de herfst
+    if (struik && kleur === 2 && pal.bes > 0.05) { c.beginPath(); for (let q = 0; q < 9; q++) { const a = R() * Math.PI * 2, d = rr * (0.2 + R() * 0.6); rondje(cx + Math.cos(a) * d, cy + Math.sin(a) * d, rr * 0.06); } vulKleur([190, 40, 36], pal.bes); }
+    c.globalAlpha = 1;
+  }
+  c.restore();
 }
 
 // ---------- seizoenspalet ----------
@@ -1408,6 +1775,18 @@ export function palet(sz) {
     loofLicht: css(seiz('#9a8a74', '#86b05a', '#5a8a4a', '#d8a050'), 1 - 0.6 * sz.winter),
     kaal: sz.winter,
     stam: 'rgba(60,46,34,0.9)',
+    // boomsprites: basiskleur per soort en kleurslot (rgb), de sprites zelf bouwt TerreinLaag per palet
+    boomRgb: BOOM_TINT.map((slots) => slots.map((k) => (k.length === 1 ? hex(k[0]) : seiz(k[0], k[1], k[2], k[3])))),
+    bes: smooth(0.15, 0.6, sz.herfst) * (1 - sz.winter),
+    // bergen: sneeuwgrens, graten, rotsen, bergmeertjes; open plekken in het bos; omgevallen stammen
+    lijn: sneeuwLijn(sz),
+    graat: 'rgba(222,208,182,0.5)', graatSneeuw: 'rgba(250,252,255,0.75)', graatSchaduw: 'rgba(36,28,20,0.3)',
+    rotsDonker: '#655648', rotsLicht: '#a8957a',
+    bergmeer: css(mengH('#2e5866', '#cddde4', ijs)), bergmeerDiep: css(mengH('#1f4452', '#bcd0d8', ijs), 0.7),
+    bergmeerRand: 'rgba(84,76,62,0.55)', bergmeerLicht: css(hex('#e8f4f6'), 0.45), bergmeerIjs: '#d4e2e8',
+    open: css(mengH(seiz('#80845e', '#80aa4c', '#789c48', '#9a9454'), wit, A * 1.3)),
+    openLicht: css(mengH(seiz('#929474', '#98c060', '#8cae58', '#b0a660'), wit, A * 1.3), 0.7),
+    stamKleur: css(mengH('#5e4632', wit, kap * 0.5)), stamLicht: css(mengH('#8e7250', wit, kap * 0.8)), stamKern: '#c4aa82',
     pluk: [css(seiz('#7a7a5a', '#3e6a2a', '#3e5c2a', '#6a6a3a'), 0.8), css(seiz('#a8a080', '#9ac060', '#96b460', '#b0a060'), 0.8)],
     helm: [css(seiz('#a8a07a', '#b0b07a', '#b8b27c', '#b4a874'), 0.85), css(seiz('#8e8a68', '#94985e', '#9a9a62', '#9a9060'), 0.85)],
     riet: css(seiz('#b0a070', '#7a9a48', '#6f8a3a', '#a08a50')), rietLicht: css(seiz('#c8b88a', '#9aba60', '#8aa850', '#c0a868'), 0.8),
@@ -1473,6 +1852,15 @@ function tekenLagen(c, b, lijst, n, k, opties) {
     c.lineTo(x - hu * co - hv * si, y - hu * si + hv * co);
     c.closePath();
   };
+  const ovaal = (x, y, rx, ry, h) => { c.moveTo(x + rx * Math.cos(h), y + rx * Math.sin(h)); c.ellipse(x, y, rx, ry, h, 0, Math.PI * 2); };
+  // bakken gaat in fasen (1 akkers en plassen, 2 de rest van de grond, 3 bomen); de scherpe laag doet alles in één keer
+  const fase = opties.fase ?? 0;
+  if (fase === 0 || fase === 1) {
+  // open plekken in het bos: gras met een lichtere rand
+  if (em[OPENPLEK].length) {
+    vul(pal.open, (iets) => elk(OPENPLEK, (t, f, p) => { iets(); ovaal(t.x + f[p + 1], t.y + f[p + 2], f[p + 3], f[p + 3] * (0.7 + 0.25 * f[p + 4]), f[p + 5]); }));
+    if (fijn) vul(pal.openLicht, (iets) => elk(OPENPLEK, (t, f, p) => { iets(); ovaal(t.x + f[p + 1] - 0.3, t.y + f[p + 2] - 0.3, f[p + 3] * 0.6, f[p + 3] * 0.45, f[p + 5]); }));
+  }
   const niveau = (x, y) => {
     if (pal.sneeuwVeld <= 0.01) return 0;
     const h = hash(Math.round(x * 10), Math.round(y * 10), 71);
@@ -1616,7 +2004,6 @@ function tekenLagen(c, b, lijst, n, k, opties) {
   }
 
   // 2. plassen in het moeras: modderrand, water, glans
-  const ovaal = (x, y, rx, ry, h) => { c.moveTo(x + rx * Math.cos(h), y + rx * Math.sin(h)); c.ellipse(x, y, rx, ry, h, 0, Math.PI * 2); };
   vul(pal.plasRand, (iets) => elk(PLAS, (t, f, p) => { iets(); ovaal(t.x + f[p + 1], t.y + f[p + 2], f[p + 3] + 0.22, f[p + 3] * 0.62 + 0.22, f[p + 5]); }));
   vul(pal.plas, (iets) => elk(PLAS, (t, f, p) => { iets(); ovaal(t.x + f[p + 1], t.y + f[p + 2], f[p + 3], f[p + 3] * 0.62, f[p + 5]); }));
   if (fijn) lijn(pal.plasLicht, 0.12, (iets) => elk(PLAS, (t, f, p) => {
@@ -1624,11 +2011,26 @@ function tekenLagen(c, b, lijst, n, k, opties) {
     const x = t.x + f[p + 1] - f[p + 3] * 0.25, y = t.y + f[p + 2] - f[p + 3] * 0.2;
     c.moveTo(x - f[p + 3] * 0.35, y); c.quadraticCurveTo(x, y - f[p + 3] * 0.18, x + f[p + 3] * 0.3, y - f[p + 3] * 0.05);
   }));
+  // bergmeertjes: stenige rand, donker diep midden, glans aan de noordwestkant; boven de sneeuwgrens bevroren
+  if (em[BERGMEER].length) {
+    const ijsMeer = (f, p) => pal.ijs > 0.5 || f[p + 5] > pal.lijn - 0.05;
+    vul(pal.bergmeerRand, (iets) => elk(BERGMEER, (t, f, p) => { iets(); ovaal(t.x + f[p + 1], t.y + f[p + 2], f[p + 3] + 0.28, f[p + 3] * 0.72 + 0.28, f[p + 4]); }));
+    vul(pal.bergmeerIjs, (iets) => elk(BERGMEER, (t, f, p) => { if (!ijsMeer(f, p)) return; iets(); ovaal(t.x + f[p + 1], t.y + f[p + 2], f[p + 3], f[p + 3] * 0.72, f[p + 4]); }));
+    vul(pal.bergmeer, (iets) => elk(BERGMEER, (t, f, p) => { if (ijsMeer(f, p)) return; iets(); ovaal(t.x + f[p + 1], t.y + f[p + 2], f[p + 3], f[p + 3] * 0.72, f[p + 4]); }));
+    vul(pal.bergmeerDiep, (iets) => elk(BERGMEER, (t, f, p) => { if (ijsMeer(f, p)) return; iets(); ovaal(t.x + f[p + 1] + f[p + 3] * 0.1, t.y + f[p + 2] + f[p + 3] * 0.08, f[p + 3] * 0.55, f[p + 3] * 0.38, f[p + 4]); }));
+    if (fijn) lijn(pal.bergmeerLicht, 0.1, (iets) => elk(BERGMEER, (t, f, p) => {
+      iets();
+      const x = t.x + f[p + 1], y = t.y + f[p + 2], rr = f[p + 3];
+      c.moveTo(x - rr * 0.75, y - rr * 0.1); c.quadraticCurveTo(x - rr * 0.55, y - rr * 0.55, x - rr * 0.05, y - rr * 0.62);
+    }));
+  }
+  }
 
   // kleine dingen (alleen de scherpe laag): bloemen, lelies, paddenstoelen; onder gras, riet, rotsen, boerderijen en
   // bomen, zodat een paddenstoel niet boven op een boomkruin ligt
   if (opties.naPlassen) opties.naPlassen();
 
+  if (fase === 0 || fase === 2) {
   // 3. grasplukjes, helm en riet; in de wind buigen de toppen mee
   c.lineWidth = Math.max(0.08, 0.5 * pix);
   const pollen = (type, kleuren, hoog) => {
@@ -1676,6 +2078,24 @@ function tekenLagen(c, b, lijst, n, k, opties) {
     c.moveTo(x - Math.cos(h) * l, y - Math.sin(h) * l); c.lineTo(x + Math.cos(h) * l, y + Math.sin(h) * l);
   }));
 
+  // 4b. graten: een schaduwlijn aan de zuidoostkant (alleen gebakken) en een lichte kamlijn; boven de sneeuwgrens wit
+  if (em[GRAAT].length) {
+    const graat = (zij, sneeuw, dx, dy) => (iets) => elk(GRAAT, (t, f, p) => {
+      const h = f[p + 5] >= 10 ? f[p + 5] - 10 : f[p + 5];
+      if ((f[p + 5] >= 10) !== zij || (sneeuw != null && (h > pal.lijn - 0.03) !== sneeuw)) return;
+      iets();
+      c.moveTo(t.x + f[p + 1] + dx, t.y + f[p + 2] + dy); c.lineTo(t.x + f[p + 3] + dx, t.y + f[p + 4] + dy);
+    });
+    c.lineCap = 'round';
+    for (const zij of [false, true]) {
+      const br = zij ? 0.13 : 0.2;
+      if (opties.schaduw) lijn(pal.graatSchaduw, Math.max(br * 1.8, 1.2 * pix), graat(zij, null, 0.12, 0.14));
+      lijn(pal.graat, Math.max(br, 0.7 * pix), graat(zij, false, -0.03, -0.03));
+      lijn(pal.graatSneeuw, Math.max(br, 0.7 * pix), graat(zij, true, -0.03, -0.03));
+    }
+    c.lineCap = 'butt';
+  }
+
   // 5. rotsen: schaduw, lijf, belichte kant, sneeuw, gruis; keien in het gras met mos
   const veelhoek = (x, y, r, zaad, schaal, dx, dy) => {
     for (let q = 0; q < 6; q++) {
@@ -1698,19 +2118,44 @@ function tekenLagen(c, b, lijst, n, k, opties) {
     const r = f[p + 3];
     veelhoek(t.x + f[p + 1], t.y + f[p + 2], r, f[p + 4], schaal, dx * r, dy * r);
   }));
-  rotsLaag(ROTS, '#5f584e', 1, 0, 0);
-  rotsLaag(ROTS, '#9a9386', 0.68, -0.2, -0.22);
-  rotsLaag(ROTS, '#eef0f2', 0.4, -0.26, -0.32, (f, p) => f[p + 5] > 0);
+  // rotsen in de bergen: warm bruingrijs; boven de sneeuwgrens van het seizoen (of de eeuwige sneeuw) een witte kop
+  const sneeuwRots = Math.min(SNEEUW_VAST + 0.03, pal.lijn - 0.05);
+  rotsLaag(ROTS, pal.rotsDonker, 1, 0, 0);
+  rotsLaag(ROTS, pal.rotsLicht, 0.68, -0.2, -0.22);
+  rotsLaag(ROTS, '#eef0f2', 0.45, -0.24, -0.3, (f, p) => f[p + 5] > sneeuwRots);
   rotsLaag(STEEN, pal.steen, 1, 0, 0);
   rotsLaag(STEEN, pal.steenLicht, 0.6, -0.22, -0.24);
   if (fijn) rotsLaag(STEEN, pal.mos, 0.35, 0.18, 0.1, (f, p) => f[p + 4] < 0.35);
   if (pal.kap > 0.02) {
     vul(pal.sneeuwKap, (iets) => {
-      elk(ROTS, (t, f, p) => { if (f[p + 5] > 0) return; iets(); const r = f[p + 3]; veelhoek(t.x + f[p + 1], t.y + f[p + 2], r, f[p + 4], 0.5, -0.22 * r, -0.28 * r); });
       elk(STEEN, (t, f, p) => { iets(); const r = f[p + 3]; veelhoek(t.x + f[p + 1], t.y + f[p + 2], r, f[p + 4], 0.5, -0.2 * r, -0.25 * r); });
     });
   }
   vul('#8d877b', (iets) => elk(GRUIS, (t, f, p) => { iets(); rond(t.x + f[p + 1], t.y + f[p + 2], f[p + 3]); }));
+
+  // 5b. omgevallen stammen: schaduw, stam met een lichte bovenkant, kluit aan de voet, zaagvlak aan de top
+  if (em[STAM].length) {
+    const stam = (dx, dy, schaal) => (iets) => elk(STAM, (t, f, p) => {
+      iets();
+      const x = t.x + f[p + 1], y = t.y + f[p + 2], l = f[p + 3] * 0.5 * schaal, co = Math.cos(f[p + 4]), si = Math.sin(f[p + 4]);
+      c.moveTo(x - co * l + dx, y - si * l + dy); c.lineTo(x + co * l + dx, y + si * l + dy);
+    });
+    c.lineCap = 'round';
+    if (opties.schaduw) lijn('rgba(20,16,10,0.35)', 0.34, stam(0.08, 0.1, 1));
+    lijn(pal.stamKleur, Math.max(0.24, 0.8 * pix), stam(0, 0, 1));
+    if (fijn) lijn(pal.stamLicht, 0.08, stam(-0.05, -0.06, 0.85));
+    c.lineCap = 'butt';
+    vul('rgba(78,62,44,0.85)', (iets) => elk(STAM, (t, f, p) => {
+      iets();
+      const l = f[p + 3] * 0.5;
+      rond(t.x + f[p + 1] - Math.cos(f[p + 4]) * l, t.y + f[p + 2] - Math.sin(f[p + 4]) * l, 0.3);
+    }));
+    if (fijn) vul(pal.stamKern, (iets) => elk(STAM, (t, f, p) => {
+      iets();
+      const l = f[p + 3] * 0.5;
+      rond(t.x + f[p + 1] + Math.cos(f[p + 4]) * l, t.y + f[p + 2] + Math.sin(f[p + 4]) * l, 0.1);
+    }));
+  }
 
   // 6. boerderijen: erf, schaduwen, daken (licht en donker vlak), nok, silo, moestuin
   if (em[BOERDERIJ].length) {
@@ -1754,35 +2199,58 @@ function tekenLagen(c, b, lijst, n, k, opties) {
     vul(pal.siloLicht, (iets) => delen((op) => { iets(); const [sx, sy] = op(1.65, -1.05); rond(sx - 0.11, sy - 0.12, 0.12); }));
   }
 
-  // 7. bomen: schaduw naar het zuidoosten, kroon per soort en seizoen, lichte kant naar het noordwesten, sneeuw
-  // wiegen in de wind: alleen in de scherpe laag, een fractie van een eenheid
+  }
+
+  if (fase === 0 || fase === 3) {
+  // 7. bomen: schaduw naar het zuidoosten (alleen gebakken; naaldbomen spits, populieren lang, kale bomen vaag),
+  // dan per boom één sprite uit de atlas van het seizoen. Wiegen in de wind: alleen in de scherpe laag.
   const amp = 0.04 + 0.1 * kracht;
   const zx = (f, p) => (zwaai == null ? 0 : Math.sin(zwaai / 1300 + f[p + 5] * 6.283) * amp * wx + amp * 0.4 * wx);
   const zy = (f, p) => (zwaai == null ? 0 : Math.sin(zwaai / 1300 + f[p + 5] * 6.283) * amp * wy + amp * 0.4 * wy);
   const bomen = (fn) => { elk(BOOM, fn); elk(LOSBOOM, fn); };
-  const groep = (f, p) => (f[p + 4] === 0 ? 0 : 1 + (f[p + 4] - 1) * 2 + (f[p + 5] < 0.5 ? 0 : 1));
   if (opties.schaduw) {
-    vul('rgba(8,18,8,0.42)', (iets) => bomen((t, f, p) => { if (f[p + 4] !== 0) return; iets(); const r = f[p + 3]; rond(t.x + f[p + 1] + r * 0.32, t.y + f[p + 2] + r * 0.38, r * 1.02); }));
-    vul(`rgba(8,18,8,${(0.42 * (1 - 0.6 * pal.kaal)).toFixed(3)})`, (iets) => bomen((t, f, p) => { if (f[p + 4] === 0) return; iets(); const r = f[p + 3]; rond(t.x + f[p + 1] + r * 0.32, t.y + f[p + 2] + r * 0.38, r * 1.02); }));
-  }
-  for (let s = 0; s < 5; s++) vul(pal.kroon[s], (iets) => bomen((t, f, p) => { if (groep(f, p) === s) { iets(); rond(t.x + f[p + 1] + zx(f, p), t.y + f[p + 2] + zy(f, p), f[p + 3]); } }));
-  if (pal.kaal > 0.3 && fijn && zwaai != null) {
-    lijn(pal.stam, 0.07, (iets) => bomen((t, f, p) => {
-      if (f[p + 4] === 0) return;
-      iets();
-      const x = t.x + f[p + 1] + zx(f, p), y = t.y + f[p + 2] + zy(f, p), r = f[p + 3];
-      for (let q = 0; q < 5; q++) { const a = q * 1.256 + f[p + 5] * 6; c.moveTo(x, y); c.lineTo(x + Math.cos(a) * r * 0.8, y + Math.sin(a) * r * 0.8); }
+    vul('rgba(8,18,8,0.42)', (iets) => bomen((t, f, p) => {
+      if (!NAALD(f[p + 4] & 7)) return;
+      iets(); const r = f[p + 3]; ovaal(t.x + f[p + 1] + r * 0.42, t.y + f[p + 2] + r * 0.48, r * 1.12, r * 0.78, Math.PI / 4);
+    }));
+    vul(`rgba(8,18,8,${(0.42 * (1 - 0.6 * pal.kaal)).toFixed(3)})`, (iets) => bomen((t, f, p) => {
+      const soort = f[p + 4] & 7;
+      if (NAALD(soort)) return;
+      iets(); const r = f[p + 3];
+      if (soort === POPULIER) ovaal(t.x + f[p + 1] + r * 1.0, t.y + f[p + 2] + r * 1.12, r * 1.75, r * 0.62, Math.PI / 4);
+      else rond(t.x + f[p + 1] + r * 0.32, t.y + f[p + 2] + r * 0.38, r * 1.02);
     }));
   }
-  vul(pal.naaldLicht, (iets) => bomen((t, f, p) => { if (f[p + 4] !== 0) return; iets(); const r = f[p + 3]; rond(t.x + f[p + 1] - r * 0.28 + zx(f, p) * 1.3, t.y + f[p + 2] - r * 0.3 + zy(f, p) * 1.3, r * 0.45); }));
-  vul(pal.loofLicht, (iets) => bomen((t, f, p) => { if (f[p + 4] === 0) return; iets(); const r = f[p + 3]; rond(t.x + f[p + 1] - r * 0.28 + zx(f, p) * 1.3, t.y + f[p + 2] - r * 0.3 + zy(f, p) * 1.3, r * 0.45); }));
-  if (pal.kap > 0.02) {
-    vul(pal.sneeuwKap, (iets) => bomen((t, f, p) => {
-      iets();
-      const r = f[p + 3], naald = f[p + 4] === 0;
-      rond(t.x + f[p + 1] - r * 0.22 + zx(f, p) * 1.3, t.y + f[p + 2] - r * 0.26 + zy(f, p) * 1.3, r * (naald ? 0.55 : 0.32));
-    }));
+  const atlas = opties.atlas;
+  if (atlas) {
+    const cv = atlas.cv;
+    bomen((t, f, p) => {
+      const slot = BOOM_SLOT[f[p + 4] & 255];
+      if (slot < 0) return;
+      const w = f[p + 3] * BS_SPAN;
+      c.drawImage(cv, (slot % ATLAS_KOL) * BS, Math.floor(slot / ATLAS_KOL) * BS, BS, BS, t.x + f[p + 1] - w / 2 + zx(f, p), t.y + f[p + 2] - w / 2 + zy(f, p), w, w);
+    });
+  } else {
+    // nog geen atlas (alleen in tests zonder laag): eenvoudige kronen
+    vul(pal.kroon[1], (iets) => bomen((t, f, p) => { iets(); rond(t.x + f[p + 1] + zx(f, p), t.y + f[p + 2] + zy(f, p), f[p + 3]); }));
   }
+  }
+}
+
+// Bouwt de boomatlas van een palet verder op, hooguit `max` sprites; geeft het aantal gebouwde sprites terug.
+function bouwAtlas(atlas, pal, max) {
+  const c = atlas.cv.getContext('2d');
+  let n = 0;
+  if (atlas.klaar === 0) { c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = 1; c.globalCompositeOperation = 'source-over'; c.clearRect(0, 0, atlas.cv.width, atlas.cv.height); }
+  while (atlas.klaar < BOOM_TOTAAL && n < max) {
+    const slot = atlas.klaar;
+    let soort = 6;
+    while (soort > 0 && BOOM_START[soort] > slot) soort--;
+    const rest = slot - BOOM_START[soort], vorm = Math.floor(rest / BOOM_KLEUREN[soort]), kleur = rest % BOOM_KLEUREN[soort];
+    tekenBoomSprite(c, soort, vorm, kleur, pal, (slot % ATLAS_KOL) * BS + BS / 2, Math.floor(slot / ATLAS_KOL) * BS + BS / 2);
+    atlas.klaar++; n++;
+  }
+  return n;
 }
 
 // Hoeveel vormen de scherpe laag voor een vakje tekent (voor het plafond per frame).
@@ -1795,7 +2263,8 @@ function kostenVan(t, b) {
     if (ty === PERCEEL) {
       const s = f[p + 4] & 15, hu = f[p + 3], hv = f[p + 5];
       n += 4 + (s === BOOMGAARD ? (hu * hv * 4) / 1.56 * 3 : s === KAS ? 4 : s === WEI ? 1 : hv / 0.35);
-    } else n += ty === BOERDERIJ ? 16 : ty === ROTS || ty === STEEN || ty === PLAS ? 2.5 : ty === BOOM || ty === LOSBOOM ? 1.4 : ty === RIET ? 1.2 : 0.6;
+    } else n += ty === BOERDERIJ ? 16 : ty === ROTS || ty === STEEN || ty === PLAS ? 2.5 : ty === BOOM || ty === LOSBOOM ? 1 : ty === RIET ? 1.2
+      : ty === BERGMEER ? 6 : ty === STAM ? 3 : ty === OPENPLEK ? 1.2 : ty === GRAAT ? 0.4 : 0.6;
   }
   b.kosten[t.i] = n;
   return n;
@@ -2058,11 +2527,15 @@ function tekenWindBanden(c, b, em, pal, wnd, nu) {
 }
 
 const MICRO_KLEUR = {
-  wit: '#f4f2ea', geel: '#f0d23c', paars: '#9a7ac8', rood: '#d23a2a', grijs: '#9a958a', paddo: '#c0301e', stip: '#f6f0e6',
+  mos: 'rgba(104,136,62,0.7)', tak: '#6a5238',
+  wit: '#f4f2ea', geel: '#f0d23c', paars: '#9a7ac8', rood: '#d23a2a', grijs: '#9a958a', steel: '#e8dfc8', paddo: '#c0301e', paddoBruin: '#9a6a3a', stip: '#f6f0e6',
   blad1: '#c8782a', blad2: '#d8b03a', lelie: '#4f7f3a', lelieBloem: '#f2c6d8', mol: '#5e4630', molLicht: '#7a6046', varen: '#4f7a36',
 };
 const MICRO_NAMEN = Object.keys(MICRO_KLEUR);
 const MICRO_INDEX = Object.fromEntries(MICRO_NAMEN.map((k, i) => [k, i]));
+// varens en takjes als lijntjes; mos, takjes, steeltjes en bruine paddenstoelen pas vanaf zoom 11,5
+const MICRO_STREEP = MICRO_NAMEN.map((k) => k === 'tak' || k === 'varen');
+const MICRO_DIEP = MICRO_NAMEN.map((k) => k === 'mos' || k === 'tak' || k === 'steel' || k === 'paddoBruin');
 
 // ---------- de laag ----------
 
@@ -2075,9 +2548,122 @@ export class TerreinLaag {
     this.politiek = []; // per brok: { sig, raster, ketens }
     this.pool = [];
     this.gebakken = 0;
+    this.taak = null; // brok dat in stappen gebakken wordt
+    this.werk = 0; // geschat bakwerk in deze frame (ms); 0 = een rustige frame
+    this.atlasKlaar = null; // laatste complete boomatlas
     this.paletten = new Map(); // seizoensstap -> palet, hooguit 3
-    this.optBak = { schaduw: true, zwaai: null, pal: null, wind: null, emmers: nieuweEmmers() };
-    this.optScherp = { schaduw: false, zwaai: 0, pal: null, wind: null, emmers: nieuweEmmers() };
+    this.optBak = { schaduw: true, zwaai: null, pal: null, wind: null, emmers: nieuweEmmers(), fase: 0, atlas: null };
+    this.optScherp = { schaduw: false, zwaai: 0, pal: null, wind: null, emmers: nieuweEmmers(), atlas: null };
+  }
+
+  // ---- voor de natuurlaag en andere lagen: puur decor, vast per wereld ----
+
+  // Hoogte van het terrein op de schaal van de bergzones (BOOMGRENS enz.), zoals de gebakken grond hem gebruikt.
+  hoogte(wx, wy) {
+    if (!this.basis) return 0;
+    const g = this._g ?? (this._g = new Float32Array(SOORTEN));
+    gewichtenOp(this.basis, wx, wy, g);
+    return hoogteOp(this.basis, wx, wy, g[BERG]);
+  }
+  // Terreingewichten op een punt (samen 1).
+  gewicht(wx, wy) {
+    if (!this.basis) return { gras: 1, bos: 0, berg: 0, zand: 0, akker: 0 };
+    const g = this._g ?? (this._g = new Float32Array(SOORTEN));
+    gewichtenOp(this.basis, wx, wy, g);
+    return { gras: g[GRAS], bos: g[BOS], berg: g[BERG], zand: g[ZAND], akker: g[AKKER] };
+  }
+  // 0 in dicht bos, 1 midden op een open plek.
+  openPlek(wx, wy) { return this.basis ? openPlekOp(this.basis, wx, wy) : 0; }
+  // Is dit punt vrij van boomkruinen, rotsen, bergmeertjes, plassen en boerderijen (plus marge)? Met alleenBomen
+  // tellen alleen de boomkruinen (bijvoorbeeld voor een pad: dat loopt om een rots heen, maar onder een kruin door).
+  boomvrij(wx, wy, marge = 0, alleenBomen = false) {
+    if (!this.basis) return true;
+    const geo = this.geo, tk = Math.floor(wx / geo.T), tr = Math.floor(wy / geo.T);
+    for (let r = Math.max(0, tr - 1); r <= Math.min(geo.rij - 1, tr + 1); r++) {
+      for (let k = Math.max(0, tk - 1); k <= Math.min(geo.kol - 1, tk + 1); k++) {
+        const t = geo.tegels[r * geo.kol + k], f = kenmerkenVoorTegel(t, this.basis);
+        for (let p = 0; p < f.length; p += STAP) {
+          const ty = f[p];
+          const straal = ty === BOOM || ty === LOSBOOM ? f[p + 3] : alleenBomen ? -1
+            : ty === ROTS || ty === STEEN ? f[p + 3] : ty === BERGMEER ? f[p + 3] + 0.4 : ty === PLAS ? f[p + 3] + 0.2 : ty === BOERDERIJ ? 2.8 : -1;
+          if (straal < 0) continue;
+          const dx = t.x + f[p + 1] - wx, dy = t.y + f[p + 2] - wy, rr = straal + marge;
+          if (dx * dx + dy * dy < rr * rr) return false;
+        }
+      }
+    }
+    return true;
+  }
+  // Vlaggen per vakje (Uint8Array per soort), vast per wereld.
+  get vlaggen() {
+    const b = this.basis;
+    return b ? { moeras: b.moeras, klif: b.klif, duin: b.duin, bergvoet: b.bergvoet, stad: b.stad, akker: b.akker } : null;
+  }
+  // Bergmeertjes: [{ x, y, r, h }], vast per wereld.
+  get bergmeren() {
+    if (!this.basis) return [];
+    if (this._meertjes) return this._meertjes;
+    const uit = [];
+    for (const t of this.geo.tegels) {
+      if (t.terrein !== 'berg') continue;
+      const f = kenmerkenVoorTegel(t, this.basis);
+      for (let p = 0; p < f.length; p += STAP) if (f[p] === BERGMEER) uit.push({ x: t.x + f[p + 1], y: t.y + f[p + 2], r: f[p + 3], h: f[p + 5] });
+    }
+    return (this._meertjes = uit);
+  }
+  // Watervallen: de steilste punten langs de rivieren (verval over een paar punten, ten opzichte van de lengte),
+  // op het droge, niet bij de kust of in een meer, minstens 14 eenheden uit elkaar, hooguit 14 per wereld.
+  // [{ x, y, hoek (stroomrichting), br (breedte), kracht 0..1, rivier, i }]
+  get watervallen() {
+    if (!this.basis) return [];
+    if (this._vallen) return this._vallen;
+    const b = this.basis, geo = this.geo, w = b.water, kand = [];
+    for (let ri = 0; ri < w.rivieren.length; ri++) {
+      const rv = w.rivieren[ri], n = rv.br.length;
+      if (rv.delta || n < 12) continue;
+      const d = new Float32Array(n);
+      for (let i = 3; i < n - 3; i++) d[i] = (tegelHoogte(geo, rv.pts[(i - 3) * 2], rv.pts[(i - 3) * 2 + 1]) - tegelHoogte(geo, rv.pts[(i + 3) * 2], rv.pts[(i + 3) * 2 + 1])) / Math.max(0.5, rv.s[i + 3] - rv.s[i - 3]);
+      for (let i = 4; i < n - 4; i++) {
+        if (d[i] < 0.0062 || !rv.open[i]) continue;
+        let top = true;
+        for (let j = Math.max(3, i - 6); j <= Math.min(n - 4, i + 6) && top; j++) if (d[j] > d[i] || (d[j] === d[i] && j < i)) top = false;
+        const x = rv.pts[i * 2], y = rv.pts[i * 2 + 1];
+        if (!top || sdOp(b, x, y) > -4 || veldOp(w.meer, x, y) < 3) continue;
+        kand.push({ x, y, hoek: Math.atan2(rv.pts[(i + 1) * 2 + 1] - rv.pts[(i - 1) * 2 + 1], rv.pts[(i + 1) * 2] - rv.pts[(i - 1) * 2]), br: rv.br[i], kracht: smooth(0.006, 0.011, d[i]), rivier: ri, i, d: d[i] });
+      }
+    }
+    kand.sort((p, q) => q.d - p.d || p.rivier - q.rivier || p.i - q.i);
+    const uit = [];
+    for (const k of kand) {
+      if (uit.length >= 14) break;
+      if (uit.some((u) => Math.hypot(u.x - k.x, u.y - k.y) < 14)) continue;
+      uit.push(k);
+    }
+    return (this._vallen = uit);
+  }
+
+  // ---- boomatlas: per palet, in stukjes gebouwd zodat een seizoenswissel niet hapert ----
+
+  atlasVan(pal) {
+    if (!pal.atlas) pal.atlas = { cv: fabriek(ATLAS_KOL * BS, Math.ceil(BOOM_TOTAAL / ATLAS_KOL) * BS), klaar: 0 };
+    return pal.atlas;
+  }
+  // Bouwt verder aan de atlas van dit palet; geeft terug of hij af is.
+  bouwAtlasStuk(pal, max) {
+    const a = this.atlasVan(pal);
+    if (a.klaar < BOOM_TOTAAL) {
+      this.werk += 0.06 * bouwAtlas(a, pal, max);
+      if (a.klaar >= BOOM_TOTAAL) this.atlasKlaar = a;
+    }
+    return a.klaar >= BOOM_TOTAAL;
+  }
+  // Atlas voor de scherpe laag: die van dit palet als hij af is, anders de laatste complete (alleen de allereerste
+  // keer bouwt hij hem in één keer).
+  scherpeAtlas(pal) {
+    const a = this.atlasVan(pal);
+    if (a.klaar >= BOOM_TOTAAL) return a;
+    if (!this.atlasKlaar) { bouwAtlas(a, pal, BOOM_TOTAAL); this.atlasKlaar = a; return a; }
+    return this.atlasKlaar;
   }
 
   // ---- voor andere lagen (bijvoorbeeld bruggen): rivieren zijn puur decor ----
@@ -2097,7 +2683,12 @@ export class TerreinLaag {
     const stap = seizoensStap(dag);
     let p = this.paletten.get(stap);
     if (!p) {
-      if (this.paletten.size >= 3) this.paletten.delete(this.paletten.keys().next().value);
+      if (this.paletten.size >= 3) {
+        // de atlas van een weggegooid palet mag weg, tenzij het de laatste complete is
+        const weg = this.paletten.keys().next().value, oud = this.paletten.get(weg);
+        if (oud.atlas && oud.atlas !== this.atlasKlaar) oud.atlas = null;
+        this.paletten.delete(weg);
+      }
       p = palet(seizoenVanStap(stap));
       this.paletten.set(stap, p);
     }
@@ -2113,6 +2704,8 @@ export class TerreinLaag {
     this.bytes = 0;
     this.politiek = [];
     this.pool = [];
+    this.taak = null;
+    this._vallen = null; this._meertjes = null; // hoorden bij de vorige wereld
     // hulpcanvassen voor het bakken
     this.tijdelijk = fabriek(CH * 12, CH * 12);
     this.tctx = this.tijdelijk.getContext('2d');
@@ -2144,7 +2737,17 @@ export class TerreinLaag {
 
   dekking(zoom) { return smooth(2.2, 3.2, zoom); }
 
-  statistiek() { return { canvassen: this.cache.size, bytes: this.bytes, gebakken: this.gebakken }; }
+  // Geheugen: brokken in de cache (bytes), de pool met herbruikbare canvassen, het brok in de maak en de boomatlassen.
+  statistiek() {
+    let pool = 0, atlas = 0;
+    for (const c of this.pool) pool += c.width * c.height * 4;
+    const gezien = [];
+    for (const p of this.paletten.values()) if (p.atlas && !gezien.includes(p.atlas)) gezien.push(p.atlas);
+    if (this.atlasKlaar && !gezien.includes(this.atlasKlaar)) gezien.push(this.atlasKlaar);
+    for (const a of gezien) atlas += a.cv.width * a.cv.height * 4;
+    const werk = this.taak ? (CH * this.taak.R) ** 2 * 4 : 0;
+    return { canvassen: this.cache.size, bytes: this.bytes, gebakken: this.gebakken, pool, atlas, werk, totaal: this.bytes + pool + atlas + werk };
+  }
 
   // ---- handtekeningen ----
 
@@ -2193,7 +2796,7 @@ export class TerreinLaag {
         for (let i = 0; i < NN; i++) { m[i * 4] = m[i * 4 + 1] = m[i * 4 + 2] = 255; m[i * 4 + 3] = d.gewicht[s * NN + i] * 255; }
         return m;
       });
-      g = { land: d.land, zee: d.zee, maskers, sneeuwBasis: d.sneeuwBasis, licht: d.licht, meer: d.meer };
+      g = { land: d.land, zee: d.zee, maskers, sneeuwBasis: d.sneeuwBasis, licht: d.licht, meer: d.meer, hoogte8: d.hoogte8, steil8: d.steil8, alm8: d.alm8, heeftWater: d.heeftWater };
       this.basis.grond[ci] = g;
     }
     return g;
@@ -2209,77 +2812,34 @@ export class TerreinLaag {
     return fabriek(w, h);
   }
 
+  // Een grondcanvas terug in de pool, zolang die onder zijn grens blijft (maskers gaan nooit in de pool: die kunnen
+  // door twee brokken van verschillende resolutie gedeeld worden).
+  geefTerug(cv) {
+    if (!cv) return;
+    let bytes = cv.width * cv.height * 4;
+    for (const c of this.pool) bytes += c.width * c.height * 4;
+    if (bytes <= POOL_BYTES) this.pool.push(cv);
+  }
+
   patroon(soort, R) {
     const k = `${soort}:${R}`;
     if (!this.patronen[k]) this.patronen[k] = this.tctx.createPattern(this.patroonBron[soort][R], 'repeat');
     return this.patronen[k];
   }
 
-  bak(view, ck, cr, R, sig, polSig) {
-    const s = view.state, b = this.basis, geo = this.geo;
-    const S = CH * R;
-    const g = this.grondVan(ck, cr);
-    const oud = this.cache.get(`${R}:${ck}:${cr}`);
-    const grond = oud?.grond ?? this.canvas(S, S);
-    const gc = grond.getContext('2d');
-    gc.setTransform(1, 0, 0, 1, 0, 0);
-    gc.globalAlpha = 1;
-    gc.globalCompositeOperation = 'source-over';
-    gc.imageSmoothingEnabled = true;
-    const k = this.kctx, t = this.tctx;
-    // 1. kleurbeeld van het land in het seizoen van nu, vergroot met smoothing: zachte overgangen en reliëf
-    const pal = this.palVoor(s.dag);
-    const NN4 = N * N * 4;
-    const sl = this._seizLand ?? (this._seizLand = new Uint8ClampedArray(NN4)), sz = this._seizZee ?? (this._seizZee = new Uint8ClampedArray(NN4));
-    seizoensGrond(g, pal.sz, sl, sz);
-    k.putImageData(maakBeeld(sl, N, N), 0, 0);
-    gc.drawImage(this.klein, -MARGE * R, -MARGE * R, N * R, N * R);
-    // 2. detailpatronen per terreinsoort, gemaskeerd met het gewicht, in soft-light
-    const sterkte = R === 3 ? 0.45 : R === 6 ? 0.75 : 1;
-    for (let q = 0; q < 4; q++) {
-      t.setTransform(1, 0, 0, 1, 0, 0);
-      t.globalCompositeOperation = 'source-over';
-      t.globalAlpha = 1;
-      t.clearRect(0, 0, S, S);
-      t.fillStyle = this.patroon(q, R);
-      t.fillRect(0, 0, S, S);
-      k.putImageData(maakBeeld(g.maskers[q], N, N), 0, 0);
-      t.globalCompositeOperation = 'destination-in';
-      t.drawImage(this.klein, -MARGE * R, -MARGE * R, N * R, N * R);
-      gc.globalCompositeOperation = 'soft-light';
-      gc.globalAlpha = sterkte * (q === GRAS ? 0.8 : q === BERG ? 0.6 : 1);
-      gc.drawImage(this.tijdelijk, 0, 0, S, S, 0, 0, S, S);
-    }
-    gc.globalCompositeOperation = 'source-over';
-    gc.globalAlpha = 1;
-    // 2b. rivieren, onder het zeewater: in een monding loopt de rivier zo zacht de zee in
-    const stukken = b.water.perBrok[cr * this.kolC + ck];
-    if (stukken.length) {
-      gc.setTransform(R, 0, 0, R, -ck * CH * R, -cr * CH * R);
-      tekenRivierLijf(gc, b.water, stukken, stukken.length, R, pal, true);
-      gc.setTransform(1, 0, 0, 1, 0, 0);
-    }
-    // 3. water erover (zee en meren), met een fijn masker voor een strakke kustlijn
-    const md = bakMaskerData(b, ck, cr, s.bezet);
-    const maskers = ['water', 'schuim1', 'schuim2'].map((naam) => {
-      const cv = oud?.[naam === 'water' ? 'waterMasker' : naam] ?? this.canvas(MN, MN);
-      cv.getContext('2d').putImageData(maakBeeld(md[naam], MN, MN), 0, 0);
-      return cv;
-    });
-    t.setTransform(1, 0, 0, 1, 0, 0);
-    t.globalCompositeOperation = 'source-over';
-    t.clearRect(0, 0, S, S);
-    k.putImageData(maakBeeld(sz, N, N), 0, 0);
-    t.drawImage(this.klein, -MARGE * R, -MARGE * R, N * R, N * R);
-    t.globalCompositeOperation = 'destination-in';
-    t.drawImage(maskers[0], -MARGE * R, -MARGE * R, N * R, N * R);
-    t.globalCompositeOperation = 'source-over';
-    gc.drawImage(this.tijdelijk, 0, 0, S, S, 0, 0, S, S);
-    // 4. kenmerken van de vakjes in en rond de brok, in wereldcoördinaten
-    gc.setTransform(R, 0, 0, R, -ck * CH * R, -cr * CH * R);
-    const lijst = this._lijst ?? (this._lijst = new Int32Array(64));
-    let n = 0;
-    gc.fillStyle = 'rgba(112,100,70,0.22)';
+  // ---- bakken in stappen ----
+  // Een brok bakt in zes stappen: grond (seizoenskleur plus detailpatronen), water (rivieren, zee en meren),
+  // akkers en plassen, de rest van de grond, bomen, en politiek (tint en grenzen). Elke frame doet zoveel stappen als
+  // in het werkbudget past (minstens één); pas als alles klaar is, vervangt het nieuwe canvas het oude in de cache.
+  // Zo hapert een seizoenswissel niet: het oude seizoen blijft zichtbaar tot het nieuwe brok af is.
+
+  begin(view, doel) {
+    const s = view.state, geo = this.geo, { ck, cr, R } = doel;
+    // maskers hangen alleen af van de bebouwing, niet van het seizoen of de resolutie: hergebruiken als het kan
+    let maskers = null;
+    for (const l of LODS) { const o = this.cache.get(`${l}:${ck}:${cr}`); if (o && o.zSig === doel.z) { maskers = o; break; } }
+    const lijst = new Int32Array(36), kale = [];
+    let n = 0, kosten = 0, bomen = 0;
     for (let r = cr * 4 - 1; r <= cr * 4 + 4; r++) {
       if (r < 0 || r >= geo.rij) continue;
       for (let kk = ck * 4 - 1; kk <= ck * 4 + 4; kk++) {
@@ -2287,42 +2847,186 @@ export class TerreinLaag {
         const ti = r * geo.kol + kk, tg = geo.tegels[ti];
         if (tg.terrein === 'water') continue;
         // bebouwd: geen bomen, wel een kale, betreden plek waar het gebouw op staat
-        if (s.bezet[ti]) { gc.fillRect(tg.x - 7.2, tg.y - 7.2, 14.4, 14.4); continue; }
+        if (s.bezet[ti]) { kale.push(tg.x, tg.y); continue; }
         lijst[n++] = ti;
+        kosten += kostenVan(tg, this.basis);
+        const f = kenmerkenVoorTegel(tg, this.basis);
+        for (let p = 0; p < f.length; p += STAP) if (f[p] === BOOM || f[p] === LOSBOOM) bomen++;
       }
     }
-    this.optBak.pal = pal;
-    tekenLagen(gc, b, lijst, n, R, this.optBak);
+    this.taak = { ...doel, stap: 0, grond: null, maskers, md: null, lijst, n, kale, kosten, bomen };
+  }
+
+  breekAf() {
+    if (!this.taak) return;
+    this.geefTerug(this.taak.grond);
+    this.taak = null;
+  }
+
+  // Geschatte kosten (ms) van de volgende stap.
+  stapKosten(tk) {
+    const RF = (tk.R / 12) ** 2, g = this.basis.grond[tk.cr * this.kolC + tk.ck];
+    switch (tk.stap) {
+      case 0: return 0.3 + 1.1 * RF;
+      case 1: return g && !g.heeftWater ? 0.1 + 0.3 * RF : 0.15 + 0.6 * RF + (tk.maskers ? 0 : 2.2);
+      case 2: return 0.1 + (tk.kosten * 0.35) / 1500;
+      case 3: return 0.1 + (tk.kosten * 0.35) / 1500;
+      case 4: return 0.1 + tk.bomen / 2500 + (this.palVoor(this._dag).atlas?.klaar >= BOOM_TOTAAL ? 0 : 1.5);
+      default: return 0.3 + 0.4 * RF + (this.politiek[tk.cr * this.kolC + tk.ck]?.sig === tk.polSig ? 0 : 1.5);
+    }
+  }
+
+  // Werkt binnen het budget aan het brok in de maak; geeft het brok terug als het af is.
+  werkAan(view) {
+    const tk = this.taak;
+    this._dag = view.state.dag;
+    while (tk.stap < 6) {
+      const kost = this.stapKosten(tk);
+      if (this.werk > 0 && this.werk + kost > BAK_BUDGET) return null;
+      this.werk += kost;
+      this.bakStap(view, tk);
+      tk.stap++;
+    }
+    const { R, ck, cr } = tk, S = CH * R, sleutel = `${R}:${ck}:${cr}`, oud = this.cache.get(sleutel);
+    if (oud) { this.cache.delete(sleutel); this.bytes -= oud.bytes; this.geefTerug(oud.grond); }
+    const m = tk.maskers;
+    const bytes = S * S * 4 + (m?.waterMasker ? MN * MN * 4 : 0) + (m?.schuim1 ? 2 * MN * MN * 4 : 0);
+    const brok = { R, ck, cr, grond: tk.grond, waterMasker: m?.waterMasker ?? null, schuim1: m?.schuim1 ?? null, schuim2: m?.schuim2 ?? null, sig: tk.sig, zSig: tk.z, bytes, gebruikt: this.frame };
+    this.cache.set(sleutel, brok);
+    this.bytes += bytes;
+    this.gebakken += 1;
+    this.taak = null;
+    this.ruimOp();
+    return brok;
+  }
+
+  bakStap(view, tk) {
+    const s = view.state, b = this.basis, { R, ck, cr } = tk, S = CH * R;
+    const g = this.grondVan(ck, cr);
+    const pal = this.palVoor(s.dag);
+    const k = this.kctx, t = this.tctx;
+    if (tk.stap === 0) {
+      tk.grond = this.canvas(S, S);
+      const gc = tk.grond.getContext('2d');
+      gc.setTransform(1, 0, 0, 1, 0, 0);
+      gc.globalAlpha = 1;
+      gc.globalCompositeOperation = 'source-over';
+      gc.imageSmoothingEnabled = true;
+      gc.imageSmoothingQuality = 'high';
+      // 1. kleurbeeld van het land in het seizoen van nu, vergroot met smoothing: zachte overgangen en reliëf
+      const NN4 = N * N * 4;
+      const sl = this._seizLand ?? (this._seizLand = new Uint8ClampedArray(NN4)), sz = this._seizZee ?? (this._seizZee = new Uint8ClampedArray(NN4));
+      seizoensGrond(g, pal.sz, sl, sz);
+      tk.zee = sz.slice(); // de waterstap heeft de zeekleur van dit seizoen nodig
+      k.putImageData(maakBeeld(sl, N, N), 0, 0);
+      gc.drawImage(this.klein, -MARGE * R, -MARGE * R, N * R, N * R);
+      // 2. detailpatronen per terreinsoort, gemaskeerd met het gewicht, in soft-light
+      const sterkte = R === 3 ? 0.45 : R === 6 ? 0.75 : 1;
+      for (let q = 0; q < 4; q++) {
+        t.setTransform(1, 0, 0, 1, 0, 0);
+        t.globalCompositeOperation = 'source-over';
+        t.globalAlpha = 1;
+        t.clearRect(0, 0, S, S);
+        t.fillStyle = this.patroon(q, R);
+        t.fillRect(0, 0, S, S);
+        k.putImageData(maakBeeld(g.maskers[q], N, N), 0, 0);
+        t.globalCompositeOperation = 'destination-in';
+        t.drawImage(this.klein, -MARGE * R, -MARGE * R, N * R, N * R);
+        gc.globalCompositeOperation = 'soft-light';
+        gc.globalAlpha = sterkte * (q === GRAS ? 0.8 : q === BERG ? 0.6 : 1);
+        gc.drawImage(this.tijdelijk, 0, 0, S, S, 0, 0, S, S);
+      }
+      gc.globalCompositeOperation = 'source-over';
+      gc.globalAlpha = 1;
+      return;
+    }
+    const gc = tk.grond.getContext('2d');
+    if (tk.stap === 1) {
+      // 2b. rivieren, onder het zeewater: in een monding loopt de rivier zo zacht de zee in
+      const stukken = b.water.perBrok[cr * this.kolC + ck];
+      if (stukken.length) {
+        gc.setTransform(R, 0, 0, R, -ck * CH * R, -cr * CH * R);
+        tekenRivierLijf(gc, b.water, stukken, stukken.length, R, pal, true);
+        gc.setTransform(1, 0, 0, 1, 0, 0);
+      }
+      // 3. water erover (zee en meren), met een fijn masker voor een strakke kustlijn; lege maskers bewaren we niet
+      if (!tk.maskers) {
+        const md = g.heeftWater ? bakMaskerData(b, ck, cr, s.bezet) : null;
+        const maak = (data, nodig) => {
+          if (!nodig) return null;
+          const cv = fabriek(MN, MN);
+          cv.getContext('2d').putImageData(maakBeeld(data, MN, MN), 0, 0);
+          return cv;
+        };
+        tk.maskers = { waterMasker: maak(md?.water, md?.heeftWater), schuim1: maak(md?.schuim1, md?.heeftSchuim), schuim2: maak(md?.schuim2, md?.heeftSchuim) };
+      }
+      if (tk.maskers.waterMasker) {
+        t.setTransform(1, 0, 0, 1, 0, 0);
+        t.globalCompositeOperation = 'source-over';
+        t.globalAlpha = 1;
+        t.clearRect(0, 0, S, S);
+        k.putImageData(maakBeeld(tk.zee, N, N), 0, 0);
+        t.drawImage(this.klein, -MARGE * R, -MARGE * R, N * R, N * R);
+        t.globalCompositeOperation = 'destination-in';
+        t.drawImage(tk.maskers.waterMasker, -MARGE * R, -MARGE * R, N * R, N * R);
+        t.globalCompositeOperation = 'source-over';
+        gc.drawImage(this.tijdelijk, 0, 0, S, S, 0, 0, S, S);
+      }
+      tk.zee = null;
+      return;
+    }
+    if (tk.stap <= 4) {
+      // 4. kenmerken van de vakjes in en rond de brok, in wereldcoördinaten, in drie fasen
+      gc.setTransform(R, 0, 0, R, -ck * CH * R, -cr * CH * R);
+      if (tk.stap === 2 && tk.kale.length) {
+        gc.fillStyle = 'rgba(112,100,70,0.22)';
+        for (let q = 0; q < tk.kale.length; q += 2) gc.fillRect(tk.kale[q] - 7.2, tk.kale[q + 1] - 7.2, 14.4, 14.4);
+      }
+      const opt = this.optBak;
+      opt.pal = pal;
+      opt.fase = tk.stap - 1;
+      if (tk.stap === 4) {
+        if (!this.bouwAtlasStuk(pal, BOOM_TOTAAL)) bouwAtlas(this.atlasVan(pal), pal, BOOM_TOTAAL);
+        opt.atlas = this.atlasVan(pal);
+      }
+      tekenLagen(gc, b, tk.lijst, tk.n, R, opt);
+      opt.fase = 0; opt.atlas = null;
+      gc.setTransform(1, 0, 0, 1, 0, 0);
+      return;
+    }
     // 5. eigenaar: lichte tint in de blokkleur, sterker langs de grens; daarna de grenslijnen
-    const pol = this.politiekVan(s, ck, cr, polSig);
+    const pol = this.politiekVan(s, ck, cr, tk.polSig);
     this.tintBeeld(view, pol.raster);
     gc.setTransform(1, 0, 0, 1, 0, 0);
     gc.drawImage(this.eigCanvas, (-RM / OR) * R, (-RM / OR) * R, (ON / OR) * R, (ON / OR) * R);
     gc.setTransform(R, 0, 0, R, -ck * CH * R, -cr * CH * R);
     tekenGrenzen(gc, pol.ketens, R, (o) => this.blokKleur(view, o), (a, c) => this.zelfdeBlok(view, a, c));
     gc.setTransform(1, 0, 0, 1, 0, 0);
-
-    const bytes = S * S * 4 + 3 * MN * MN * 4;
-    const brok = { R, ck, cr, grond, waterMasker: maskers[0], schuim1: maskers[1], schuim2: maskers[2], sig, bytes, gebruikt: this.frame };
-    const sleutel = `${R}:${ck}:${cr}`;
-    if (oud) { this.cache.delete(sleutel); this.bytes -= oud.bytes; }
-    this.cache.set(sleutel, brok);
-    this.bytes += bytes;
-    this.gebakken += 1;
-    this.ruimOp();
-    return brok;
   }
 
-  // LRU: het langst niet getekende brok eerst weg, maar nooit iets dat deze frame getekend is.
+  // Bakt een brok in één keer (voor tests en gereedschap); het gewone pad is begin() plus werkAan() over frames.
+  bak(view, ck, cr, R, sig, polSig) {
+    this.breekAf();
+    this.brokSig(view.state, ck, cr);
+    this.begin(view, { ck, cr, R, sig, polSig, z: this._z });
+    const werk = this.werk;
+    this.werk = 0;
+    let br = null;
+    while (!br) { this.werk = 0; br = this.werkAan(view); }
+    this.werk = werk;
+    return br;
+  }
+
+  // LRU: het langst niet getekende brok eerst weg, maar nooit iets dat deze frame getekend is. Ruimt op tot onder
+  // het doel, zodat pool, werkbrok en atlassen er samen ruim onder de harde grens bij passen.
   ruimOp() {
-    while (this.cache.size > MAX_CANVASSEN || this.bytes > MAX_BYTES) {
+    while (this.cache.size > MAX_CANVASSEN || this.bytes > DOEL_BYTES) {
       let sleutel = null, br = null;
       for (const [k, b] of this.cache) if (b.gebruikt !== this.frame && (!br || b.gebruikt < br.gebruikt)) { sleutel = k; br = b; }
       if (!br) break;
       this.cache.delete(sleutel);
       this.bytes -= br.bytes;
-      this.pool.push(br.grond, br.waterMasker, br.schuim1, br.schuim2);
-      if (this.pool.length > 16) this.pool.splice(0, this.pool.length - 16);
+      this.geefTerug(br.grond);
     }
   }
 
@@ -2372,34 +3076,55 @@ export class TerreinLaag {
     // resolutie: de kleinste die scherp genoeg is, en nooit meer geheugen dan het budget aankan
     let R = LODS.find((l) => l >= sc * dpr * 0.6) ?? 12;
     const zichtbaar = (k1 - k0 + 1) * (r1 - r0 + 1);
-    while (R > 3 && zichtbaar * (CH * R * CH * R * 4 + 3 * MN * MN * 4) > MAX_BYTES * 0.8) R /= 2;
+    while (R > 3 && zichtbaar * (CH * R * CH * R * 4 + 3 * MN * MN * 4) > DOEL_BYTES) R /= 2;
     const glob = this.globaleSig(s);
     const stap = seizoensStap(s.dag);
     const mx = (wx0 + wx1) / 2, my = (wy0 + wy1) / 2;
     let beste = null, bd = Infinity;
     const getekend = this._getekend ?? (this._getekend = []);
     getekend.length = 0;
+    this.werk = 0;
+    const tk = this.taak;
+    let taakGeldig = false;
     for (let cr = r0; cr <= r1; cr++) {
       for (let ck = k0; ck <= k1; ck++) {
         this.brokSig(s, ck, cr);
         const polSig = `${glob}${this._e}`;
         const sig = `${polSig}|${this._z}|${stap}`;
         let br = this.cache.get(`${R}:${ck}:${cr}`);
+        if (tk && tk.ck === ck && tk.cr === cr && tk.sig === sig) taakGeldig = true;
         if (!br || br.sig !== sig) {
           const d = (ck * CH + CH / 2 - mx) ** 2 + (cr * CH + CH / 2 - my) ** 2;
-          if (d < bd) { bd = d; beste = { ck, cr, sig, polSig }; }
+          if (d < bd) { bd = d; beste = { ck, cr, R, sig, polSig, z: this._z }; }
         }
         // ontbreekt hij nog, dan dezelfde brok op een andere resolutie; anders schijnt de kaart eronder door
         if (!br) for (const l of LODS) { br = this.cache.get(`${l}:${ck}:${cr}`); if (br) break; }
         if (br) { br.gebruikt = this.frame; getekend.push(br); }
       }
     }
-    // maximaal één brok per frame bakken, de dichtstbijzijnde eerst; anders alvast de ring eromheen.
-    // Een brok die nog nooit gebakken is, krijgt eerst een frame voor zijn grondgegevens en daarna een voor het canvas.
-    if (beste) {
-      if (!this.basis.grond[beste.cr * this.kolC + beste.ck]) this.grondVan(beste.ck, beste.cr);
-      else getekend.push(this.bak(view, beste.ck, beste.cr, R, beste.sig, beste.polSig));
-    } else this.voorbak(view, k0, k1, r0, r1, R, glob, mx, my);
+    // De boomatlas van dit seizoen groeit in stukjes mee; bakken gebeurt in stappen binnen een werkbudget per frame.
+    // Een brok in de maak dat niet meer klopt (ander seizoen, nieuw gebouw) of buiten beeld ligt terwijl er in beeld
+    // werk is, gaat weg. Een brok dat nog nooit gebakken is, krijgt eerst een frame voor zijn grondgegevens.
+    const pal = this.palVoor(s.dag);
+    if (!pal.atlas || pal.atlas.klaar < BOOM_TOTAAL) this.bouwAtlasStuk(pal, 12);
+    if (tk && !taakGeldig) {
+      const buiten = tk.ck < k0 || tk.ck > k1 || tk.cr < r0 || tk.cr > r1;
+      if (!buiten || beste) this.breekAf();
+      else {
+        this.brokSig(s, tk.ck, tk.cr);
+        if (tk.sig !== `${glob}${this._e}|${this._z}|${stap}`) this.breekAf();
+      }
+    }
+    if (!this.taak) {
+      if (beste) {
+        if (!this.basis.grond[beste.cr * this.kolC + beste.ck]) { this.grondVan(beste.ck, beste.cr); this.werk += 2.5; }
+        else this.begin(view, beste);
+      } else this.voorbak(view, k0, k1, r0, r1, R, glob, mx, my);
+    }
+    if (this.taak && this.werk < BAK_BUDGET) {
+      const br = this.werkAan(view);
+      if (br) getekend.push(br);
+    }
     if (a <= 0) return;
 
     const naarX = (x) => Math.round(((x - view.cx) * sc + view.w / 2) * dpr) / dpr;
@@ -2461,7 +3186,7 @@ export class TerreinLaag {
 
   voorbak(view, k0, k1, r0, r1, R, glob, mx, my) {
     const S = CH * R, bytes = S * S * 4 + 3 * MN * MN * 4;
-    if (this.cache.size >= MAX_CANVASSEN || this.bytes + bytes > MAX_BYTES) return;
+    if (this.cache.size >= MAX_CANVASSEN || this.bytes + bytes > DOEL_BYTES) return;
     const s = view.state;
     let beste = null, bd = Infinity;
     for (let cr = r0 - 1; cr <= r1 + 1; cr++) {
@@ -2473,12 +3198,12 @@ export class TerreinLaag {
         const br = this.cache.get(`${R}:${ck}:${cr}`);
         if (br && br.sig === sig) continue;
         const d = (ck * CH + CH / 2 - mx) ** 2 + (cr * CH + CH / 2 - my) ** 2;
-        if (d < bd) { bd = d; beste = { ck, cr, sig, polSig }; }
+        if (d < bd) { bd = d; beste = { ck, cr, R, sig, polSig, z: this._z }; }
       }
     }
     if (!beste) return;
-    if (!this.basis.grond[beste.cr * this.kolC + beste.ck]) this.grondVan(beste.ck, beste.cr);
-    else this.bak(view, beste.ck, beste.cr, R, beste.sig, beste.polSig);
+    if (!this.basis.grond[beste.cr * this.kolC + beste.ck]) { this.grondVan(beste.ck, beste.cr); this.werk += 2.5; }
+    else this.begin(view, beste);
   }
 
   tekenWater(c, view, sc, nu, a, getekend, naarX, naarY) {
@@ -2493,10 +3218,14 @@ export class TerreinLaag {
     mc.setTransform(1, 0, 0, 1, 0, 0);
     mc.clearRect(0, 0, Wd, Hd);
     mc.imageSmoothingEnabled = true;
+    let nat = 0;
     for (const br of getekend) {
+      if (!br.waterMasker) continue; // droog brok: geen masker bewaard
+      nat++;
       const x = naarX(br.ck * CH), y = naarY(br.cr * CH);
       mc.drawImage(br.waterMasker, MARGE * M, MARGE * M, CH * M, CH * M, x * dpr, y * dpr, (naarX(br.ck * CH + CH) - x) * dpr, (naarY(br.cr * CH + CH) - y) * dpr);
     }
+    if (!nat) return;
     // 2. glinsteringen in twee lagen die elk een andere kant op drijven
     kc.setTransform(1, 0, 0, 1, 0, 0);
     kc.globalCompositeOperation = 'source-over';
@@ -2529,6 +3258,7 @@ export class TerreinLaag {
     // 3. schuim: twee banden die om beurten oplichten, zodat het lijkt aan te rollen
     const s1 = a * (0.3 + 0.2 * Math.sin(nu / 850)), s2 = a * (0.3 + 0.2 * Math.sin(nu / 850 + Math.PI));
     for (const br of getekend) {
+      if (!br.schuim1) continue;
       const x = naarX(br.ck * CH), y = naarY(br.cr * CH), w = naarX(br.ck * CH + CH) - x, h = naarY(br.cr * CH + CH) - y;
       c.globalAlpha = s1;
       c.drawImage(br.schuim1, MARGE * M, MARGE * M, CH * M, CH * M, x, y, w, h);
@@ -2617,7 +3347,7 @@ export class TerreinLaag {
     this.laatsteKosten = kosten;
     c.globalAlpha = alfa;
     const opt = this.optScherp;
-    opt.zwaai = nu; opt.pal = pal; opt.wind = wnd;
+    opt.zwaai = nu; opt.pal = pal; opt.wind = wnd; opt.atlas = this.scherpeAtlas(pal);
     // C. windvlagen over het gewas en E. kleine dingen vanaf zoom 9,5: tekenLagen roept ze op hun plek in de
     // laagvolgorde aan (op de velden en bij de plassen), niet erbovenop
     const aW = smooth(7.5, 8.5, zoom) * alfa, aM = smooth(9.5, 10.5, zoom);
@@ -2630,7 +3360,7 @@ export class TerreinLaag {
     opt.naPlassen = aM > 0 ? () => {
       const ga = c.globalAlpha;
       c.globalAlpha = aM;
-      this.laatsteMicro = this.tekenMicro(c, b, lijst, n, pal, seizoensStap(s.dag));
+      this.laatsteMicro = this.tekenMicro(c, b, lijst, n, pal, seizoensStap(s.dag), zoom >= 11.5);
       c.globalAlpha = ga;
     } : null;
     tekenLagen(c, b, lijst, n, sc, opt);
@@ -2677,22 +3407,37 @@ export class TerreinLaag {
   // Bloemen in het gras, paddenstoelen en gevallen blad in het herfstbos, varens, waterlelies op plassen,
   // molshopen in de wei, klaprozen langs het graan, steentjes. Plaatsing per vakje vast; het seizoen bepaalt
   // hoeveel van de vaste plekken iets dragen. Hard plafond van MAX_MICRO. Geeft het aantal getekende dingen terug.
-  tekenMicro(c, b, lijst, n, pal, stap) {
+  tekenMicro(c, b, lijst, n, pal, stap, diep) {
     const tegels = b.geo.tegels;
     const em = this._microEmmers ?? (this._microEmmers = MICRO_NAMEN.map(() => []));
     for (let k = 0; k < em.length; k++) em[k].length = 0;
     let tel = 0;
     for (let q = 0; q < n && tel < MAX_MICRO; q++) {
       const m = this.microVan(tegels[lijst[q]], b, pal, stap);
-      for (let i = 0; i < m.length && tel < MAX_MICRO; i += 4) { em[m[i]].push(m[i + 1], m[i + 2], m[i + 3]); tel++; }
+      for (let i = 0; i < m.length && tel < MAX_MICRO; i += 4) {
+        if (MICRO_DIEP[m[i]] && !diep) continue;
+        em[m[i]].push(m[i + 1], m[i + 2], m[i + 3]); tel++;
+      }
     }
     for (let k = 0; k < em.length; k++) {
       const l = em[k];
       if (!l.length) continue;
       c.beginPath();
-      for (let i = 0; i < l.length; i += 3) { c.moveTo(l[i] + l[i + 2], l[i + 1]); c.arc(l[i], l[i + 1], l[i + 2], 0, Math.PI * 2); }
-      c.fillStyle = MICRO_KLEUR[MICRO_NAMEN[k]];
-      c.fill();
+      if (MICRO_STREEP[k]) {
+        const tak = MICRO_NAMEN[k] === 'tak';
+        for (let i = 0; i < l.length; i += 3) {
+          const x = l[i], y = l[i + 1], r = l[i + 2];
+          if (tak) { c.moveTo(x - r, y - r * 0.35); c.lineTo(x + r, y + r * 0.35); c.moveTo(x + r * 0.2, y + r * 0.07); c.lineTo(x + r * 0.5, y - r * 0.3); }
+          else for (let q = 0; q < 5; q++) { const a = q * 1.2566 + x * 3.1; c.moveTo(x, y); c.quadraticCurveTo(x + Math.cos(a + 0.3) * r * 0.6, y + Math.sin(a + 0.3) * r * 0.6, x + Math.cos(a) * r, y + Math.sin(a) * r); }
+        }
+        c.strokeStyle = MICRO_KLEUR[MICRO_NAMEN[k]];
+        c.lineWidth = tak ? 0.05 : 0.04;
+        c.stroke();
+      } else {
+        for (let i = 0; i < l.length; i += 3) { c.moveTo(l[i] + l[i + 2], l[i + 1]); c.arc(l[i], l[i + 1], l[i + 2], 0, Math.PI * 2); }
+        c.fillStyle = MICRO_KLEUR[MICRO_NAMEN[k]];
+        c.fill();
+      }
     }
     return tel;
   }
@@ -2736,12 +3481,18 @@ export class TerreinLaag {
     };
     const bloemen = Math.round(16 * Math.min(1, pal.bloemen)), herfst = pal.herfst, groen = 1 - pal.kaal;
     if (t.terrein === 'bos') {
-      for (let i = 0; i < 10; i++) {
-        const x = t.x + (r() - 0.5) * T, y = t.y + (r() - 0.5) * T, kies = r();
+      // bosgrond: paddenstoelen en blad in de herfst, varens, en vanaf zoom 11,5 mos en takjes
+      const sneeuwt = pal.sneeuwVeld > 0.25;
+      for (let i = 0; i < 18; i++) {
+        const x = t.x + (r() - 0.5) * T, y = t.y + (r() - 0.5) * T, kies = r(), k2 = r();
         if (!vrij(x, y)) continue;
-        if (i < 4 && kies < herfst * 1.4) { zet('paddo', x, y, 0.1); zet('stip', x - 0.03, y - 0.03, 0.03); }
-        else if (kies < herfst) zet(kies < herfst / 2 ? 'blad1' : 'blad2', x, y, 0.07);
-        else if (kies < herfst + 0.5 * groen) zet('varen', x, y, 0.12);
+        if (i < 4 && kies < herfst * 1.4) {
+          zet('steel', x + 0.035, y + 0.045, 0.05);
+          if (k2 < 0.6) { zet('paddo', x, y, 0.1); zet('stip', x - 0.03, y - 0.03, 0.03); } else zet('paddoBruin', x, y, 0.09 + k2 * 0.03);
+        } else if (i < 10 && kies < herfst) zet(kies < herfst / 2 ? 'blad1' : 'blad2', x, y, 0.07);
+        else if (i < 10 && kies < herfst + 0.5 * groen && !sneeuwt) zet('varen', x, y, 0.22 + k2 * 0.12);
+        else if (i >= 10 && i < 14 && !sneeuwt) zet('mos', x, y, 0.14 + k2 * 0.14);
+        else if (i >= 14) zet('tak', x, y, 0.18 + k2 * 0.16);
       }
     } else if ((t.terrein === 'vlakte' || t.terrein === 'kust') && !b.akker[t.i]) {
       const max = b.moeras[t.i] ? 6 : 16;

@@ -11,6 +11,10 @@ import { tekenUitval, tekenCyberFlits, CYBER_KLEUR } from './cyber.js';
 import { LevenLaag } from './leven.js';
 import { InfraLaag } from './infra.js';
 import { SfeerLaag } from './sfeer.js';
+import { TroepenLaag } from './troepen.js';
+import { NatuurLaag } from './natuur.js';
+import { KustLaag } from './kust.js';
+import { GrensLaag } from './grens.js';
 
 // Vanaf deze zoom tekent de kaart vakjes als echte plekken: huizen, akkers, fabrieken, bomen.
 const DIEP = 4;
@@ -48,6 +52,10 @@ export class KaartView {
     this.levenLaag = new LevenLaag();
     this.infraLaag = new InfraLaag();
     this.sfeerLaag = new SfeerLaag();
+    this.troepenLaag = new TroepenLaag();
+    this.natuurLaag = new NatuurLaag();
+    this.kustLaag = new KustLaag();
+    this.grensLaag = new GrensLaag();
     this.bron = document.createElement('canvas');
     this.bron.width = 1000;
     this.bron.height = 620;
@@ -227,6 +235,9 @@ export class KaartView {
     this.levenLaag.laad(this);
     this.infraLaag.laad(this);
     this.sfeerLaag.laad(this);
+    this.natuurLaag.laad(this);
+    this.kustLaag.laad(this);
+    this.grensLaag.laad(this);
   }
 
   // Het overzichtsbeeld. Staand vult de brede kaart de hoogte, met je eigen land in beeld;
@@ -443,15 +454,20 @@ export class KaartView {
     if (this.bouwModus) this.tekenBouwRaster(c, sc);
     if (detail) this.tekenWegen(c, sc);
     this.infraLaag.teken(c, this, sc, nu, dt, tempo);
+    this.kustLaag.teken(c, this, sc, nu, dt, tempo);
     this.tekenKoopvaardij(c, sc, nu);
     this.tekenGebouwen(c, sc, detail);
+    this.grensLaag.teken(c, this, sc, nu, dt, tempo);
     this.levenLaag.teken(c, this, sc, nu, dt, tempo);
+    this.natuurLaag.teken(c, this, sc, nu, dt, tempo);
     this.sfeerLaag.tekenGrond(c, this, sc, nu, frac);
     this.tekenEenheden(c, sc, detail, frac);
     this.infraLaag.tekenLucht(c, this, sc, nu);
     this.tekenNacht(c, sc, nu);
     this.levenLaag.tekenLichten(c, this, sc, nu);
+    this.grensLaag.tekenLichten(c, this, sc, nu);
     this.infraLaag.tekenLichten(c, this, sc, nu);
+    this.kustLaag.tekenLichten(c, this, sc, nu);
     this.sfeerLaag.tekenLucht(c, this, sc, nu);
     this.tekenGolven(c, sc, nu);
     this.tekenStrategisch(c, sc);
@@ -473,9 +489,13 @@ export class KaartView {
     const posities = new Map();
     for (const u of s.eenheden) posities.set(u.id, this.eenheidPositie(u, frac));
     const nu = performance.now();
-    // gevechtslijnen
-    if (detail) {
+    // Ingezoomd worden de rondjes echte troepen (troepen.js); tussen zoom 6 en 7,5 vloeien ze in elkaar over.
+    const diep = this.troepenLaag.mengsel(this.zoom);
+    if (diep > 0) this.troepenLaag.teken(c, this, sc, nu, frac, posities, diep);
+    // gevechtslijnen (diep ingezoomd nemen lichtspoorkogels en inslagen het over)
+    if (detail && diep < 1) {
       c.lineWidth = 1.5;
+      if (diep > 0) c.globalAlpha = 1 - diep;
       for (const u of s.eenheden) {
         if (!u.vecht || !posities.has(u.doelwit)) continue;
         const [ax, ay] = posities.get(u.id), [bx, by] = posities.get(u.doelwit);
@@ -486,6 +506,7 @@ export class KaartView {
           c.beginPath(); c.arc(bx + Math.sin(u.id) * T * 0.15, by + Math.cos(u.id) * T * 0.15, Math.max(2, T * 0.1), 0, Math.PI * 2); c.fill();
         }
       }
+      if (diep > 0) c.globalAlpha = 1;
     }
     // route van geselecteerde eenheden
     c.setLineDash([4, 4]);
@@ -501,33 +522,42 @@ export class KaartView {
     c.setLineDash([]);
     c.textAlign = 'center';
     c.textBaseline = 'middle';
-    for (const u of s.eenheden) {
+    const marge = 20 + T * 0.3 * diep;
+    for (let i = 0; i < s.eenheden.length; i++) {
+      const u = s.eenheden[i];
       const [x, y] = posities.get(u.id);
-      if (x < -20 || y < -20 || x > this.w + 20 || y > this.h + 20) continue;
+      if (x < -marge || y < -marge || x > this.w + marge || y > this.h + marge) continue;
       const land = s.landen[u.land];
       const kleur = land.idx === s.speler ? '#f0b429' : this.kleurVan(land);
       const type = s.pack.eenhedenIndex[u.type];
+      // echt: hoeveel van deze eenheid als troepen getekend is; ring en balk omsluiten dan de hele formatie
+      const echt = diep > 0 ? diep * this.troepenLaag.getekend(i) : 0;
+      const r = echt > 0 ? straal + (this.troepenLaag.omvang(u, T) - straal) * echt : straal;
       if (this.selectie?.has(u.id)) {
         c.strokeStyle = '#ffffff'; c.lineWidth = 2;
-        c.beginPath(); c.arc(x, y, straal + 3, 0, Math.PI * 2); c.stroke();
+        c.beginPath(); c.arc(x, y, r + 3, 0, Math.PI * 2); c.stroke();
       }
-      c.fillStyle = detail ? 'rgba(10,15,21,0.92)' : kleur;
-      c.strokeStyle = detail ? kleur : 'rgba(5,10,15,0.9)';
-      c.lineWidth = detail ? 2 : 1;
-      c.beginPath(); c.arc(x, y, straal, 0, Math.PI * 2); c.fill(); c.stroke();
-      if (detail) {
-        c.font = `${Math.round(straal * 1.15)}px ${EMOJI}`;
-        c.fillText(type.icoon ?? '●', x, y + 1);
+      if (echt < 1) {
+        if (echt > 0) c.globalAlpha = 1 - echt;
+        c.fillStyle = detail ? 'rgba(10,15,21,0.92)' : kleur;
+        c.strokeStyle = detail ? kleur : 'rgba(5,10,15,0.9)';
+        c.lineWidth = detail ? 2 : 1;
+        c.beginPath(); c.arc(x, y, straal, 0, Math.PI * 2); c.fill(); c.stroke();
+        if (detail) {
+          c.font = `${Math.round(straal * 1.15)}px ${EMOJI}`;
+          c.fillText(type.icoon ?? '●', x, y + 1);
+        }
+        if (echt > 0) c.globalAlpha = 1;
       }
       if (u.hp < type.hp && detail) {
-        const w = straal * 2;
-        c.fillStyle = '#0c131b'; c.fillRect(x - straal, y - straal - 5, w, 3);
+        const w = r * 2 * (1 - 0.4 * echt), bx = x - w / 2;
+        c.fillStyle = '#0c131b'; c.fillRect(bx, y - r - 5, w, 3);
         c.fillStyle = u.hp / type.hp > 0.5 ? '#5fd38d' : u.hp / type.hp > 0.25 ? '#f0b429' : '#f2706a';
-        c.fillRect(x - straal, y - straal - 5, w * Math.max(0, u.hp / type.hp), 3);
+        c.fillRect(bx, y - r - 5, w * Math.max(0, u.hp / type.hp), 3);
       }
       if (u.bezig && detail) {
         c.strokeStyle = '#f0b429'; c.lineWidth = 2;
-        c.beginPath(); c.arc(x, y, straal + 1.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, u.bezig / 6)); c.stroke();
+        c.beginPath(); c.arc(x, y, r + 1.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, u.bezig / 6)); c.stroke();
       }
     }
   }

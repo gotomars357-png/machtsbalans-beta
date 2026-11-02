@@ -640,7 +640,7 @@ export class LevenLaag {
     if (z >= 3.5) { this.verzamelAutos(); this.tekenHaltes(c); this.tekenAutos(c, smooth(3.5, 4.5, z), nu); }
     if (z >= 4) this.tekenMenigte(c, nu);
     if (z >= 4) this.tekenKranen(c, nu);
-    if (z >= 2) { this.verzamelGevechten(); this.tekenRook(c, nu, smooth(2, 3, z)); }
+    if (z >= 2) { this.verzamelGevechten(); this.tekenRook(c, nu, smooth(2, 3, z), z); }
     if (z >= 2.5 && z <= 11) this.tekenVogels(c, nu, smooth(2.5, 3.5, z) * (1 - smooth(9, 11, z)));
     if (z >= 4) this.tekenMeeuwen(c, nu);
     if (this.nKlein) this.tekenKlein(c, nu);
@@ -1846,7 +1846,7 @@ export class LevenLaag {
 
   // Grijze wolkjes die opstijgen en uitwaaieren (eigen kopie van rook() uit detail.js), gebundeld in drie
   // dichtheidsbanden per kleur; onder de oorlogsrook een flakkerend oranje vuur.
-  tekenRook(c, nu, a) {
+  tekenRook(c, nu, a, z = 0) {
     const n = this.nRook, b = this.rook, T = this.T;
     if (!n || a <= 0) return;
     const tijd = nu / 1000;
@@ -1871,13 +1871,18 @@ export class LevenLaag {
       c.fill();
     }
     const BANDEN = [0.5, 0.32, 0.14];
-    for (let licht = 0; licht < 2; licht++) {
+    // diep ingezoomd tekent de troepenlaag eigen rook en vuur per eenheid; de oorlogskolommen wijken dan
+    // terug, anders liggen er donkere vlekken over de stad
+    const oorlogA = 1 - 0.65 * smooth(6, 7.5, z);
+    // soort 0: donkere rook, 1: lichte rook (stoom), 2: oorlogsrook
+    for (let soort = 0; soort < 3; soort++) {
+      const licht = soort === 1;
       for (let band = 0; band < 3; band++) {
         let open = false;
         for (let i = 0; i < n; i++) {
           const o = i * ROOK;
-          const isLicht = b[o + 3] < 0;
-          if (isLicht !== (licht === 1)) continue;
+          const s = b[o + 3] < 0 ? 1 : b[o + 3] === 1 ? 2 : 0;
+          if (s !== soort) continue;
           const schaal = Math.abs(b[o + 3]), zaad = b[o + 2];
           const pufjes = schaal >= 1 ? 6 : 4;
           for (let p = 0; p < pufjes; p++) {
@@ -1889,7 +1894,7 @@ export class LevenLaag {
             stip(c, x, y, T * schaal * (0.04 + f * 0.12));
           }
         }
-        if (open) { c.fillStyle = licht ? `rgba(228,228,226,${BANDEN[band] * 0.7})` : `rgba(72,68,64,${BANDEN[band]})`; c.fill(); }
+        if (open) { c.fillStyle = licht ? `rgba(228,228,226,${BANDEN[band] * 0.7})` : `rgba(72,68,64,${BANDEN[band] * (soort === 2 ? oorlogA : 1)})`; c.fill(); }
       }
     }
     c.globalAlpha = 1;
