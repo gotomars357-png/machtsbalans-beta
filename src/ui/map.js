@@ -238,6 +238,7 @@ export class KaartView {
     this.natuurLaag.laad(this);
     this.kustLaag.laad(this);
     this.grensLaag.laad(this);
+    this.ligplek = null;
   }
 
   // Het overzichtsbeeld. Staand vult de brede kaart de hoogte, met je eigen land in beeld;
@@ -320,7 +321,8 @@ export class KaartView {
     let best = null, bd = this.geo.T * 0.6;
     for (const u of this.state.eenheden) {
       if (alleenLand != null && u.land !== alleenLand) continue;
-      const d = Math.hypot(u.x - wx, u.y - wy);
+      this.eenheidWereld(u, 1);
+      const d = Math.hypot(this.ewx - wx, this.ewy - wy);
       if (d < bd) { bd = d; best = u.id; }
     }
     return best;
@@ -475,11 +477,82 @@ export class KaartView {
   }
 
   eenheidPositie(u, frac) {
-    // kleine vaste spreiding zodat gestapelde eenheden zichtbaar blijven
+    this.eenheidWereld(u, frac);
+    return this.naarScherm(this.ewx, this.ewy);
+  }
+
+  // Wereldplek waar een eenheid getekend en aangeklikt wordt (uitkomst in this.ewx, this.ewy). Een kleine vaste
+  // spreiding houdt gestapelde eenheden zichtbaar. Een schip dat op een landtegel ligt (net gebouwd in de haven)
+  // ligt op het water vóór de kade, niet bovenop de kade en het eigen schip van het havengebouw.
+  eenheidWereld(u, frac) {
     const j = this.geo.T * 0.2;
     const ox = (((u.id * 7919) % 7) - 3) / 3 * j;
     const oy = (((u.id * 104729) % 7) - 3) / 3 * j;
-    return this.naarScherm(u.px + (u.x - u.px) * frac + ox, u.py + (u.y - u.py) * frac + oy);
+    let ax = u.px + ox, ay = u.py + oy, bx = u.x + ox, by = u.y + oy;
+    if (this.state.pack.eenhedenIndex[u.type]?.vaart) {
+      // aan de ligplaats zonder spreiding: die ligt al per schip een eigen stukje langs de kust
+      if (this.ligOpWater(u.px, u.py, u.id)) { ax = this.lwx; ay = this.lwy; }
+      if (this.ligOpWater(u.x, u.y, u.id)) { bx = this.lwx; by = this.lwy; }
+    }
+    this.ewx = ax + (bx - ax) * frac;
+    this.ewy = ay + (by - ay) * frac;
+  }
+
+  // Koers van een schip dat stil aan een ligplaats ligt: evenwijdig aan de kust (NaN als het niet aan een
+  // ligplaats ligt). troepen.js gebruikt dit in plaats van een willekeurige richting.
+  ligRichting(u) {
+    if (u.x !== u.px || u.y !== u.py || (u.pad && u.pad.length)) return NaN;
+    if (!this.state.pack.eenhedenIndex[u.type]?.vaart || !this.ligOpWater(u.x, u.y, u.id)) return NaN;
+    return this.lwa;
+  }
+
+  // Ligt (x, y) op een landtegel, dan de ligplaats op zee ernaast in this.lwx, this.lwy (true); anders false.
+  // Per tegel één keer uitgerekend: richting van de zeetegels eromheen, dan zo ver die kant op dat het
+  // grondraster zee zegt. Schepen van verschillende ids liggen een stukje naast elkaar langs de kade.
+  ligOpWater(x, y, id) {
+    const geo = this.geo, s = this.state, T = geo.T;
+    const k = Math.floor(x / T), r = Math.floor(y / T);
+    if (k < 0 || r < 0 || k >= geo.kol || r >= geo.rij) return false;
+    const t = r * geo.kol + k;
+    if (s.eigenaar[t] === -1) return false;
+    const L = this.ligplek ??= new Float32Array(geo.tegels.length * 3).fill(NaN);
+    if (Number.isNaN(L[t * 3])) {
+      let vx = 0, vy = 0;
+      for (let dr = -1; dr <= 1; dr++) for (let dk = -1; dk <= 1; dk++) {
+        const kk = k + dk, rr = r + dr;
+        if ((dk || dr) && kk >= 0 && rr >= 0 && kk < geo.kol && rr < geo.rij && s.eigenaar[rr * geo.kol + kk] === -1) {
+          const w = dk && dr ? 0.5 : 1; vx += dk * w; vy += dr * w;
+        }
+      }
+      const l = Math.hypot(vx, vy), cx = (k + 0.5) * T, cy = (r + 0.5) * T;
+      let gx = NaN, gy = NaN;
+      if (l > 0.01) {
+        vx /= l; vy /= l;
+        // vrij van het havengebouw (dat reikt tot een halve tegel van het midden) en met water rondom de romp
+        for (let q = 1.0; q <= 1.8; q += 0.1) {
+          const px = cx + vx * q * T, py = cy + vy * q * T;
+          if (this.zeeOp(px, py) && this.zeeOp(px - vx * 0.25 * T, py - vy * 0.25 * T) && this.zeeOp(px + vx * 0.25 * T, py + vy * 0.25 * T)) { gx = px; gy = py; break; }
+        }
+      }
+      L[t * 3] = gx; L[t * 3 + 1] = gy; L[t * 3 + 2] = l > 0.01 ? Math.atan2(vy, vx) : 0;
+    }
+    const gx = L[t * 3];
+    if (Number.isNaN(gx)) return false;
+    // langs de kade (dwars op de waterrichting) een vaste plek per schip
+    // langs de kust een vaste plek per schip; valt die op land, dan de middelste plek
+    const a = L[t * 3 + 2], gy = L[t * 3 + 1], sx = -Math.sin(a), sy = Math.cos(a);
+    const zij = ((id % 5) - 2) * 0.52 * T;
+    const ok = zij === 0 || (this.zeeOp(gx + sx * zij, gy + sy * zij) && this.zeeOp(gx + sx * zij * 1.3, gy + sy * zij * 1.3));
+    this.lwx = ok ? gx + sx * zij : gx;
+    this.lwy = ok ? gy + sy * zij : gy;
+    this.lwa = a + Math.PI / 2;
+    return true;
+  }
+
+  zeeOp(x, y) {
+    const ix = Math.floor(x), iy = Math.floor(y);
+    if (!this.eigenaar || ix < 0 || iy < 0 || ix >= 1000 || iy >= 620) return true;
+    return this.eigenaar[iy * 1000 + ix] === -1;
   }
 
   tekenEenheden(c, sc, detail, frac) {

@@ -476,7 +476,12 @@ export class TroepenLaag {
       const ex = tg ? tg.x - u.x : 0, ey = tg ? tg.y - u.y : 0, ed = Math.hypot(ex, ey);
       if (ed > 0.01) { hx = ex / ed; hy = ey / ed; }
       else if (doel && Math.hypot(doel[0] - x, doel[1] - y) > 0.5) { const q = Math.hypot(doel[0] - x, doel[1] - y); hx = (doel[0] - x) / q; hy = (doel[1] - y) / q; }
-      else { const a = hash(u.id, 7) * TAU; hx = Math.cos(a); hy = Math.sin(a); }
+      else {
+        // een schip aan een ligplaats in de haven ligt evenwijdig aan de kust
+        const lr = this.view.ligRichting ? this.view.ligRichting(u) : NaN;
+        const a = Number.isNaN(lr) ? hash(u.id, 7) * TAU : lr;
+        hx = Math.cos(a); hy = Math.sin(a);
+      }
     }
     let ax = hx, ay = hy;
     if (doel) { const q = Math.hypot(doel[0] - x, doel[1] - y); if (q > 0.5) { ax = (doel[0] - x) / q; ay = (doel[1] - y) / q; } }
