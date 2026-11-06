@@ -2437,11 +2437,12 @@ function tekenRivierLijf(c, w, lijst, n, k, pal, oever) {
 // tijd. De verschuiving rekent vanaf de bron, dus het patroon loopt door over de naden tussen stukken.
 // In een stroomversnelling gaat het sneller en schuimt het.
 function tekenGlinsters(c, w, lijst, n, pal, nu) {
-  const t = nu / 1000;
+  const t = nu / 1000, basisA = c.globalAlpha;
   c.lineCap = 'round';
-  const pas = (dash, periode, snelF, breedteF, kleur, alleenSnel) => {
+  const pas = (dash, periode, snelF, breedteF, kleur, alleenSnel, maxB = Infinity, alfa = 1) => {
     c.setLineDash(dash);
     c.strokeStyle = kleur;
+    c.globalAlpha = basisA * alfa;
     for (let q = 0; q < n; q++) {
       const st = w.stukken[lijst[q]];
       if (alleenSnel && !st.snel) continue;
@@ -2452,13 +2453,15 @@ function tekenGlinsters(c, w, lijst, n, pal, nu) {
       c.lineTo(p[st.e * 2], p[st.e * 2 + 1]);
       const o = (rv.s[st.a] - t * v) % periode;
       c.lineDashOffset = o < 0 ? o + periode : o;
-      c.lineWidth = Math.max(0.08, st.w * breedteF);
+      c.lineWidth = Math.max(0.08, Math.min(maxB, st.w * breedteF));
       c.stroke();
     }
   };
-  pas([0.5, 2.4], 2.9, 1, 0.2, pal.glinster, false);
-  pas([0.22, 1.6], 1.82, 1.35, 0.09, pal.glinster, false);
+  // glinsters blijven smalle streepjes, ook op een brede rivier (breder werden het witte ovalen, net ijsschotsen)
+  pas([0.5, 2.4], 2.9, 1, 0.2, pal.glinster, false, 0.18, 0.55);
+  pas([0.22, 1.6], 1.82, 1.35, 0.09, pal.glinster, false, 0.1, 0.7);
   pas([0.6, 0.45], 1.05, 1.25, 0.65, pal.schuim, true);
+  c.globalAlpha = basisA;
   c.setLineDash([]);
   c.lineDashOffset = 0;
 }

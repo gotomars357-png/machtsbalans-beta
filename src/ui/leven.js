@@ -637,7 +637,7 @@ export class LevenLaag {
     c.save();
     if (z >= 4) { this.verzamelBoten(view, nu); this.tekenNetten(c, nu); this.tekenBoten(c, nu); }
     if (z >= 4) this.tekenPlatteland(c, nu);
-    if (z >= 3.5) { this.verzamelAutos(); this.tekenHaltes(c); this.tekenAutos(c, smooth(3.5, 4.5, z), nu); }
+    if (z >= 3.5) { this.verzamelTunnels(view); this.verzamelAutos(); this.tekenHaltes(c); this.tekenAutos(c, smooth(3.5, 4.5, z), nu); }
     if (z >= 4) this.tekenMenigte(c, nu);
     if (z >= 4) this.tekenKranen(c, nu);
     if (z >= 2) { this.verzamelGevechten(); this.tekenRook(c, nu, smooth(2, 3, z), z); }
@@ -690,6 +690,32 @@ export class LevenLaag {
 
   // ---------- auto's ----------
 
+  // Tunnels uit de infralaag, per weg (dezelfde sleutel: gebouw * 4099 + knooppunt). Daar rijdt niets over
+  // de berg: de auto zit in de tunnel en is even uit beeld.
+  verzamelTunnels(view) {
+    const t = this.tunnels ??= [];
+    let n = 0;
+    const W = view.infraLaag?.wegen;
+    if (W) for (let i = 0; i < W.length; i++) if (W[i].tunnel) { t[n++] = W[i].zaad; t[n++] = W[i].tunnel; }
+    t.length = n;
+  }
+
+  heeftTunnel(zaad) {
+    const t = this.tunnels;
+    if (t) for (let i = 0; i < t.length; i += 2) if (t[i] === zaad) return true;
+    return false;
+  }
+
+  inTunnel(zaad, q) {
+    const t = this.tunnels;
+    for (let i = 0; i < t.length; i += 2) {
+      if (t[i] !== zaad) continue;
+      const r = t[i + 1];
+      for (let j = 0; j < r.length; j += 2) if (q > r[j] - 0.3 && q < r[j + 1] + 0.3) return true;
+    }
+    return false;
+  }
+
   verzamelAutos() {
     const s = this.state, W = this.wegen, Tw = this.geo.T, sc = this.sc;
     const marge = Tw;
@@ -698,7 +724,10 @@ export class LevenLaag {
     let n = 0;
     // Alleen auto's die echt in beeld rijden tellen mee voor het plafond.
     const mx0 = -20, my0 = -20, mx1 = this.w + 20, my1 = this.h + 20;
+    // de weg waarop nu gezet wordt: niets tekenen in een tunnel
+    let wz = 0, wax = 0, way = 0, wux = 0, wuy = 0, metTunnel = false;
     const zet = (wx, wy, hx, hy, kleur, soort) => {
+      if (metTunnel && this.inTunnel(wz, (wx - wax) * wux + (wy - way) * wuy)) return;
       const x = wx * sc + this.ox, y = wy * sc + this.oy;
       if (x < mx0 || y < my0 || x > mx1 || y > my1) return;
       const o = n * AUTO;
@@ -712,6 +741,7 @@ export class LevenLaag {
       if ((ax > bx ? ax : bx) < this.wx0 - marge || (ax < bx ? ax : bx) > this.wx1 + marge) continue;
       if ((ay > by ? ay : by) < this.wy0 - marge || (ay < by ? ay : by) > this.wy1 + marge) continue;
       const len = W[o + 4], zaad = W[o + 6] | 0, ux = W[o + 7], uy = W[o + 8];
+      wz = zaad; wax = ax; way = ay; wux = ux; wuy = uy; metTunnel = this.heeftTunnel(zaad);
       const d = levenDichtheid(s, W[o + 5]);
       // Niet over de gebouwen aan de uiteinden rijden: de auto 'verdwijnt' in de garage.
       const rand = Math.min(0.45, (Tw * 0.42) / len), rijd = 1 - 2 * rand;
@@ -981,8 +1011,10 @@ export class LevenLaag {
         const d = levenDichtheid(s, W[o + 5]);
         const aantal = Math.min(3, Math.round((len / Tw) * 0.8 * d.mensenFactor * nachtFactor * this.buiten));
         const rand = Math.min(0.45, (Tw * 0.45) / len), loop = 1 - 2 * rand;
+        const tun = this.heeftTunnel(zaad);
         for (let i = 0; i < aantal && this.nMens < MAX; i++) {
           const p = rand + loop * tri(this.klok * (0.9 + 0.4 * hash(zaad, i, 31)) * 0.12 * Tw / len + hash(zaad, i, 32));
+          if (tun && this.inTunnel(zaad, p * len)) continue;
           const kant = (hash(zaad, i, 33) < 0.5 ? -1 : 1) * 0.075 * Tw;
           const stap = (Math.floor(this.klok * 4 + hash(zaad, i, 34) * 4) % 2) * bob;
           const x = ax + (bx - ax) * p - uy * (kant + stap), y = ay + (by - ay) * p + ux * (kant + stap);
@@ -993,7 +1025,7 @@ export class LevenLaag {
           const r = frac(this.klok * 0.35 * Tw / len + hash(zaad, 92));
           const baan = hash(zaad, 93) < 0.5 ? 1 : -1;
           const p = rand + loop * (baan > 0 ? r : 1 - r), kant = baan * 0.058 * Tw;
-          this.zetFig(ax + (bx - ax) * p - uy * kant, ay + (by - ay) * p + ux * kant, ux * baan, uy * baan, FIETS, Math.floor(hash(zaad, 94) * 10), Math.floor(hash(zaad, 95) * 3), 0, 0);
+          if (!(tun && this.inTunnel(zaad, p * len))) this.zetFig(ax + (bx - ax) * p - uy * kant, ay + (by - ay) * p + ux * kant, ux * baan, uy * baan, FIETS, Math.floor(hash(zaad, 94) * 10), Math.floor(hash(zaad, 95) * 3), 0, 0);
         }
       }
     }
