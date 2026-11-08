@@ -15,6 +15,10 @@ import { TroepenLaag } from './troepen.js';
 import { NatuurLaag } from './natuur.js';
 import { KustLaag } from './kust.js';
 import { GrensLaag } from './grens.js';
+import { StadLaag } from './stad.js';
+import { ZeeLaag } from './zee.js';
+import { WerkLaag } from './werk.js';
+import { HemelLaag } from './hemel.js';
 
 // Vanaf deze zoom tekent de kaart vakjes als echte plekken: huizen, akkers, fabrieken, bomen.
 const DIEP = 4;
@@ -56,6 +60,10 @@ export class KaartView {
     this.natuurLaag = new NatuurLaag();
     this.kustLaag = new KustLaag();
     this.grensLaag = new GrensLaag();
+    this.stadLaag = new StadLaag();
+    this.zeeLaag = new ZeeLaag();
+    this.werkLaag = new WerkLaag();
+    this.hemelLaag = new HemelLaag();
     this.bron = document.createElement('canvas');
     this.bron.width = 1000;
     this.bron.height = 620;
@@ -238,6 +246,10 @@ export class KaartView {
     this.natuurLaag.laad(this);
     this.kustLaag.laad(this);
     this.grensLaag.laad(this);
+    this.stadLaag.laad(this);
+    this.zeeLaag.laad(this);
+    this.werkLaag.laad(this);
+    this.hemelLaag.laad(this);
     this.ligplek = null;
   }
 
@@ -457,20 +469,27 @@ export class KaartView {
     if (detail) this.tekenWegen(c, sc);
     this.infraLaag.teken(c, this, sc, nu, dt, tempo);
     this.kustLaag.teken(c, this, sc, nu, dt, tempo);
+    this.zeeLaag.teken(c, this, sc, nu, dt, tempo);
     this.tekenKoopvaardij(c, sc, nu);
+    this.stadLaag.teken(c, this, sc, nu, dt, tempo);
     this.tekenGebouwen(c, sc, detail);
     this.grensLaag.teken(c, this, sc, nu, dt, tempo);
     this.levenLaag.teken(c, this, sc, nu, dt, tempo);
+    this.werkLaag.teken(c, this, sc, nu, dt, tempo);
     this.natuurLaag.teken(c, this, sc, nu, dt, tempo);
     this.sfeerLaag.tekenGrond(c, this, sc, nu, frac);
     this.tekenEenheden(c, sc, detail, frac);
     this.infraLaag.tekenLucht(c, this, sc, nu);
+    this.hemelLaag.teken(c, this, sc, nu, dt, tempo);
     this.tekenNacht(c, sc, nu);
     this.levenLaag.tekenLichten(c, this, sc, nu);
     this.grensLaag.tekenLichten(c, this, sc, nu);
+    this.werkLaag.tekenLichten(c, this, sc, nu);
     this.infraLaag.tekenLichten(c, this, sc, nu);
     this.kustLaag.tekenLichten(c, this, sc, nu);
+    this.stadLaag.tekenLichten(c, this, sc, nu);
     this.sfeerLaag.tekenLucht(c, this, sc, nu);
+    this.hemelLaag.tekenNacht(c, this, sc, nu);
     this.tekenGolven(c, sc, nu);
     this.tekenStrategisch(c, sc);
     this.tekenMarkeringen(c);
