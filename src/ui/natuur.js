@@ -7,7 +7,16 @@
 // - Bergleven: zigzagpaden naar hutten met rook uit de schoorsteen en een uitzichtpunt, wandelaars in de zomer,
 //   per land hooguit één skigebied bij de hoofdstad (stoeltjeslift met draaiende stoeltjes, in de winter witte pistes
 //   met skiërs) en een kabelbaan met twee gondels naar een hoge top.
-// Herten, kuddes, eenden, meeuwen, vlinders en vallend blad horen bij leven.js en komen hier niet nog eens.
+// - Dichtbij (zoom 9-14, C10): na een regenbui plassen en modder op de kale akkers, met kringen als het nog regent en
+//   mussen die er overdag in badderen; in de lente een moeder met kuikens op de sloot; kikkers die van de kant in de
+//   sloot of de plas springen en als twee oogjes terugzwemmen; libellen die boven het water stilhangen en wegschieten;
+//   bijen en hommels boven de bloemenplekken van terrein.js; aan de bosrand een dode boom met overdag een kloppende
+//   specht en 's nachts een uil met oplichtende ogen; eekhoorns die over omgevallen stammen rennen; egels die 's avonds
+//   door het gras scharrelen; vleermuizen in de schemering; spinnenwebben vol dauw in de heggen op herfstochtenden.
+//   De reiger vangt af en toe een vis. Wat op de grond staat ontwijkt ook wegen, gebouwen, werk en grensstroken van
+//   werk.js (zijn botsraster) en de vakjes waar leven.js tractoren, kuddes en herten zet.
+// Herten, kuddes, eenden, meeuwen, vlinders en vallend blad horen bij leven.js en komen hier niet nog eens (de moeder
+// met kuikens hier zwemt op de sloten, die van leven.js langs de kust).
 //
 // Plaatsing hangt alleen af van de wereld (vaste hashes van vakje, rivierpunt en index, eenmalig in laad), niet van
 // de toestand: na opslaan en laden staat alles weer op dezelfde plek. De klok (nu) stuurt alleen beweging. Alles staat
@@ -19,7 +28,7 @@
 // Plafonds per frame (PLAFOND), alleen wat in beeld is, en geen allocaties in de tekenlussen.
 
 import { seizoen, weer, wind } from './seizoen.js';
-import { BOOMGRENS, ALMGRENS, SNEEUW_VAST } from './terrein.js';
+import { BOOMGRENS, ALMGRENS, SNEEUW_VAST, KENMERK, GEWAS, RAND, perceelHoek, bloemenPlek, kenmerkenVoorTegel } from './terrein.js';
 
 const TAU = Math.PI * 2;
 function hash(a, b = 0, c = 0) { let h = (a * 374761393 + b * 668265263 + c * 2147483647) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
@@ -36,7 +45,17 @@ export const PLAFOND = {
   watervallen: 12, versnellingen: 30, zwijnen: 30, vossen: 8, konijnen: 40, geiten: 30, roofvogels: 6, reigers: 12,
   ooievaars: 10, bevers: 6, wolven: 12, sporen: 20, vuurvliegjes: 80, skiers: 40, stoeltjes: 60, gondels: 4,
   wandelaars: 20, hutten: 12, paden: 16, liften: 4, uitzicht: 16,
+  // dichtbij (zoom 9-14)
+  plassen: 40, mussen: 24, kuikens: 28, kikkers: 16, libellen: 16, bijen: 40, dodeBomen: 16, spechten: 6, uilen: 6,
+  eekhoorns: 10, egels: 10, vleermuizen: 24, webben: 24, vissen: 12,
 };
+
+// Hoeveel dingen van dichtbij per soort hooguit in de wereld (een vangnet; de plaatsing zelf blijft er ruim onder, zodat
+// het zuiden van de kaart net zo veel krijgt als het noorden).
+const MAX_DICHTBIJ = 4000;
+
+// Vanaf welke zoom iets van dichtbij te zien is.
+export const DREMPEL = { plas: 9, vleermuis: 9.5, kuiken: 10, uil: 10, dodeBoom: 8, specht: 10.5, libel: 10.5, egel: 10.5, kikker: 11, eekhoorn: 11, mus: 11, bij: 11.5, web: 12 };
 
 // Dieren op de grond: soort, naam voor het plafond, lengte in wereldeenheden, snelheid (lussen per seconde).
 const ZWIJN = 0, VOS = 1, KONIJN = 2, GEIT = 3, REIGER = 4, OOIEVAAR = 5;
@@ -57,6 +76,29 @@ function nachtOp(nu) {
   return clamp((0.5 - licht) / 0.5, 0, 1);
 }
 
+// Fase van de dag uit dezelfde klok: 0 is midden op de dag, 0,5 middernacht; tussen 0,66 en 0,92 is het ochtend.
+const faseOp = (nu) => ((nu / 1000) % 180) / 180;
+const ochtendOp = (nu) => { const f = faseOp(nu); return smooth(0.64, 0.7, f) * (1 - smooth(0.88, 0.94, f)); };
+
+// Vakjes waar leven.js tractoren, kuddes en herten zet (dezelfde hashes als daar en in werk.js).
+const levenAkker = (t) => t.terrein === 'vlakte' && t.eig >= 0 && hash(t.i, 3) < 0.45 && hash(t.i, 101) < 0.5;
+const levenKudde = (t) => t.eig >= 0 && !(t.terrein === 'vlakte' && hash(t.i, 3) < 0.45) && (t.terrein === 'vlakte' || t.terrein === 'kust') && hash(t.i, 61) < 0.6 && hash(t.i, 111) < 0.42;
+const levenHert = (t) => t.terrein === 'bos' && hash(t.i, 171) < 0.3;
+// Botsraster van werk.js: wegen en spoor (1), gebouwen en stad (2), werk op het land (4) en grensstroken (8).
+const BOTS = 1 | 2 | 4 | 8;
+
+// Ruimtelijk register: per cel van 32 eenheden welke dingen erin liggen, zodat elk frame alleen het beeld telt.
+const RC = 32, RK = Math.ceil(1000 / RC), RR = Math.ceil(620 / RC);
+function maakRooster(lijst) {
+  const start = new Int32Array(RK * RR + 1), idx = new Int32Array(lijst.length);
+  const cel = (d) => clamp(Math.floor(d.y / RC), 0, RR - 1) * RK + clamp(Math.floor(d.x / RC), 0, RK - 1);
+  for (const d of lijst) start[cel(d) + 1]++;
+  for (let i = 0; i < RK * RR; i++) start[i + 1] += start[i];
+  const vul = start.slice(0, RK * RR);
+  lijst.forEach((d, i) => { idx[vul[cel(d)]++] = i; });
+  return { start, idx };
+}
+
 const ellips = (c, x, y, rx, ry, a) => { c.moveTo(x + Math.cos(a) * rx, y + Math.sin(a) * rx); c.ellipse(x, y, rx, ry, a, 0, TAU); };
 const rond = (c, x, y, r) => { c.moveTo(x + r, y); c.arc(x, y, r, 0, TAU); };
 
@@ -68,6 +110,15 @@ export class NatuurLaag {
     this.buf = new Float32Array(4 * 96); // posities van één soort in beeld: x, y, hoek, schaal
     this.liftNu = []; // per frame: per land de eerste skiplek zonder gebouw
     this.p3 = new Float32Array(4); // x, y, hoek (en bij langs(): het stuk van de lijn)
+    this.zi = new Int32Array(512); // indexen van de dingen van dichtbij die in beeld zijn
+    this.zaadBuf = new Float32Array(96); // per dier in buf: zijn zaad (voor het ritme van de reiger)
+    this.vistBuf = new Uint8Array(96); // per dier in buf: 1 als de snavel van de reiger in het water uitvalt
+    this.leegDichtbij();
+  }
+
+  leegDichtbij() {
+    this.plasjes = []; this.kuikens = []; this.kikkers = []; this.libellen = []; this.bijen = []; this.dodeBomen = [];
+    this.eekhoorns = []; this.egels = []; this.vleer = []; this.webben = []; this.rs = {};
   }
 
   // ---------- plaatsing (eenmalig per wereld) ----------
@@ -81,6 +132,7 @@ export class NatuurLaag {
     const geo = this.geo, tl = this.terrein;
     this.dieren = []; this.roof = []; this.bevers = []; this.vlieg = []; this.wolven = []; this.snel = [];
     this.paden = []; this.hutten = []; this.liften = []; this.kabels = []; this.vallen = [];
+    this.leegDichtbij();
     if (!geo || !tl || !this.basis || !this.eigenaar) return;
     // nevel: één zacht wit vlekje, bij watervallen honderden keren hergebruikt
     this.nevel = maakCanvas(32, 32);
@@ -98,6 +150,7 @@ export class NatuurLaag {
     this.plaatsWater();
     this.plaatsWild();
     this.plaatsBergen();
+    this.plaatsDichtbij();
   }
 
   // Hoogte op de schaal van de bergzones, precies zoals de gebakken grond (alleen bij het plaatsen).
@@ -439,6 +492,129 @@ export class NatuurLaag {
     }
   }
 
+  // Dichtbij: plassen op kale akkers, sloten met kuikens, kikkers en libellen, plassen in het moeras, bloemenplekken
+  // met bijen, dode bomen aan de bosrand, eekhoorns op omgevallen stammen, egels in het gras, vleermuizen en
+  // spinnenwebben in de heggen. Alles uit de kenmerken van terrein.js en vaste hashes, eenmalig per wereld.
+  plaatsDichtbij() {
+    const geo = this.geo, tl = this.terrein, b = this.basis, v = tl.vlaggen, K = KENMERK;
+    // water of stad (ook als een ding over de rand van zijn eigen tegel steekt)
+    const water = (x, y) => this.zee(x, y) || tl.isRivier(x, y, 0.15) || tl.isMeer(x, y) || v.stad[this.tegelVan(x, y)];
+    // kale akker waar leven.js geen tractor laat rijden
+    const kaal = (x, y) => { const tt = geo.tegels[this.tegelVan(x, y)]; return v.akker[tt.i] && !levenAkker(tt) && !water(x, y); };
+    // een lijnstuk langs een perceelrand (u langs, w dwars in het akkerrooster) met monsters voor de botstoets
+    const stuk = (px, py, co, si, u0, u1, w) => {
+      const ax = px + u0 * co - w * si, ay = py + u0 * si + w * co, bx = px + u1 * co - w * si, by = py + u1 * si + w * co;
+      const pts = [];
+      for (let q = 0; q <= 4; q++) pts.push(ax + (bx - ax) * q / 4, ay + (by - ay) * q / 4);
+      return { ax, ay, bx, by, pts };
+    };
+    for (const t of geo.tegels) {
+      if (t.terrein === 'water' || v.stad[t.i]) continue;
+      const f = kenmerkenVoorTegel(t, b);
+      const open = (t.terrein === 'vlakte' || t.terrein === 'kust') && !v.akker[t.i];
+      let bosBuur = false;
+      for (let dr = -1; dr <= 1 && !bosBuur; dr++) for (let dk = -1; dk <= 1 && !bosBuur; dk++) {
+        const k = t.k + dk, r = t.r + dr;
+        if (k >= 0 && r >= 0 && k < geo.kol && r < geo.rij && geo.tegels[r * geo.kol + k].terrein === 'bos') bosBuur = true;
+      }
+      const h = perceelHoek(t), co = Math.cos(h), si = Math.sin(h);
+      for (let p = 0; p < f.length; p += K.STAP) {
+        const ty = f[p], z = hash(t.i, p, 900);
+        if (ty === K.PERCEEL) {
+          const soort = f[p + 4] & 15, rand = f[p + 4] >> 5, px = t.x + f[p + 1], py = t.y + f[p + 2], hu = f[p + 3], hv = f[p + 5];
+          // plassen op kale grond (geploegd, braak, net ingezaaid of maïs): pas zichtbaar na een bui
+          if ((soort === GEWAS.PLOEG || soort === GEWAS.BRAAK || soort === GEWAS.GROEN || soort === GEWAS.MAIS) && !levenAkker(t) && hash(t.i, p, 901) < 0.4 && this.plasjes.length < MAX_DICHTBIJ) {
+            const n = 1 + Math.floor(hash(t.i, p, 902) * 3);
+            for (let k = 0; k < n; k++) {
+              const u = (hash(t.i, p * 5 + k, 903) - 0.5) * 2 * (hu - 0.8), w = (hash(t.i, p * 5 + k, 904) - 0.5) * 2 * (hv - 0.7);
+              if (hu < 1 || hv < 0.9) break;
+              const x = px + u * co - w * si, y = py + u * si + w * co, rx = 0.35 + hash(t.i, p * 5 + k, 905) * 0.45;
+              if (!kaal(x, y)) continue;
+              this.plasjes.push({ x, y, rx, ry: rx * (0.5 + 0.2 * hash(t.i, p * 5 + k, 906)), h: h + (hash(t.i, p * 5 + k, 907) - 0.5) * 0.8, zaad: hash(t.i, p * 5 + k, 908), mus: hash(t.i, p * 5 + k, 909) < 0.3, tg: this.tegelsRond(x, y, rx + 0.3), wr: rx + 0.2 });
+            }
+          }
+          if (rand === RAND.SLOOT) {
+            // een moeder met kuikens zwemt heen en weer langs de lange kant van de sloot
+            const lang = hu >= hv;
+            if (hash(t.i, p, 911) < 0.22 && this.kuikens.length < MAX_DICHTBIJ) {
+              const s = lang ? stuk(px, py, co, si, -hu + 0.6, hu - 0.6, -(hv + 0.1)) : stuk(px, py, -si, co, -hv + 0.6, hv - 0.6, hu + 0.1);
+              let ok = true;
+              for (let q = 0; q < s.pts.length && ok; q += 2) ok = !water(s.pts[q], s.pts[q + 1]) && tl.boomvrij(s.pts[q], s.pts[q + 1], 0.1, true); // niet onder een kruin
+              const L = Math.hypot(s.bx - s.ax, s.by - s.ay);
+              if (ok && L > 2) this.kuikens.push({ x: (s.ax + s.bx) / 2, y: (s.ay + s.by) / 2, ax: s.ax, ay: s.ay, bx: s.bx, by: s.by, L, zaad: z, tg: this.tegelsVan(s.pts), wp: Float32Array.from(s.pts) });
+            }
+            // een kikker op de kant, met de sloot voor zich
+            if (hash(t.i, p, 912) < 0.3 && this.kikkers.length < MAX_DICHTBIJ) {
+              const u = (hash(t.i, p, 913) - 0.5) * 2 * (hu - 0.5), w = hv + 0.1 + 0.3;
+              const x = px + u * co - w * si, y = py + u * si + w * co;
+              if (!water(x, y) && tl.boomvrij(x, y, 0.1, true)) this.kikkers.push({ x, y, dx: si, dy: -co, sprong: 0.3, zaad: z, tg: this.tegelsRond(x, y, 0.45), wr: 0.3 });
+            }
+            // libellen boven de sloot
+            if (hash(t.i, p, 914) < 0.1 && this.libellen.length < MAX_DICHTBIJ) {
+              const s = stuk(px, py, co, si, -hu * 0.8, hu * 0.8, hv + 0.1);
+              if (!water(s.ax, s.ay) && !water(s.bx, s.by)) this.libellen.push({ x: (s.ax + s.bx) / 2, y: (s.ay + s.by) / 2, ux: co, uy: si, L: hu * 0.8, w: 0.35, zaad: z, tg: this.tegelsVan(s.pts) });
+            }
+          } else if (rand === RAND.HAAGRAND && hash(t.i, p, 915) < 0.22 && this.webben.length < MAX_DICHTBIJ) {
+            // spinnenweb in de heg (de heg ligt 0,1 buiten het perceel)
+            const langs = hash(t.i, p, 916) < 0.6, kant = hash(t.i, p, 917) < 0.5 ? -1 : 1, s = hash(t.i, p, 918) - 0.5;
+            const u = langs ? s * 2 * hu : kant * (hu + 0.1), w = langs ? kant * (hv + 0.1) : s * 2 * hv;
+            const x = px + u * co - w * si, y = py + u * si + w * co;
+            if (!water(x, y) && tl.boomvrij(x, y, 0.4, true)) this.webben.push({ x, y, r: 0.28 + hash(t.i, p, 919) * 0.14, a: hash(t.i, p, 920) * TAU, zaad: z, tg: this.tegelsRond(x, y, 0.45), wr: 0.2 });
+          }
+        } else if (ty === K.PLAS) {
+          // moerasplas: [x, y, r, zaad, hoek], een ellips van r bij 0,62 r
+          const px = t.x + f[p + 1], py = t.y + f[p + 2], r = f[p + 3], hk = f[p + 5], ch = Math.cos(hk), sh = Math.sin(hk);
+          if (hash(t.i, p, 921) < 0.6 && this.kikkers.length < MAX_DICHTBIJ) {
+            const a = hash(t.i, p, 922) * TAU, u = Math.cos(a) * (r + 0.3), w = Math.sin(a) * (r * 0.62 + 0.3);
+            const x = px + u * ch - w * sh, y = py + u * sh + w * ch, l = Math.hypot(px - x, py - y) || 1;
+            if (!water(x, y) && tl.boomvrij(x, y, 0.1, true)) this.kikkers.push({ x, y, dx: (px - x) / l, dy: (py - y) / l, sprong: Math.min(0.6, l * 0.55), zaad: z, tg: this.tegelsRond(x, y, 0.5), wr: 0.3 });
+          }
+          if (hash(t.i, p, 923) < 0.5 && !water(px, py) && this.libellen.length < MAX_DICHTBIJ) this.libellen.push({ x: px, y: py, ux: ch, uy: sh, L: r * 0.8, w: r * 0.5, zaad: z, tg: this.tegelsRond(px, py, r + 0.3) });
+        } else if (ty === K.STAM && t.terrein === 'bos' && !levenHert(t) && hash(t.i, p, 931) < 0.9 && this.eekhoorns.length < MAX_DICHTBIJ) {
+          const x = t.x + f[p + 1], y = t.y + f[p + 2], l = f[p + 3], ex = Math.cos(f[p + 4]) * l * 0.42, ey = Math.sin(f[p + 4]) * l * 0.42;
+          // een stam kan half onder de kruinen liggen; de eekhoorn tekent boven de bomen, dus alleen een stam in het open
+          if (!tl.boomvrij(x, y, 0.15, true) || !tl.boomvrij(x + ex, y + ey, 0.15, true) || !tl.boomvrij(x - ex, y - ey, 0.15, true)) continue;
+          this.eekhoorns.push({ x, y, l, co: Math.cos(f[p + 4]), si: Math.sin(f[p + 4]), zaad: z, tg: this.tegelsRond(x, y, l / 2 + 0.3), wr: l / 2 });
+        } else if (ty === K.OPENPLEK && t.terrein === 'bos' && !levenHert(t) && hash(t.i, p, 932) < 0.2 && this.dodeBomen.length < MAX_DICHTBIJ) {
+          const x = t.x + f[p + 1], y = t.y + f[p + 2];
+          if (this.vrij(x, y, 0.6)) this.dodeBoom(x, y, z);
+        }
+      }
+      if (open && !v.moeras[t.i]) {
+        // bijen boven de bloemenplek van terrein.js
+        const bp = bloemenPlek(t, b);
+        if (bp && hash(t.i, 941) < 0.7 && this.bijen.length < MAX_DICHTBIJ) this.bijen.push({ x: bp.x, y: bp.y, r: bp.r, zaad: hash(t.i, 942), tg: this.tegelsRond(bp.x, bp.y, bp.r + 0.4) });
+        // dode boom aan de bosrand
+        if (bosBuur && !levenKudde(t) && hash(t.i, 943) < 0.32 && this.dodeBomen.length < MAX_DICHTBIJ) {
+          for (let q = 0; q < 6; q++) {
+            const x = t.x + (hash(t.i, q, 944) - 0.5) * geo.T * 0.8, y = t.y + (hash(t.i, q, 945) - 0.5) * geo.T * 0.8, wB = tl.gewicht(x, y).bos;
+            if (wB < 0.12 || wB > 0.45 || !this.vrij(x, y, 0.6)) continue;
+            this.dodeBoom(x, y, hash(t.i, q, 946));
+            break;
+          }
+        }
+        // egels: 's avonds een rondje door het gras, liefst bij bos of heg
+        if (!levenKudde(t) && hash(t.i, 951) < (bosBuur ? 0.2 : 0.08) && this.egels.length < MAX_DICHTBIJ) {
+          const x = t.x + (hash(t.i, 952) - 0.5) * geo.T * 0.6, y = t.y + (hash(t.i, 953) - 0.5) * geo.T * 0.6;
+          const d = { x, y, R: 0.9, v: 0.022, f: hash(t.i, 954) * TAU, a: 0, tg: null, jong: 0, kl: 0, zaad: hash(t.i, 955), wr: 1.4 };
+          if (this.vrij(x, y, 0.3) && this.pasLus(d)) { d.tg = this.lusTegels(d); this.egels.push(d); }
+        }
+      }
+      // vleermuizen: in de schemering boven de bosrand en het water
+      if ((bosBuur || tl.rivierAfstand(t.x, t.y) < 4) && t.terrein !== 'berg' && hash(t.i, 961) < 0.06 && this.vleer.length < MAX_DICHTBIJ) {
+        const x = t.x + (hash(t.i, 962) - 0.5) * geo.T * 0.5, y = t.y + (hash(t.i, 963) - 0.5) * geo.T * 0.5, R = 1.4 + hash(t.i, 964) * 1.2;
+        if (!water(x, y) && !this.zee(x + R, y) && !this.zee(x - R, y)) this.vleer.push({ x, y, R, n: 2 + Math.floor(hash(t.i, 965) * 3), zaad: hash(t.i, 966), tg: this.tegelsRond(x, y, R + 0.6) });
+      }
+    }
+    for (const d of this.dieren) if (d.s === REIGER) this.vist(d);
+    for (const k of ['plasjes', 'kuikens', 'kikkers', 'libellen', 'bijen', 'dodeBomen', 'eekhoorns', 'egels', 'vleer', 'webben']) this.rs[k] = maakRooster(this[k]);
+  }
+
+  // Een dode boom: kale stam met twee takken en een lange schaduw naar het zuidoosten (die vakjes horen er ook bij).
+  dodeBoom(x, y, zaad) {
+    this.dodeBomen.push({ x, y, zaad, a: zaad * TAU, tg: this.tegelsVan([x - 0.7, y - 0.7, x + 0.7, y - 0.7, x - 0.7, y + 0.7, x + 0.7, y + 0.7, x + 1.4, y + 1.6]), wr: 0.7 });
+  }
+
   // ---------- elke frame ----------
 
   teken(c, view, sc, nu, dt = 0, tempo = 0) {
@@ -459,6 +635,11 @@ export class NatuurLaag {
     this.wr = weer(dag, view.cx, view.cy);
     this.nacht = nachtOp(nu);
     this.z = z; this.pix = 1 / sc; this.t = nu / 1000;
+    // dichtbij: het botsraster van werk.js (dat eerder tekent), de natheid na regen en het uur van de dag
+    const wl = view.werkLaag;
+    this.werk = wl && typeof wl.vrij === 'function' ? wl : null; this.werkSig = wl?.sig ?? 0;
+    this.natheid = z >= DREMPEL.plas ? this.natheidOp(dag, view.cx, view.cy) : 0;
+    this.ochtend = ochtendOp(nu);
     c.save();
     c.translate(view.w / 2 - view.cx * sc, view.h / 2 - view.cy * sc);
     c.scale(sc, sc);
@@ -476,6 +657,7 @@ export class NatuurLaag {
     }
     this.tekenPistes(c);
     if (z >= 9) this.tekenSporen(c);
+    if (z >= DREMPEL.plas) { c.globalAlpha = a * smooth(DREMPEL.plas, DREMPEL.plas + 1, z); this.tekenPlasjes(c); c.globalAlpha = a; }
     if (z >= 5) this.tekenVersnellingen(c);
     this.tekenVallen(c);
     if (z >= 7) this.tekenBevers(c);
@@ -485,17 +667,534 @@ export class NatuurLaag {
       this.tekenDieren(c);
       if (this.sz.winter > 0.25) this.tekenWolven(c);
     }
+    // kleine dieren van dichtbij, elk vanaf zijn eigen zoom
+    const dicht = (k) => { c.globalAlpha = a * smooth(DREMPEL[k], DREMPEL[k] + 0.8, z); };
+    if (z >= DREMPEL.kuiken) { dicht('kuiken'); this.tekenKuikens(c); }
+    if (z >= DREMPEL.egel) { dicht('egel'); this.tekenEgels(c); }
+    if (z >= DREMPEL.kikker) { dicht('kikker'); this.tekenKikkers(c); }
+    if (z >= DREMPEL.eekhoorn) { dicht('eekhoorn'); this.tekenEekhoorns(c); }
+    if (z >= DREMPEL.web) { dicht('web'); this.tekenWebben(c); }
+    if (z >= DREMPEL.dodeBoom) { c.globalAlpha = a; this.tekenDodeBomen(c); }
     // huizen en liften, dan wat erin of eraan beweegt
     c.globalAlpha = a;
     if (z >= 5.5) this.tekenHutten(c);
     if (z >= 7) this.tekenUitzicht(c);
     this.tekenLiften(c);
     if (z >= 8) this.tekenVuurvliegjes(c);
+    if (z >= DREMPEL.libel) { dicht('libel'); this.tekenLibellen(c); }
+    if (z >= DREMPEL.bij) { dicht('bij'); this.tekenBijen(c); }
+    if (z >= DREMPEL.vleermuis) { dicht('vleermuis'); this.tekenVleermuizen(c); }
+    c.globalAlpha = a;
     this.tekenRoofvogels(c);
     c.restore();
   }
 
   zicht(x, y, m = 0) { return x > this.x0 - m && x < this.x1 + m && y > this.y0 - m && y < this.y1 + m; }
+
+  // ---------- dichtbij: tekenen ----------
+
+  // Botst een ding met een weg, gebouw, werk of grensstrook van werk.js? Eén keer per stand van zijn botsraster.
+  vrijWerk(d) {
+    const w = this.werk;
+    if (!w) return true;
+    if (d.ws !== this.werkSig) {
+      d.ws = this.werkSig;
+      let ok = true;
+      const p = d.wp;
+      if (p) for (let q = 0; q < p.length && ok; q += 2) ok = w.vrij(p[q], p[q + 1], 0.3, BOTS);
+      else ok = w.vrij(d.x, d.y, d.wr ?? 0.4, BOTS);
+      d.wv = ok;
+    }
+    return d.wv;
+  }
+
+  // Indexen (in this.zi) van de dingen uit lijst `naam` die in beeld zijn, zonder gebouw en zonder botsing; vaste
+  // volgorde per cel. Geeft het aantal terug.
+  verzamel(naam, marge) {
+    const lijst = this[naam], rs = this.rs[naam], zi = this.zi;
+    if (!lijst.length) return 0;
+    let n = 0;
+    const c0 = clamp(Math.floor((this.x0 - marge) / RC), 0, RK - 1), c1 = clamp(Math.floor((this.x1 + marge) / RC), 0, RK - 1);
+    const r0 = clamp(Math.floor((this.y0 - marge) / RC), 0, RR - 1), r1 = clamp(Math.floor((this.y1 + marge) / RC), 0, RR - 1);
+    for (let r = r0; r <= r1; r++) for (let k = c0; k <= c1; k++) {
+      const cel = r * RK + k;
+      for (let j = rs.start[cel]; j < rs.start[cel + 1] && n < zi.length; j++) {
+        const d = lijst[rs.idx[j]];
+        if (!this.zicht(d.x, d.y, marge) || this.bebouwd(d.tg) || !this.vrijWerk(d)) continue;
+        zi[n++] = rs.idx[j];
+      }
+    }
+    return n;
+  }
+
+  // Na een bui: hoe nat de akkers nog zijn (vandaag, gisteren en eergisteren), op het midden van het beeld.
+  natheidOp(dag, x, y) {
+    const k = (dag * 128 + Math.round(x / 8)) * 128 + Math.round(y / 8); // een getal: geen nieuwe tekst per frame
+    if (this.natSleutel !== k) {
+      this.natSleutel = k;
+      this.natWaarde = Math.max(weer(dag, x, y).regen, 0.75 * weer(dag - 1, x, y).regen, 0.45 * weer(dag - 2, x, y).regen);
+    }
+    return this.natWaarde;
+  }
+
+  // Plassen en modder op de kale akkers na regen; kringen zolang het regent; bevroren in de vorst.
+  tekenPlasjes(c) {
+    const nat = this.natheid;
+    if (nat < 0.15 || this.pal.A > 0.3) return;
+    const n = this.verzamel('plasjes', 1);
+    const ijs = this.sz.koud > 0.8, t = this.t, groot = 0.6 + 0.6 * smooth(0.15, 0.7, nat), buf = this.buf;
+    let m = 0;
+    for (let q = 0; q < n && m < PLAFOND.plassen; q++) {
+      const d = this.plasjes[this.zi[q]];
+      if (d.zaad * 0.5 > nat - 0.15) continue; // na een flinke bui meer plassen
+      buf[m * 4] = this.zi[q]; m++;
+    }
+    this.n.plassen = m;
+    if (!m) return;
+    const L = this.plasjes;
+    c.beginPath();
+    for (let q = 0; q < m; q++) { const d = L[buf[q * 4]]; ellips(c, d.x + 0.05, d.y + 0.06, d.rx * groot + 0.22, d.ry * groot + 0.18, d.h); }
+    c.fillStyle = 'rgba(78,58,36,0.5)'; c.fill();
+    c.beginPath();
+    for (let q = 0; q < m; q++) { const d = L[buf[q * 4]]; ellips(c, d.x, d.y, d.rx * groot, d.ry * groot, d.h); }
+    c.fillStyle = ijs ? '#dde6ec' : 'rgba(128,150,160,0.9)'; c.fill();
+    // de lucht spiegelt aan de noordwestkant, de zuidoostrand is donkerder
+    c.beginPath();
+    for (let q = 0; q < m; q++) { const d = L[buf[q * 4]]; ellips(c, d.x + d.rx * groot * 0.18, d.y + d.ry * groot * 0.2, d.rx * groot * 0.7, d.ry * groot * 0.6, d.h); }
+    c.fillStyle = ijs ? 'rgba(190,206,216,0.6)' : 'rgba(84,104,112,0.5)'; c.fill();
+    c.beginPath();
+    for (let q = 0; q < m; q++) { const d = L[buf[q * 4]], x = d.x - d.rx * groot * 0.35, y = d.y - d.ry * groot * 0.35; c.moveTo(x - d.rx * groot * 0.3, y + 0.02); c.quadraticCurveTo(x, y - d.ry * groot * 0.25, x + d.rx * groot * 0.35, y - 0.02); }
+    c.strokeStyle = 'rgba(236,244,246,0.75)'; c.lineWidth = Math.max(0.03, 0.6 * this.pix); c.stroke();
+    if (!ijs && this.wr.regen > 0.12 && this.z >= 10) {
+      c.beginPath();
+      for (let q = 0; q < m; q++) {
+        const d = L[buf[q * 4]];
+        for (let k = 0; k < 3; k++) {
+          const f = frac(t * 0.9 + k * 0.37 + d.zaad * 5), a = (d.zaad * 17 + k * 2.3 + Math.floor(t * 0.9 + k * 0.37 + d.zaad * 5) * 1.7) % TAU, rr = Math.sqrt(frac(a * 0.37)) * 0.6;
+          const x = d.x + Math.cos(a) * d.rx * groot * rr, y = d.y + Math.sin(a) * d.ry * groot * rr;
+          ellips(c, x, y, 0.03 + f * 0.14, (0.03 + f * 0.14) * 0.7, 0);
+        }
+      }
+      c.strokeStyle = 'rgba(232,242,246,0.55)'; c.lineWidth = Math.max(0.02, 0.5 * this.pix); c.stroke();
+    }
+    // mussen die in een plas badderen: een paar op de rand die rondhuppen, één in het water die spat
+    if (this.z >= DREMPEL.mus && !ijs && this.nacht < 0.3 && this.wr.regen < 0.25) this.tekenMussen(c, m, groot);
+  }
+
+  tekenMussen(c, m, groot) {
+    const L = this.plasjes, buf = this.buf, t = this.t, vogels = this.mussenBuf ?? (this.mussenBuf = new Float32Array(PLAFOND.mussen * 4));
+    let n = 0;
+    for (let q = 0; q < m && n + 4 <= PLAFOND.mussen; q++) {
+      const d = L[buf[q * 4]];
+      if (!d.mus) continue;
+      for (let k = 0; k < 4; k++) {
+        const o = n * 4;
+        if (k === 0) { // in het water
+          vogels[o] = d.x + Math.sin(t * 0.7 + d.zaad * 9) * d.rx * groot * 0.25; vogels[o + 1] = d.y; vogels[o + 2] = d.h + Math.sin(t * 0.5) * 0.6; vogels[o + 3] = 1;
+        } else { // huppen over de rand, om de 0,6 tel een sprongetje
+          const sprong = Math.floor(t / 0.6 + k * 0.37 + d.zaad * 3), f = frac(t / 0.6 + k * 0.37 + d.zaad * 3);
+          const a = d.zaad * TAU + k * 2.1 + sprong * 0.5 + f * 0.5 * smooth(0, 0.3, f), rr = 1.25 + 0.15 * Math.sin(sprong * 1.7 + k);
+          vogels[o] = d.x + Math.cos(a) * d.rx * groot * rr; vogels[o + 1] = d.y + Math.sin(a) * d.ry * groot * rr - 0.06 * Math.sin(Math.PI * smooth(0, 0.3, f));
+          vogels[o + 2] = a + Math.PI / 2 + Math.sin(sprong * 2.3) * 0.8; vogels[o + 3] = 0;
+        }
+        n++;
+      }
+    }
+    this.n.mussen = n;
+    if (!n) return;
+    c.beginPath(); for (let q = 0; q < n; q++) ellips(c, vogels[q * 4] + 0.03, vogels[q * 4 + 1] + 0.04, 0.06, 0.035, vogels[q * 4 + 2]); c.fillStyle = 'rgba(0,0,0,0.2)'; c.fill();
+    c.beginPath(); for (let q = 0; q < n; q++) ellips(c, vogels[q * 4], vogels[q * 4 + 1], 0.06, 0.035, vogels[q * 4 + 2]); c.fillStyle = '#8a6a48'; c.fill();
+    c.beginPath(); for (let q = 0; q < n; q++) { const a = vogels[q * 4 + 2]; rond(c, vogels[q * 4] + Math.cos(a) * 0.05, vogels[q * 4 + 1] + Math.sin(a) * 0.05, 0.026); } c.fillStyle = '#5e4e40'; c.fill();
+    c.beginPath(); for (let q = 0; q < n; q++) { const a = vogels[q * 4 + 2]; ellips(c, vogels[q * 4] - Math.cos(a) * 0.005 - 0.008, vogels[q * 4 + 1] - Math.sin(a) * 0.005 - 0.01, 0.03, 0.014, a); } c.fillStyle = '#c8b494'; c.fill();
+    // spatten rond de badderaar, en zijn vleugels die op en neer gaan
+    c.beginPath();
+    for (let q = 0; q < n; q++) {
+      if (vogels[q * 4 + 3] !== 1) continue;
+      const x = vogels[q * 4], y = vogels[q * 4 + 1], a = vogels[q * 4 + 2], s = 0.5 + 0.5 * Math.sin(t * 22 + q);
+      c.moveTo(x - Math.sin(a) * 0.03, y + Math.cos(a) * 0.03); c.lineTo(x - Math.sin(a) * (0.06 + 0.05 * s) - Math.cos(a) * 0.02, y + Math.cos(a) * (0.06 + 0.05 * s) - Math.sin(a) * 0.02);
+      c.moveTo(x + Math.sin(a) * 0.03, y - Math.cos(a) * 0.03); c.lineTo(x + Math.sin(a) * (0.06 + 0.05 * s) - Math.cos(a) * 0.02, y - Math.cos(a) * (0.06 + 0.05 * s) - Math.sin(a) * 0.02);
+    }
+    c.strokeStyle = '#6e5038'; c.lineWidth = 0.022; c.stroke();
+    c.beginPath();
+    for (let q = 0; q < n; q++) {
+      if (vogels[q * 4 + 3] !== 1) continue;
+      for (let k = 0; k < 6; k++) { const f = frac(t * 2.2 + k / 6), a = k * 1.05 + q, r = 0.06 + f * 0.16; rond(c, vogels[q * 4] + Math.cos(a) * r, vogels[q * 4 + 1] + Math.sin(a) * r * 0.8 - Math.sin(f * Math.PI) * 0.05, 0.012 * (1 - f) + 0.004); }
+    }
+    c.fillStyle = 'rgba(232,244,250,0.85)'; c.fill();
+  }
+
+  // Een moeder met haar kuikens op de sloot, in de lente: heen en weer langs de kant, de kuikens in een rijtje erachter.
+  tekenKuikens(c) {
+    const sz = this.sz, d0 = sz.dagInJaar;
+    if (d0 < 95 || d0 > 175 || this.nacht > 0.6 || this.pal.ijs > 0.3) return;
+    // de sloot is tot 9 lang: ook wie aan het eind zwemt, telt mee
+    const n = this.verzamel('kuikens', 4.6), t = this.t, buf = this.buf;
+    let m = 0;
+    for (let q = 0; q < n; q++) {
+      const d = this.kuikens[this.zi[q]], aantal = 3 + Math.floor(d.zaad * 4);
+      if (m + aantal + 1 > PLAFOND.kuikens) break;
+      const u = frac(t * 0.6 / (2 * d.L) + d.zaad), terug = u >= 0.5, f = terug ? 2 - u * 2 : u * 2;
+      const dx = (d.bx - d.ax) / d.L, dy = (d.by - d.ay) / d.L, kop = terug ? -1 : 1;
+      for (let k = 0; k <= aantal; k++) {
+        const s = clamp(f * d.L - kop * k * 0.15 - (k ? 0.06 : 0), 0, d.L), zij = k ? Math.sin(t * 2 + k * 1.3) * 0.03 : 0;
+        buf[m * 4] = d.ax + dx * s - dy * zij; buf[m * 4 + 1] = d.ay + dy * s + dx * zij; buf[m * 4 + 2] = Math.atan2(dy * kop, dx * kop); buf[m * 4 + 3] = k ? 1 : 0;
+        m++;
+      }
+    }
+    this.n.kuikens = m;
+    if (!m) return;
+    c.beginPath();
+    for (let q = 0; q < m; q++) {
+      const x = buf[q * 4], y = buf[q * 4 + 1], a = buf[q * 4 + 2], ca = Math.cos(a), sa = Math.sin(a), w = buf[q * 4 + 3] ? 0.03 : 0.06;
+      c.moveTo(x - ca * w * 2.2 - sa * w, y - sa * w * 2.2 + ca * w); c.lineTo(x - ca * w * 0.6, y - sa * w * 0.6); c.lineTo(x - ca * w * 2.2 + sa * w, y - sa * w * 2.2 - ca * w);
+    }
+    c.strokeStyle = 'rgba(232,244,248,0.5)'; c.lineWidth = Math.max(0.015, 0.4 * this.pix); c.stroke();
+    c.beginPath(); for (let q = 0; q < m; q++) if (!buf[q * 4 + 3]) ellips(c, buf[q * 4], buf[q * 4 + 1], 0.09, 0.05, buf[q * 4 + 2]); c.fillStyle = '#7a5a3a'; c.fill();
+    c.beginPath(); for (let q = 0; q < m; q++) if (!buf[q * 4 + 3]) { const a = buf[q * 4 + 2]; rond(c, buf[q * 4] + Math.cos(a) * 0.08, buf[q * 4 + 1] + Math.sin(a) * 0.08, 0.032); } c.fillStyle = '#2e6b45'; c.fill();
+    c.beginPath(); for (let q = 0; q < m; q++) if (buf[q * 4 + 3]) rond(c, buf[q * 4], buf[q * 4 + 1], 0.032); c.fillStyle = '#d9c070'; c.fill();
+    if (this.z >= 12) { c.beginPath(); for (let q = 0; q < m; q++) if (buf[q * 4 + 3]) { const a = buf[q * 4 + 2]; rond(c, buf[q * 4] + Math.cos(a) * 0.022, buf[q * 4 + 1] + Math.sin(a) * 0.022, 0.016); } c.fillStyle = '#8a6a30'; c.fill(); }
+  }
+
+  // Kikkers: zitten op de kant, springen in een boogje het water in (een kring), zwemmen als twee oogjes terug.
+  tekenKikkers(c) {
+    const d0 = this.sz.dagInJaar;
+    if (d0 < 75 || d0 > 275 || this.nacht > 0.85 || this.pal.ijs > 0.3) return;
+    const n = this.verzamel('kikkers', 1), t = this.t, buf = this.buf;
+    let m = 0, kring = 0;
+    const kr = this.kringBuf ?? (this.kringBuf = new Float32Array(PLAFOND.kikkers * 3));
+    for (let q = 0; q < n && m + kring < PLAFOND.kikkers; q++) { // wie net in het water dook (een kring) telt ook mee
+      const d = this.kikkers[this.zi[q]], P = 10 + d.zaad * 6, ph = (t + d.zaad * 40) % P, wx = d.x + d.dx * d.sprong, wy = d.y + d.dy * d.sprong;
+      const a = Math.atan2(d.dy, d.dx);
+      let x = d.x, y = d.y, soort = 0, hoog = 0;
+      if (ph < P - 4) { /* zit stil, af en toe een draai */ }
+      else if (ph < P - 3.6) { const f = (ph - (P - 4)) / 0.4; x = d.x + (wx - d.x) * f; y = d.y + (wy - d.y) * f; hoog = Math.sin(f * Math.PI); }
+      else {
+        // in het water: eerst alleen een kring, dan zwemt hij als twee oogjes terug naar de kant
+        const f = (ph - (P - 3.6)) / 3.6;
+        if (f < 0.3) { kr[kring * 3] = wx; kr[kring * 3 + 1] = wy; kr[kring * 3 + 2] = f / 0.3; kring++; continue; }
+        const g = smooth(0.3, 1, f);
+        x = wx + (d.x - wx) * g * 0.75; y = wy + (d.y - wy) * g * 0.75; soort = 1;
+      }
+      buf[m * 4] = x; buf[m * 4 + 1] = y; buf[m * 4 + 2] = soort ? a + Math.PI : a + Math.sin(t * 0.3 + d.zaad * 9) * 0.3; buf[m * 4 + 3] = soort + hoog * 0.5;
+      m++;
+    }
+    this.n.kikkers = m + kring;
+    if (kring) {
+      c.beginPath();
+      for (let q = 0; q < kring; q++) { const r = 0.05 + kr[q * 3 + 2] * 0.25; ellips(c, kr[q * 3], kr[q * 3 + 1], r, r * 0.7, 0); }
+      c.strokeStyle = 'rgba(232,242,244,0.6)'; c.lineWidth = Math.max(0.015, 0.4 * this.pix); c.stroke();
+    }
+    if (!m) return;
+    // schaduw (bij een sprong verder weg), lijf, lichte rugstreep en ogen
+    c.beginPath(); for (let q = 0; q < m; q++) { const h = buf[q * 4 + 3] % 1; if (buf[q * 4 + 3] < 1) ellips(c, buf[q * 4] + 0.02 + h * 0.12, buf[q * 4 + 1] + 0.025 + h * 0.14, 0.07, 0.05, buf[q * 4 + 2]); } c.fillStyle = 'rgba(0,0,0,0.2)'; c.fill();
+    c.beginPath(); for (let q = 0; q < m; q++) { const s = 1 + (buf[q * 4 + 3] % 1) * 0.5; if (buf[q * 4 + 3] < 1) ellips(c, buf[q * 4], buf[q * 4 + 1], 0.075 * s, 0.055 * s, buf[q * 4 + 2]); } c.fillStyle = '#5a8a3a'; c.fill();
+    c.beginPath(); for (let q = 0; q < m; q++) if (buf[q * 4 + 3] < 1) ellips(c, buf[q * 4] - 0.01, buf[q * 4 + 1] - 0.012, 0.045, 0.014, buf[q * 4 + 2]); c.fillStyle = '#9cc46a'; c.fill();
+    c.beginPath();
+    for (let q = 0; q < m; q++) {
+      const x = buf[q * 4], y = buf[q * 4 + 1], a = buf[q * 4 + 2], ca = Math.cos(a), sa = Math.sin(a);
+      for (let k = -1; k <= 1; k += 2) rond(c, x + ca * 0.05 - sa * k * 0.028, y + sa * 0.05 + ca * k * 0.028, 0.016);
+    }
+    c.fillStyle = '#d8c060'; c.fill();
+    // wie zwemt, laat een v-tje in het water achter
+    c.beginPath();
+    for (let q = 0; q < m; q++) {
+      if (buf[q * 4 + 3] < 1) continue;
+      const x = buf[q * 4], y = buf[q * 4 + 1], a = buf[q * 4 + 2], ca = Math.cos(a), sa = Math.sin(a);
+      c.moveTo(x - ca * 0.15 - sa * 0.06, y - sa * 0.15 + ca * 0.06); c.lineTo(x - ca * 0.02, y - sa * 0.02); c.lineTo(x - ca * 0.15 + sa * 0.06, y - sa * 0.15 - ca * 0.06);
+    }
+    c.strokeStyle = 'rgba(232,242,244,0.5)'; c.lineWidth = Math.max(0.012, 0.35 * this.pix); c.stroke();
+  }
+
+  // Doel van een libel bij sprong k: een vast punt boven zijn sloot of plas.
+  libelDoel(d, k, uit) {
+    const u = (hash(Math.floor(d.zaad * 1e6), k, 991) * 2 - 1) * d.L, w = (hash(Math.floor(d.zaad * 1e6), k, 992) * 2 - 1) * d.w;
+    uit[0] = d.x + d.ux * u - d.uy * w; uit[1] = d.y + d.uy * u + d.ux * w;
+    return uit;
+  }
+
+  // Libellen: hangen stil boven het water, schieten dan in een flits naar een ander punt (zomer, overdag, droog).
+  tekenLibellen(c) {
+    const d0 = this.sz.dagInJaar;
+    if (d0 < 130 || d0 > 260 || this.nacht > 0.35 || this.wr.regen > 0.15) return;
+    const n = this.verzamel('libellen', 4.4), t = this.t, buf = this.buf, a3 = this.p3, b3 = this.libelP ?? (this.libelP = new Float32Array(2));
+    let m = 0;
+    for (let q = 0; q < n && m < PLAFOND.libellen; q++) {
+      const d = this.libellen[this.zi[q]], s = t / 1.7 + d.zaad * 10, k = Math.floor(s), f = smooth(0, 0.18, s - k);
+      this.libelDoel(d, k - 1, a3); this.libelDoel(d, k, b3);
+      const x = a3[0] + (b3[0] - a3[0]) * f + Math.sin(t * 31 + q) * 0.012, y = a3[1] + (b3[1] - a3[1]) * f + Math.cos(t * 27 + q) * 0.012;
+      buf[m * 4] = x; buf[m * 4 + 1] = y; buf[m * 4 + 2] = Math.atan2(b3[1] - a3[1], b3[0] - a3[0]) + Math.sin(t * 0.7 + q) * 0.2; buf[m * 4 + 3] = Math.floor(d.zaad * 3);
+      m++;
+    }
+    this.n.libellen = m;
+    if (!m) return;
+    // schaduw op het water, vleugels, en het lijf in blauw, rood of groen
+    c.beginPath();
+    for (let q = 0; q < m; q++) { const a = buf[q * 4 + 2]; c.moveTo(buf[q * 4] + 0.25 - Math.cos(a) * 0.1, buf[q * 4 + 1] + 0.3 - Math.sin(a) * 0.1); c.lineTo(buf[q * 4] + 0.25 + Math.cos(a) * 0.1, buf[q * 4 + 1] + 0.3 + Math.sin(a) * 0.1); }
+    c.strokeStyle = 'rgba(0,0,0,0.15)'; c.lineWidth = 0.03; c.stroke();
+    c.beginPath();
+    for (let q = 0; q < m; q++) {
+      const x = buf[q * 4], y = buf[q * 4 + 1], a = buf[q * 4 + 2], ca = Math.cos(a), sa = Math.sin(a), tril = 0.85 + 0.15 * Math.sin(t * 40 + q * 2);
+      for (const v of [0.04, -0.005]) { const vx = x + ca * v, vy = y + sa * v; c.moveTo(vx - sa * 0.11 * tril, vy + ca * 0.11 * tril); c.lineTo(vx + sa * 0.11 * tril, vy - ca * 0.11 * tril); }
+    }
+    c.strokeStyle = 'rgba(226,238,246,0.7)'; c.lineWidth = 0.035; c.stroke();
+    for (let kl = 0; kl < 3; kl++) {
+      c.beginPath();
+      let iets = false;
+      for (let q = 0; q < m; q++) {
+        if (buf[q * 4 + 3] !== kl) continue;
+        const x = buf[q * 4], y = buf[q * 4 + 1], a = buf[q * 4 + 2];
+        c.moveTo(x + Math.cos(a) * 0.07, y + Math.sin(a) * 0.07); c.lineTo(x - Math.cos(a) * 0.13, y - Math.sin(a) * 0.13); iets = true;
+      }
+      if (iets) { c.strokeStyle = ['#2a7ab8', '#c43a2a', '#3a9a5a'][kl]; c.lineWidth = 0.025; c.stroke(); }
+    }
+  }
+
+  // Bijen en hommels boven de bloemenplekken: zwermen rond, blijven even op een bloem hangen (lente en zomer, overdag).
+  tekenBijen(c) {
+    const sz = this.sz, d0 = sz.dagInJaar;
+    if (d0 < 80 || d0 > 270 || sz.winter > 0.2 || this.nacht > 0.3 || this.wr.regen > 0.2) return;
+    const n = this.verzamel('bijen', 2), t = this.t, buf = this.buf;
+    let m = 0;
+    for (let q = 0; q < n && m + 5 <= PLAFOND.bijen; q++) {
+      const d = this.bijen[this.zi[q]];
+      for (let k = 0; k < 5; k++) {
+        // trage zwerftocht over de plek, met een snel zigzagje erdoor; op een bloem staat het zigzagje stil
+        const z = d.zaad * 9 + k * 2.1, rust = smooth(0.55, 0.8, Math.sin(t * 0.45 + z)), tril = 1 - rust;
+        const x = d.x + Math.sin(t * (0.21 + k * 0.03) + z) * d.r * 0.75 + Math.sin(t * 3.1 + z * 2) * 0.12 * tril;
+        const y = d.y + Math.cos(t * (0.17 + k * 0.025) + z * 1.3) * d.r * 0.6 + Math.sin(t * 3.7 + z) * 0.09 * tril;
+        buf[m * 4] = x; buf[m * 4 + 1] = y; buf[m * 4 + 2] = t * 0.9 + z; buf[m * 4 + 3] = (k === 0 ? 1 : 0) + rust * 0.5;
+        m++;
+      }
+    }
+    this.n.bijen = m;
+    if (!m) return;
+    c.beginPath(); for (let q = 0; q < m; q++) { const h = 0.12 * (1 - (buf[q * 4 + 3] % 1) * 1.6); rond(c, buf[q * 4] + h, buf[q * 4 + 1] + h * 1.15, buf[q * 4 + 3] >= 1 ? 0.035 : 0.022); } c.fillStyle = 'rgba(0,0,0,0.16)'; c.fill();
+    // vleugels: twee doorschijnende vlekjes die snel flikkeren
+    c.beginPath();
+    for (let q = 0; q < m; q++) { const x = buf[q * 4], y = buf[q * 4 + 1], s = buf[q * 4 + 3] >= 1 ? 1.4 : 1, f = Math.sin(t * 60 + q * 1.7) > 0 ? 1 : 0.6; ellips(c, x - 0.02 * s, y - 0.03 * s * f, 0.03 * s, 0.018 * s, -0.6); ellips(c, x + 0.02 * s, y - 0.03 * s * f, 0.03 * s, 0.018 * s, 0.6); }
+    c.fillStyle = 'rgba(238,246,252,0.65)'; c.fill();
+    c.beginPath(); for (let q = 0; q < m; q++) if (buf[q * 4 + 3] < 1) ellips(c, buf[q * 4], buf[q * 4 + 1], 0.035, 0.022, buf[q * 4 + 2]); c.fillStyle = '#d8a020'; c.fill();
+    c.beginPath(); for (let q = 0; q < m; q++) if (buf[q * 4 + 3] >= 1) ellips(c, buf[q * 4], buf[q * 4 + 1], 0.052, 0.036, buf[q * 4 + 2]); c.fillStyle = '#2a2218'; c.fill();
+    c.beginPath(); for (let q = 0; q < m; q++) if (buf[q * 4 + 3] >= 1) { const a = buf[q * 4 + 2]; ellips(c, buf[q * 4] + Math.cos(a) * 0.008, buf[q * 4 + 1] + Math.sin(a) * 0.008, 0.016, 0.034, a); } c.fillStyle = '#f0c030'; c.fill();
+    c.beginPath(); for (let q = 0; q < m; q++) if (buf[q * 4 + 3] < 1) { const a = buf[q * 4 + 2]; ellips(c, buf[q * 4] - Math.cos(a) * 0.01, buf[q * 4 + 1] - Math.sin(a) * 0.01, 0.008, 0.02, a); } c.fillStyle = '#2a2016'; c.fill();
+  }
+
+  // Dode bomen aan de bosrand: zilvergrijze stam met kale takken. Overdag klopt er een specht op, 's nachts zit er een
+  // uil bovenop met ogen die oplichten.
+  tekenDodeBomen(c) {
+    const n = this.verzamel('dodeBomen', 2), t = this.t, z = this.z, L = this.dodeBomen, buf = this.buf;
+    let m = 0;
+    for (let q = 0; q < n && m < PLAFOND.dodeBomen; q++) { buf[m * 4] = this.zi[q]; m++; }
+    this.n.dodeBomen = m;
+    if (!m) return;
+    const ga = c.globalAlpha;
+    c.globalAlpha = ga * smooth(DREMPEL.dodeBoom, DREMPEL.dodeBoom + 1, z);
+    c.beginPath(); for (let q = 0; q < m; q++) { const d = L[buf[q * 4]]; c.moveTo(d.x + 0.1, d.y + 0.1); c.lineTo(d.x + 1.3, d.y + 1.5); } c.strokeStyle = 'rgba(10,14,8,0.25)'; c.lineWidth = 0.2; c.stroke();
+    c.beginPath();
+    for (let q = 0; q < m; q++) {
+      const d = L[buf[q * 4]];
+      for (let k = 0; k < 3; k++) { const a = d.a + k * 2.2, l = 0.55 + 0.3 * frac(d.zaad * 7 + k * 0.3); c.moveTo(d.x, d.y); c.quadraticCurveTo(d.x + Math.cos(a + 0.3) * l * 0.6, d.y + Math.sin(a + 0.3) * l * 0.6, d.x + Math.cos(a) * l, d.y + Math.sin(a) * l); }
+    }
+    c.strokeStyle = '#776f64'; c.lineWidth = Math.max(0.05, 0.6 * this.pix); c.stroke();
+    c.beginPath(); for (let q = 0; q < m; q++) { const d = L[buf[q * 4]]; rond(c, d.x, d.y, 0.2); } c.fillStyle = '#8a8378'; c.fill();
+    c.beginPath(); for (let q = 0; q < m; q++) { const d = L[buf[q * 4]]; rond(c, d.x - 0.06, d.y - 0.07, 0.1); } c.fillStyle = '#b8b2a6'; c.fill();
+    c.beginPath(); for (let q = 0; q < m; q++) { const d = L[buf[q * 4]]; rond(c, d.x + 0.02, d.y + 0.02, 0.06); } c.fillStyle = '#4a443c'; c.fill();
+    c.globalAlpha = ga;
+    // de specht hangt aan de westkant van de stam en klopt in roffels; houtsplinters vallen weg
+    if (z >= DREMPEL.specht && this.nacht < 0.35) {
+      let s = 0;
+      c.globalAlpha = ga * smooth(DREMPEL.specht, DREMPEL.specht + 0.8, z); // invloeien, net als de andere dieren
+      c.beginPath();
+      for (let q = 0; q < m && s < PLAFOND.spechten; q++, s++) { const d = L[buf[q * 4]], k = this.klop(d); ellips(c, d.x - 0.27 - k, d.y + 0.02, 0.1, 0.045, 0); }
+      c.fillStyle = '#1e1e22'; c.fill();
+      c.beginPath(); for (let q = 0; q < s; q++) { const d = L[buf[q * 4]], k = this.klop(d); ellips(c, d.x - 0.3 - k, d.y - 0.012, 0.04, 0.018, 0); ellips(c, d.x - 0.3 - k, d.y + 0.05, 0.04, 0.016, 0); } c.fillStyle = '#f0eee6'; c.fill();
+      c.beginPath(); for (let q = 0; q < s; q++) { const d = L[buf[q * 4]], k = this.klop(d); rond(c, d.x - 0.36 - k, d.y + 0.02, 0.018); rond(c, d.x - 0.19 - k * 1.6, d.y + 0.015, 0.016); } c.fillStyle = '#c8302a'; c.fill();
+      c.beginPath();
+      for (let q = 0; q < s; q++) {
+        const d = L[buf[q * 4]], roffel = frac(t / 5 + d.zaad) < 0.3;
+        if (!roffel) continue;
+        for (let k = 0; k < 3; k++) { const f = frac(t * 1.8 + k / 3), a = 2.4 + k * 0.5; rond(c, d.x - 0.2 + Math.cos(a) * f * 0.35, d.y + Math.sin(a) * f * 0.2 + f * f * 0.3, 0.012); }
+      }
+      c.fillStyle = '#c8b48c'; c.fill();
+      this.n.spechten = s;
+      c.globalAlpha = ga;
+    }
+    // de uil zit bovenop; zijn ogen lichten op en knipperen af en toe, de kop draait langzaam
+    if (z >= DREMPEL.uil && this.nacht > 0.55) {
+      let u = 0;
+      const gu = ga * smooth(DREMPEL.uil, DREMPEL.uil + 0.8, z);
+      c.globalAlpha = gu;
+      c.beginPath(); for (let q = 0; q < m && u < PLAFOND.uilen; q++, u++) { const d = L[buf[q * 4]]; rond(c, d.x + 0.03, d.y - 0.02, 0.13); } c.fillStyle = '#8a6e52'; c.fill();
+      c.beginPath(); for (let q = 0; q < u; q++) { const d = L[buf[q * 4]], dr = Math.sin(t * 0.4 + d.zaad * 9) * 0.025; ellips(c, d.x + 0.03 + dr, d.y + 0.01, 0.085, 0.07, 0); } c.fillStyle = '#d2bc98'; c.fill();
+      c.beginPath(); for (let q = 0; q < u; q++) { const d = L[buf[q * 4]]; rond(c, d.x - 0.03, d.y - 0.08, 0.05); } c.fillStyle = '#a88a68'; c.fill();
+      const ogen = this.ogenBuf ?? (this.ogenBuf = new Float32Array(PLAFOND.uilen * 2));
+      let o = 0;
+      c.beginPath();
+      for (let q = 0; q < u; q++) {
+        const d = L[buf[q * 4]];
+        if (frac(t / 6 + d.zaad * 3) < 0.03) continue; // knipper
+        const dr = Math.sin(t * 0.4 + d.zaad * 9) * 0.025;
+        for (let k = -1; k <= 1; k += 2) rond(c, d.x + 0.03 + dr + k * 0.035, d.y + 0.005, 0.022);
+        ogen[o * 2] = d.x + 0.03 + dr; ogen[o * 2 + 1] = d.y + 0.005; o++;
+      }
+      c.fillStyle = '#ffd84a'; c.fill();
+      if (o) {
+        c.save();
+        c.globalCompositeOperation = 'lighter';
+        c.globalAlpha = gu * 0.7 * smooth(0.55, 0.8, this.nacht);
+        for (let q = 0; q < o; q++) c.drawImage(this.gloei, ogen[q * 2] - 0.14, ogen[q * 2 + 1] - 0.1, 0.28, 0.2);
+        c.restore();
+      }
+      this.n.uilen = u;
+      c.globalAlpha = ga;
+    }
+  }
+
+  // Valt de snavel van deze reiger in het water uit (zee, rivier, meer of een moerasplas)? Eén keer per reiger uitgerekend:
+  // een reiger die met zijn kop naar het land staat, prikt in het gras en vangt geen vis.
+  vist(d) {
+    if (d.vist === undefined) { // eenmalig bij het plaatsen (plaatsDichtbij), daarna alleen opzoeken
+      const L = DIER_LENGTE[REIGER] * 1.1, x = d.x + Math.cos(d.a) * L, y = d.y + Math.sin(d.a) * L, tl = this.terrein;
+      let nat = this.zee(x, y) || tl.rivierAfstand(x, y) < 0 || tl.isMeer(x, y);
+      const t = this.geo.tegels[this.tegelVan(x, y)];
+      if (!nat && t && this.terrein.vlaggen.moeras[t.i]) {
+        const f = kenmerkenVoorTegel(t, this.basis);
+        for (let p = 0; p < f.length && !nat; p += KENMERK.STAP) {
+          if (f[p] !== KENMERK.PLAS) continue;
+          const h = f[p + 5], dx = x - t.x - f[p + 1], dy = y - t.y - f[p + 2], u = (dx * Math.cos(h) + dy * Math.sin(h)) / f[p + 3], v = (dy * Math.cos(h) - dx * Math.sin(h)) / (f[p + 3] * 0.62);
+          nat = u * u + v * v < 1;
+        }
+      }
+      d.vist = nat ? 1 : 0;
+    }
+    return d.vist;
+  }
+
+  // Hoe ver de kop van de specht naar de stam schiet: roffels van 1,5 tel om de 5 tel.
+  klop(d) { return frac(this.t / 5 + d.zaad) < 0.3 ? Math.max(0, Math.sin(this.t * TAU * 9)) * 0.03 : 0; }
+
+  // Eekhoorns op omgevallen stammen: rennen naar het eind, gaan rechtop zitten, rennen terug (overdag).
+  tekenEekhoorns(c) {
+    if (this.nacht > 0.35) return;
+    const n = this.verzamel('eekhoorns', 2), t = this.t, buf = this.buf;
+    let m = 0;
+    for (let q = 0; q < n && m < PLAFOND.eekhoorns; q++) {
+      const d = this.eekhoorns[this.zi[q]], s = frac(t / 7 + d.zaad), Lh = d.l * 0.38;
+      let u, kop, zit = 0;
+      if (s < 0.35) { u = -Lh + 2 * Lh * smooth(0, 0.35, s); kop = 1; }
+      else if (s < 0.5) { u = Lh; kop = 1; zit = 1; }
+      else if (s < 0.85) { u = Lh - 2 * Lh * smooth(0.5, 0.85, s); kop = -1; }
+      else { u = -Lh; kop = -1; zit = 1; }
+      buf[m * 4] = d.x + d.co * u; buf[m * 4 + 1] = d.y + d.si * u - 0.04; buf[m * 4 + 2] = Math.atan2(d.si * kop, d.co * kop); buf[m * 4 + 3] = zit;
+      m++;
+    }
+    this.n.eekhoorns = m;
+    if (!m) return;
+    c.beginPath(); for (let q = 0; q < m; q++) ellips(c, buf[q * 4] + 0.05, buf[q * 4 + 1] + 0.07, 0.11, 0.05, buf[q * 4 + 2]); c.fillStyle = 'rgba(0,0,0,0.22)'; c.fill();
+    // staart: plat achter het lijf als hij rent, opgekruld over de rug als hij zit
+    c.beginPath();
+    for (let q = 0; q < m; q++) {
+      const x = buf[q * 4], y = buf[q * 4 + 1], a = buf[q * 4 + 2], ca = Math.cos(a), sa = Math.sin(a), zit = buf[q * 4 + 3];
+      if (zit) ellips(c, x - ca * 0.03, y - sa * 0.03 - 0.02, 0.06, 0.045, a); else ellips(c, x - ca * 0.12, y - sa * 0.12, 0.075, 0.035, a + Math.sin(t * 9 + q) * 0.2);
+    }
+    c.fillStyle = '#b8622c'; c.fill();
+    c.beginPath(); for (let q = 0; q < m; q++) { const s = buf[q * 4 + 3] ? 0.75 : 1; ellips(c, buf[q * 4], buf[q * 4 + 1], 0.065 * s, 0.035, buf[q * 4 + 2]); } c.fillStyle = '#a4522a'; c.fill();
+    c.beginPath(); for (let q = 0; q < m; q++) { const a = buf[q * 4 + 2]; rond(c, buf[q * 4] + Math.cos(a) * 0.06, buf[q * 4 + 1] + Math.sin(a) * 0.06, 0.026); } c.fillStyle = '#8e4624'; c.fill();
+    if (this.z >= 12) { c.beginPath(); for (let q = 0; q < m; q++) { const a = buf[q * 4 + 2]; ellips(c, buf[q * 4] + Math.cos(a) * 0.01, buf[q * 4 + 1] + Math.sin(a) * 0.01, 0.03, 0.014, a); } c.fillStyle = '#e8d8c0'; c.fill(); }
+  }
+
+  // Egels: 's avonds en 's nachts (lente tot herfst) een langzaam rondje door het gras, met stekels en een snuitje.
+  tekenEgels(c) {
+    const d0 = this.sz.dagInJaar;
+    if (d0 < 90 || d0 > 300 || this.nacht < 0.3) return;
+    const n = this.verzamel('egels', 2), t = this.t, buf = this.buf;
+    let m = 0;
+    for (let q = 0; q < n && m < PLAFOND.egels; q++) {
+      const p = this.pos(this.egels[this.zi[q]], t);
+      buf[m * 4] = p[0]; buf[m * 4 + 1] = p[1]; buf[m * 4 + 2] = p[2]; m++;
+    }
+    this.n.egels = m;
+    if (!m) return;
+    c.beginPath(); for (let q = 0; q < m; q++) ellips(c, buf[q * 4] + 0.04, buf[q * 4 + 1] + 0.05, 0.13, 0.09, buf[q * 4 + 2]); c.fillStyle = 'rgba(0,0,0,0.22)'; c.fill();
+    c.beginPath(); for (let q = 0; q < m; q++) { const a = buf[q * 4 + 2]; ellips(c, buf[q * 4] + Math.cos(a) * 0.1, buf[q * 4 + 1] + Math.sin(a) * 0.1, 0.045, 0.032, a); } c.fillStyle = '#c4a47e'; c.fill();
+    c.beginPath(); for (let q = 0; q < m; q++) ellips(c, buf[q * 4], buf[q * 4 + 1], 0.12, 0.085, buf[q * 4 + 2]); c.fillStyle = '#5a4634'; c.fill();
+    if (this.z >= 12) {
+      c.beginPath();
+      for (let q = 0; q < m; q++) {
+        const x = buf[q * 4], y = buf[q * 4 + 1], a = buf[q * 4 + 2];
+        for (let k = 0; k < 9; k++) { const b2 = a + Math.PI + (k - 4) * 0.33, ca = Math.cos(b2), sa = Math.sin(b2); c.moveTo(x + ca * 0.03, y + sa * 0.025); c.lineTo(x + ca * 0.13, y + sa * 0.095); }
+      }
+      c.strokeStyle = '#a08a6a'; c.lineWidth = 0.012; c.stroke();
+    }
+    c.beginPath(); for (let q = 0; q < m; q++) { const a = buf[q * 4 + 2]; rond(c, buf[q * 4] + Math.cos(a) * 0.145, buf[q * 4 + 1] + Math.sin(a) * 0.145, 0.012); } c.fillStyle = '#1a1410'; c.fill();
+  }
+
+  // Vleermuizen in de schemering: kleine fladderende silhouetten in snelle, grillige lussen.
+  tekenVleermuizen(c) {
+    const d0 = this.sz.dagInJaar, schemer = smooth(0.2, 0.35, this.nacht) * (1 - smooth(0.8, 0.95, this.nacht));
+    if (d0 < 100 || d0 > 290 || schemer < 0.05 || this.wr.regen > 0.3) return;
+    const n = this.verzamel('vleer', 3), t = this.t, buf = this.buf;
+    let m = 0;
+    for (let q = 0; q < n && m < PLAFOND.vleermuizen; q++) {
+      const d = this.vleer[this.zi[q]];
+      for (let k = 0; k < d.n && m < PLAFOND.vleermuizen; k++) {
+        const z = d.zaad * 9 + k * 2.1, w1 = 1.3 * (1 + k * 0.2), w2 = 1.8 * (1 + k * 0.15);
+        buf[m * 4] = d.x + Math.sin(t * w1 + z) * d.R + Math.sin(t * 5.3 + k) * 0.3;
+        buf[m * 4 + 1] = d.y + Math.sin(t * w2 + z * 1.3) * d.R * 0.7 + Math.cos(t * 4.1 + k) * 0.25;
+        buf[m * 4 + 2] = Math.atan2(Math.cos(t * w2 + z * 1.3) * d.R * 0.7 * w2 - Math.sin(t * 4.1 + k) * 1.0, Math.cos(t * w1 + z) * d.R * w1 + Math.cos(t * 5.3 + k) * 1.6);
+        buf[m * 4 + 3] = Math.sin(t * 19 + k * 2 + z);
+        m++;
+      }
+    }
+    this.n.vleermuizen = m;
+    if (!m) return;
+    const ga = c.globalAlpha;
+    c.globalAlpha = ga * schemer;
+    c.beginPath();
+    for (let q = 0; q < m; q++) {
+      const x = buf[q * 4], y = buf[q * 4 + 1], a = buf[q * 4 + 2], ca = Math.cos(a), sa = Math.sin(a), s = 0.11, op = buf[q * 4 + 3] * 0.06;
+      // vleugels dwars op de vliegrichting, de punten naar achteren en op en neer
+      c.moveTo(x - sa * s - ca * (0.04 + op), y + ca * s - sa * (0.04 + op));
+      c.quadraticCurveTo(x - sa * s * 0.4 + ca * 0.02, y + ca * s * 0.4 + sa * 0.02, x, y);
+      c.quadraticCurveTo(x + sa * s * 0.4 + ca * 0.02, y - ca * s * 0.4 + sa * 0.02, x + sa * s - ca * (0.04 + op), y - ca * s - sa * (0.04 + op));
+    }
+    c.strokeStyle = '#2a2430'; c.lineWidth = Math.max(0.035, 0.9 * this.pix); c.stroke();
+    c.globalAlpha = ga;
+  }
+
+  // Spinnenwebben in de heggen op herfstochtenden, met dauwdruppels die schitteren.
+  tekenWebben(c) {
+    const d0 = this.sz.dagInJaar, ochtend = this.ochtend;
+    if (d0 < 235 || d0 > 320 || ochtend < 0.05 || this.wr.regen > 0.3) return;
+    const n = this.verzamel('webben', 1), t = this.t, L = this.webben, buf = this.buf;
+    let m = 0;
+    for (let q = 0; q < n && m < PLAFOND.webben; q++) { buf[m * 4] = this.zi[q]; m++; }
+    this.n.webben = m;
+    if (!m) return;
+    const ga = c.globalAlpha;
+    c.globalAlpha = ga * ochtend;
+    c.beginPath();
+    for (let q = 0; q < m; q++) {
+      const d = L[buf[q * 4]];
+      for (let k = 0; k < 8; k++) { const a = d.a + k * 0.785; c.moveTo(d.x, d.y); c.lineTo(d.x + Math.cos(a) * d.r, d.y + Math.sin(a) * d.r * 0.85); }
+      for (let ring = 1; ring <= 3; ring++) {
+        const rr = d.r * ring / 3.4;
+        for (let k = 0; k <= 8; k++) { const a = d.a + k * 0.785, x = d.x + Math.cos(a) * rr, y = d.y + Math.sin(a) * rr * 0.85; if (k) c.lineTo(x, y); else c.moveTo(x, y); }
+      }
+    }
+    c.strokeStyle = 'rgba(236,240,246,0.6)'; c.lineWidth = Math.max(0.008, 0.45 * this.pix); c.stroke();
+    c.beginPath();
+    for (let q = 0; q < m; q++) {
+      const d = L[buf[q * 4]];
+      for (let k = 0; k < 10; k++) {
+        if (Math.sin(t * 2.5 + k * 1.7 + d.zaad * 9) < 0.2) continue;
+        const a = d.a + k * 0.785 + 0.39 * (k % 2), rr = d.r * (0.3 + 0.65 * frac(k * 0.618 + d.zaad));
+        rond(c, d.x + Math.cos(a) * rr, d.y + Math.sin(a) * rr * 0.85, 0.016);
+      }
+    }
+    c.fillStyle = 'rgba(255,255,255,0.95)'; c.fill();
+    c.globalAlpha = ga;
+  }
 
   // Is stuk q van pad p te zien: niet onder een boomkruin en geen gebouw op begin, midden of eind?
   stukOpen(p, q) {
@@ -784,6 +1483,7 @@ export class NatuurLaag {
         const zij = d.kl ? (frac(d.zaad * 13) - 0.5) * 0.5 : 0;
         buf[n * 4] = p[0] - Math.sin(p[2]) * zij; buf[n * 4 + 1] = p[1] + Math.cos(p[2]) * zij; buf[n * 4 + 2] = p[2];
         buf[n * 4 + 3] = DIER_LENGTE[soort] * (d.jong ? 0.55 : 1) * (0.9 + 0.2 * d.zaad) * (d.kl === 1 && soort === GEIT ? -1 : 1);
+        this.zaadBuf[n] = d.zaad; this.vistBuf[n] = soort === REIGER ? this.vist(d) : 0;
         n++;
       }
       this.n[naam] = n;
@@ -834,18 +1534,48 @@ export class NatuurLaag {
       } else if (soort === REIGER) {
         this.lijven(c, n, 0.36, 0.15, -0.05, '#8e959a');
         this.lijven(c, n, 0.2, 0.1, -0.15, '#5e666c');
-        // hals in een s-bocht, kop met gele snavel
+        // hals in een s-bocht, kop met gele snavel; om de 12 tel schiet de hals naar voren en soms komt er een vis mee
+        const uit = this.zaadBuf, zb = this.uitvalBuf ?? (this.uitvalBuf = new Float32Array(96));
+        for (let q = 0; q < n; q++) {
+          const ph = frac(t / 12 + uit[q] * 7);
+          zb[q] = z >= 10 ? smooth(0, 0.04, ph) * (1 - smooth(0.1, 0.2, ph)) * 0.32 : 0;
+          uit[q] = ph + (hash(Math.floor(t / 12 + uit[q] * 7), Math.floor(uit[q] * 1e5), 981) < 0.55 ? 0 : 2); // >= 2: mis
+        }
         c.beginPath();
         for (let q = 0; q < n; q++) {
-          const L = buf[q * 4 + 3], x = buf[q * 4], y = buf[q * 4 + 1], a = buf[q * 4 + 2], co = Math.cos(a), si = Math.sin(a);
+          const L = buf[q * 4 + 3], x = buf[q * 4], y = buf[q * 4 + 1], a = buf[q * 4 + 2], co = Math.cos(a), si = Math.sin(a), e = zb[q];
           c.moveTo(x + co * L * 0.25, y + si * L * 0.25);
-          c.quadraticCurveTo(x + co * L * 0.4 - si * L * 0.12, y + si * L * 0.4 + co * L * 0.12, x + co * L * 0.55, y + si * L * 0.55);
+          c.quadraticCurveTo(x + co * L * (0.4 + e * 0.6) - si * L * 0.12 * (1 - e * 2.5), y + si * L * (0.4 + e * 0.6) + co * L * 0.12 * (1 - e * 2.5), x + co * L * (0.55 + e), y + si * L * (0.55 + e));
         }
         c.strokeStyle = '#c4cacd'; c.lineWidth = 0.035; c.stroke();
-        this.lijven(c, n, 0.06, 0.05, 0.57, '#e6eaec');
         c.beginPath();
-        for (let q = 0; q < n; q++) { const L = buf[q * 4 + 3], x = buf[q * 4], y = buf[q * 4 + 1], a = buf[q * 4 + 2]; c.moveTo(x + Math.cos(a) * L * 0.6, y + Math.sin(a) * L * 0.6); c.lineTo(x + Math.cos(a) * L * 0.82, y + Math.sin(a) * L * 0.82); }
+        for (let q = 0; q < n; q++) { const L = buf[q * 4 + 3], a = buf[q * 4 + 2], e = zb[q]; ellips(c, buf[q * 4] + Math.cos(a) * L * (0.57 + e), buf[q * 4 + 1] + Math.sin(a) * L * (0.57 + e), L * 0.06, L * 0.05, a); }
+        c.fillStyle = '#e6eaec'; c.fill();
+        c.beginPath();
+        for (let q = 0; q < n; q++) { const L = buf[q * 4 + 3], x = buf[q * 4], y = buf[q * 4 + 1], a = buf[q * 4 + 2], e = zb[q]; c.moveTo(x + Math.cos(a) * L * (0.6 + e), y + Math.sin(a) * L * (0.6 + e)); c.lineTo(x + Math.cos(a) * L * (0.82 + e), y + Math.sin(a) * L * (0.82 + e)); }
         c.strokeStyle = '#d8b040'; c.lineWidth = 0.02; c.stroke();
+        if (z >= 10) {
+          // kringen waar de snavel het water raakte, en een spartelend visje dwars in de snavel tot hij is doorgeslikt
+          c.beginPath();
+          let k = 0;
+          for (let q = 0; q < n; q++) {
+            const ph = uit[q] % 2;
+            if (!this.vistBuf[q] || ph < 0.04 || ph > 0.3) continue; // op het droge: geen kringen
+            const L = buf[q * 4 + 3], a = buf[q * 4 + 2], r = 0.04 + (ph - 0.04) * 1.4, x = buf[q * 4] + Math.cos(a) * L * 1.1, y = buf[q * 4 + 1] + Math.sin(a) * L * 1.1;
+            ellips(c, x, y, r, r * 0.7, 0); k++;
+          }
+          if (k) { c.strokeStyle = 'rgba(232,242,246,0.55)'; c.lineWidth = Math.max(0.012, 0.4 * this.pix); c.stroke(); }
+          c.beginPath();
+          k = 0;
+          for (let q = 0; q < n; q++) {
+            const ph = uit[q];
+            if (!this.vistBuf[q] || ph < 0.06 || ph > 0.32) continue; // alleen bij een vangst (een misser heeft ph >= 2), in het water
+            const L = buf[q * 4 + 3], a = buf[q * 4 + 2], e = zb[q], spartel = Math.sin(t * 24 + q) * 0.35;
+            ellips(c, buf[q * 4] + Math.cos(a) * L * (0.8 + e), buf[q * 4 + 1] + Math.sin(a) * L * (0.8 + e), 0.05, 0.016, a + Math.PI / 2 + spartel);
+            k++;
+          }
+          if (k) { c.fillStyle = '#b8c4c8'; c.fill(); this.n.vissen = k; }
+        }
       } else if (soort === OOIEVAAR) {
         this.lijven(c, n, 0.4, 0.17, -0.06, '#1e1e1e'); // zwarte slagpennen
         this.lijven(c, n, 0.32, 0.15, 0.04, '#f4f2ec');

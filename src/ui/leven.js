@@ -13,6 +13,7 @@
 import { woningCapaciteit } from '../engine/samenleving.js';
 import { oorlogenVan } from '../engine/leger.js';
 import { seizoen, weer, wind } from './seizoen.js';
+import { STOP, ZEBRA, DREMPEL as DREMPEL_INFRA } from './infra.js';
 
 // ---------- gedeelde hulpjes (eigen kopie, zie spec §0) ----------
 
@@ -62,6 +63,9 @@ export const PLAFOND = {
   bussen: 12, hulpdiensten: 12, haltes: 24, fietsers: 60, joggers: 30, honden: 30, kinderwagens: 20, kinderen: 60, sleetjes: 12,
   paraplus: 120, machines: 16, balen: 48, dieren: 160, parasols: 30, zwemmers: 20, vliegers: 6, sneeuwpoppen: 16, vlinders: 30, bladeren: 50, eenden: 30,
   netten: 10, meeuwen: 24, kranen: 10, kraampjes: 12, duiven: 40, vliegtuigen: 3, helikopters: 2, ballonnen: 4, trekvogels: 48, vuurwerk: 8,
+  // verkeer dat klopt: vrachtwagens met oplegger, vuilniswagens, sneeuwschuivers en strooiwagens, veegwagens,
+  // overstekers bij de zebra en groepjes die even blijven staan praten
+  opleggers: 12, vuilniswagens: 4, strooiers: 6, veegwagens: 3, overstekers: 40, groepjes: 16,
 };
 // Tellers die elke frame op nul gaan (alles behalve de oude zeven, die eigen velden hebben).
 const PLUS = Object.keys(PLAFOND).slice(7);
@@ -76,9 +80,19 @@ const HUID = ['#f1c9a5', '#c68e5d', '#7d5136'];
 const SPANDOEK = ['#d9443c', '#f2f2ef'];
 const GEDEMPT_REGIME = { eenpartijstaat: true, militair: true };
 // Voertuigen naast auto (0) en truck (1): bus, bestelbus, taxi, politie, ambulance. Kleurindex en halve maten in tegels.
-const BUS = 17, BESTEL = 18, TAXI = 19, POLITIE = 20, AMBU = 21;
-const KLEUR_VOERTUIG = { 17: '#2f7d6d', 18: '#e8e6df', 19: '#f2c230', 20: '#f4f5f7', 21: '#f6f3e8' };
-const MAAT = [[0.05, 0.0275], [0.08, 0.035], [0.115, 0.034], [0.064, 0.031], [0.05, 0.0275], [0.052, 0.028], [0.066, 0.031]];
+const BUS = 17, BESTEL = 18, TAXI = 19, POLITIE = 20, AMBU = 21, VUILKLEUR = 22, WINTERKLEUR = 23, VEEGKLEUR = 24, LAATSTE_KLEUR = 24;
+const KLEUR_VOERTUIG = { 17: '#2f7d6d', 18: '#e8e6df', 19: '#f2c230', 20: '#f4f5f7', 21: '#f6f3e8', 22: '#3d7a4f', 23: '#e07a1f', 24: '#ecebe4' };
+// Soorten in de autobuffer naast 0-6: vrachtwagen met oplegger, vuilniswagen, sneeuwschuiver, strooiwagen, veegwagen.
+const OPLEGGER = 7, VUIL = 8, SCHUIVER = 9, STROOI = 10, VEEG = 11;
+const MAAT = [[0.05, 0.0275], [0.08, 0.035], [0.115, 0.034], [0.064, 0.031], [0.05, 0.0275], [0.052, 0.028], [0.066, 0.031],
+  [0.112, 0.034], [0.078, 0.034], [0.074, 0.036], [0.07, 0.034], [0.05, 0.03]];
+const OPLEGGER_KLEUR = ['#d8d6cf', '#b8442f', '#2f6d9a', '#7a7d80', '#3d7a4f']; // laadbak: wit, of een containerkleur
+// Kleding per seizoen: jassen in de winter (donkerder en warmer), mutsen in vrolijke kleuren, tassen.
+const JAS = ['#6e2a26', '#2b3d55', '#6b5a3a', '#3a3d40', '#23303e', '#3d5a3a'];
+const MUTS = ['#c0392b', '#f0b429', '#2e86c1', '#ecefe9', '#8a4bb8', '#2f9e5b'];
+const TAS = ['#5a3b26', '#1f2124', '#b8442f', '#d9c9a8'];
+const HAAR = ['#2a2018', '#5a3b22', '#b08a4a', '#8a8580'];
+const BROEK = '#2b2d33';
 // Halve romp per boot: aangemeerd, varend, zeilboot, visser, veerboot.
 const BOOT_MAAT = [[0.06, 0.025], [0.06, 0.025], [0.055, 0.022], [0.065, 0.024], [0.12, 0.042]];
 // Sportkleding voor joggers en kinderen (index 6-9 naast KLEDING).
@@ -106,6 +120,10 @@ const MENSEN_PER_TEGEL = { hoofdstad: 15, woonwijk: 10, kolonie: 6 };
 const AUTO_SNELHEID = 1.2; // tegels per seconde
 const STOEP = 0.045; // afstand van de stoep tot het hart van de straat, in tegels (straatcontract)
 const BAAN = 0.03; // rijstrook naast het hart van de weg, in tegels
+// Wachtrij voor het licht (zie stroom): hoogstens zoveel stopstrepen per rijrichting en zoveel auto's terug in de tijd.
+const MAX_STOP = 3, MAXJ = 80;
+// Vanaf deze tegelmaat in pixels (zoom 10,5 in het standaardbeeld) krijgen voertuigen lampen, spiegels en wissers.
+const DETAIL_T = 220;
 
 // Soort plek per tegel, voor wie er rondloopt.
 const LEEG = 0, HOOFD = 1, WOON = 2, KOLONIE = 3, FABRIEK = 4, HAVEN = 5, OVERIG = 6, SCHOOL = 7;
@@ -114,10 +132,14 @@ const ALIAS = { olieveld: 'centrale', staalfabriek: 'industrie', landbouw: 'boer
 
 // Stride van de buffers (getallen per item).
 const WEG = 9; // ax, ay, bx, by, lengte, land, zaad, ux, uy
-const AUTO = 6; // sx, sy, hx, hy, kleur, soort (0 auto, 1 truck, 2 bus, 3 bestel, 4 taxi, 5 politie, 6 ambulance)
-const MENS = 5; // sx, sy, kleding, huid, paraplu (0 geen, anders kleur + 1)
+// sx, sy, hx, hy, kleur, soort (0 auto, 1 truck, 2 bus, 3 bestel, 4 taxi, 5 politie, 6 ambulance, 7-11 zie OPLEGGER),
+// rem (0..1), knipperlicht (-1 links, 0 niet, 1 rechts), eigen fase (0..1, voor wissers en sneeuw op het dak)
+const AUTO = 9;
+// sx, sy, kleding, huid, paraplu (0 geen, anders kleur + 1), hx, hy (looprichting; 0, 0 is stilstaan), fase (0..1),
+// houding (0 lopen, 1 staan, 2 staan en praten met de handen)
+const MENS = 9;
 const BOOT = 6; // sx, sy, hx, hy, soort (0 aangemeerd, 1 varend, 2 zeilboot, 3 visser, 4 veerboot), romp (0 wit, 1 hout)
-const FIG = 9; // sx, sy, hx, hy, soort, kleding, huid, paraplu, fase
+const FIG = 10; // sx, sy, hx, hy, soort, kleding, huid, paraplu, fase, stil (1: de hond snuffelt en het baasje wacht)
 // Figuren op straat en in het park, met elk een eigen plafond.
 const FIGUUR = ['fietsers', 'joggers', 'honden', 'kinderwagens', 'kinderen', 'sleetjes'];
 const FIETS = 0, JOGGER = 1, HOND = 2, KINDERWAGEN = 3, KIND = 4, SLEE = 5;
@@ -375,6 +397,16 @@ export class LevenLaag {
     this.ballonSprites = null;
     this.vuurSprites = null;
     this.blauwSprite = null;
+    // verkeer dat klopt: de weg die verzamelAutos nu afloopt, de koppeling met de wegen van de infralaag en de
+    // vaste werkbuffers van de wachtrij voor het licht
+    this.wg = { ax: 0, ay: 0, ux: 0, uy: 0, zaad: 0, tunnel: false, werk: false, q0: 0, q1: 0, kant: 1 };
+    this.inf = null; this.infW = null; this.koppelSig = ''; this.infraIdx = new Int32Array(0);
+    this.stS = new Float64Array(MAX_STOP); this.stP = new Float64Array(MAX_STOP); this.stO = new Float64Array(MAX_STOP); this.stG = new Float64Array(MAX_STOP);
+    this.sT0 = new Float64Array(MAXJ); this.sEx = new Uint8Array(MAXJ); this.sPre = new Int32Array(MAXJ + 1);
+    this.sAr = new Float64Array(MAX_STOP * MAXJ); this.sDe = new Float64Array(MAX_STOP * MAXJ); this.sAs = new Float64Array(MAX_STOP * MAXJ);
+    this.sLp = new Float64Array(MAX_STOP * MAXJ); this.sSl = new Float64Array(MAX_STOP * MAXJ); this.sSt = new Uint8Array(MAX_STOP * MAXJ);
+    this.nWacht = 0; this.nu = 0; this.dNu = 0; this.dNuKlok = -1;
+    this.traag = [0, 1].map(() => ({ aan: false, soort: 0, kleur: 0, plafond: 'bussen', fase: 0, pos: 0, t0: 0, rem: 0, knip: 0, lang: 0 }));
   }
 
   // Na het laden van een spel: vaste dingen voorrekenen (kustwater, zeilplekken, vogelzwermen).
@@ -634,10 +666,16 @@ export class LevenLaag {
     this.zoom = z;
     this.nGevecht = 0;
     this.nachtVorig = view.nacht ?? 0;
+    // de lichten van infra.js en stad.js lopen op nu; de auto's op de eigen klok: het verschil zet ze gelijk. In de
+    // pauze staat de klok stil en blijft het verschil staan, anders verspringen wachtende auto's zodra een licht
+    // omslaat terwijl al het andere stilstaat (na de pauze zet het verschil zich opnieuw gelijk)
+    this.nu = nu;
+    if (tempo > 0 || this.dNuKlok !== this.klok) { this.dNu = nu - this.klok * 1000; this.dNuKlok = this.klok; }
+    this.nWacht = 0; this.nPraat = 0;
     c.save();
     if (z >= 4) { this.verzamelBoten(view, nu); this.tekenNetten(c, nu); this.tekenBoten(c, nu); }
     if (z >= 4) this.tekenPlatteland(c, nu);
-    if (z >= 3.5) { this.verzamelTunnels(view); this.verzamelAutos(); this.tekenHaltes(c); this.tekenAutos(c, smooth(3.5, 4.5, z), nu); }
+    if (z >= 3.5) { this.verzamelTunnels(view); this.koppelInfra(view); this.verzamelAutos(); this.tekenHaltes(c); this.tekenAutos(c, smooth(3.5, 4.5, z), nu); }
     if (z >= 4) this.tekenMenigte(c, nu);
     if (z >= 4) this.tekenKranen(c, nu);
     if (z >= 2) { this.verzamelGevechten(); this.tekenRook(c, nu, smooth(2, 3, z), z); }
@@ -658,6 +696,8 @@ export class LevenLaag {
     this.buiten = clamp(1 - 0.6 * w.regen - 0.45 * w.sneeuw - 0.3 * w.onweer, 0.25, 1);
     this.schermKans = smooth(0.12, 0.45, w.regen + 0.5 * w.sneeuw);
     this.nat = w.regen + w.sneeuw;
+    // sneeuw op de rijbaan, precies zoals tekenWegdetail in infra.js hem legt (daar ruimt de sneeuwschuiver)
+    this.wegSneeuw = clamp(Math.max(w.sneeuw * 1.8, (this.sz.sneeuw - 0.6) * 2.5), 0, 1);
     this.windX = Math.cos(this.wnd.hoek);
     this.windY = Math.sin(this.wnd.hoek);
   }
@@ -716,64 +756,88 @@ export class LevenLaag {
     return false;
   }
 
+  // Welke weg van de infralaag hoort bij elke weg hier (zelfde zaad: gebouw * 4099 + knooppunt)? Daar staan de
+  // stopstrepen, zebra's en het wegwerk. Alleen opnieuw zoeken als een van beide wegenlijsten verandert.
+  koppelInfra(view) {
+    const inf = view.infraLaag ?? null, IW = inf?.wegen ?? null;
+    if (inf === this.inf && IW === this.infW && this.koppelSig === this.cacheSig && this.infraIdx.length === this.nWegen) return;
+    this.inf = inf; this.infW = IW; this.koppelSig = this.cacheSig;
+    const k = (this.infraIdx = new Int32Array(this.nWegen).fill(-1));
+    if (!IW) return;
+    for (let w = 0; w < this.nWegen; w++) {
+      const z = this.wegen[w * WEG + 6];
+      for (let i = 0; i < IW.length; i++) if (IW[i].zaad === z) { k[w] = i; break; }
+    }
+  }
+
+  // Eén voertuig in de buffer (schermcoördinaten), met de weg die verzamelAutos nu afloopt: niets in een tunnel, en
+  // langs wegwerk slingeren. Wie buiten beeld rijdt telt niet mee voor het plafond.
+  zetAuto(wx, wy, hx, hy, kleur, soort, rem = 0, knip = 0, fase = 0) {
+    if (this.nAuto >= PLAFOND.autos) return;
+    const Tw = this.geo.T, wg = this.wg;
+    const q = (wx - wg.ax) * wg.ux + (wy - wg.ay) * wg.uy;
+    if (wg.tunnel && this.inTunnel(wg.zaad, q)) return;
+    if (wg.werk) {
+      // wie op de half afgesloten strook rijdt, slingert naar het midden; de tegenligger wijkt wat uit
+      const b = this.bult(q);
+      if (b > 0) {
+        const baan = hx * wg.ux + hy * wg.uy > 0 ? 1 : -1, nx = -wg.uy * baan, ny = wg.ux * baan;
+        const sch = (baan === wg.kant ? -0.85 : 0.4) * BAAN * Tw, d = 0.06 * Tw;
+        wx += nx * sch * b; wy += ny * sch * b;
+        // schuin in de bocht: de helling van het slingeren in de rijrichting
+        const hel = ((this.bult(q + baan * d) - b) * sch) / d;
+        hx += nx * hel; hy += ny * hel;
+        const l = Math.hypot(hx, hy); hx /= l; hy /= l;
+      }
+    }
+    const x = wx * this.sc + this.ox, y = wy * this.sc + this.oy;
+    if (x < -20 || y < -20 || x > this.w + 20 || y > this.h + 20) return;
+    const o = this.nAuto++ * AUTO, b = this.auto;
+    b[o] = x; b[o + 1] = y; b[o + 2] = hx; b[o + 3] = hy; b[o + 4] = kleur; b[o + 5] = soort;
+    b[o + 6] = rem; b[o + 7] = knip; b[o + 8] = fase;
+  }
+
+  // 0..1: hoe ver een auto op afstand q (vanaf A) voor het wegwerk opzij moet.
+  bult(q) {
+    const Tw = this.geo.T, wg = this.wg;
+    return smooth(wg.q0 - 0.3 * Tw, wg.q0 - 0.04 * Tw, q) * (1 - smooth(wg.q1 + 0.04 * Tw, wg.q1 + 0.3 * Tw, q));
+  }
+
   verzamelAutos() {
     const s = this.state, W = this.wegen, Tw = this.geo.T, sc = this.sc;
     const marge = Tw;
     const nachtKans = 1 - 0.4 * this.nachtVorig;
-    const buf = this.auto, MAX = PLAFOND.autos;
-    let n = 0;
-    // Alleen auto's die echt in beeld rijden tellen mee voor het plafond.
+    const MAX = PLAFOND.autos;
+    const IW = this.infW, inf = this.inf, dag = s.dag ?? 0, wg = this.wg;
+    this.nAuto = 0;
+    this.nWacht = 0; this.nSpoor = 0; this.nVuil = 0;
     const mx0 = -20, my0 = -20, mx1 = this.w + 20, my1 = this.h + 20;
-    // de weg waarop nu gezet wordt: niets tekenen in een tunnel
-    let wz = 0, wax = 0, way = 0, wux = 0, wuy = 0, metTunnel = false;
-    const zet = (wx, wy, hx, hy, kleur, soort) => {
-      if (metTunnel && this.inTunnel(wz, (wx - wax) * wux + (wy - way) * wuy)) return;
-      const x = wx * sc + this.ox, y = wy * sc + this.oy;
-      if (x < mx0 || y < my0 || x > mx1 || y > my1) return;
-      const o = n * AUTO;
-      buf[o] = x; buf[o + 1] = y;
-      buf[o + 2] = hx; buf[o + 3] = hy; buf[o + 4] = kleur; buf[o + 5] = soort;
-      n++;
-    };
-    for (let w = 0; w < this.nWegen && n < MAX; w++) {
+    // sneeuw op de weg (dan rijden er schuivers en strooiers), ochtend (vuilniswagens), dag (veegwagens)
+    const sneeuw = this.sz.sneeuw > 0.3 || this.wr.sneeuw > 0.25;
+    const dagFase = frac(this.nu / 180000), ochtend = dagFase > 0.68 && dagFase < 0.95;
+    for (let w = 0; w < this.nWegen && this.nAuto < MAX; w++) {
       const o = w * WEG;
       const ax = W[o], ay = W[o + 1], bx = W[o + 2], by = W[o + 3];
       if ((ax > bx ? ax : bx) < this.wx0 - marge || (ax < bx ? ax : bx) > this.wx1 + marge) continue;
       if ((ay > by ? ay : by) < this.wy0 - marge || (ay < by ? ay : by) > this.wy1 + marge) continue;
       const len = W[o + 4], zaad = W[o + 6] | 0, ux = W[o + 7], uy = W[o + 8];
-      wz = zaad; wax = ax; way = ay; wux = ux; wuy = uy; metTunnel = this.heeftTunnel(zaad);
+      const iw = IW ? this.infraIdx[w] : -1, iweg = iw >= 0 ? IW[iw] : null;
+      wg.ax = ax; wg.ay = ay; wg.ux = ux; wg.uy = uy; wg.zaad = zaad; wg.tunnel = this.heeftTunnel(zaad);
+      wg.werk = !!iweg && inf.werkOp(iweg, dag);
+      if (wg.werk) { wg.q0 = inf.werk0; wg.q1 = inf.werk1; wg.kant = inf.werkKant; }
       const d = levenDichtheid(s, W[o + 5]);
       // Niet over de gebouwen aan de uiteinden rijden: de auto 'verdwijnt' in de garage.
       const rand = Math.min(0.45, (Tw * 0.42) / len), rijd = 1 - 2 * rand;
       const konvooi = d.oorlog && len >= 1.5 * Tw;
       const totaal = clamp(Math.round((len / Tw) * 2 * d.autoFactor), 0, 4);
       const autos = konvooi ? Math.round(totaal * 0.65) : totaal;
-      for (let i = 0; i < autos && n < MAX; i++) {
-        if (hash(zaad, i, 13) > nachtKans) continue;
-        const v = AUTO_SNELHEID * Tw * (0.85 + 0.3 * hash(zaad, i, 5));
-        const baan = i & 1 ? -1 : 1;
-        let f = frac(this.klok * v / len + hash(zaad, i));
-        if (baan < 0) f = 1 - f;
-        const p = rand + f * rijd;
-        // Een deel van het verkeer is een taxi (welvarend, niet in een gedempt regime) of een bestelbus.
-        const r = hash(zaad, i, 17);
-        let kleur = (d.gedempt ? 8 : 0) + Math.floor(hash(zaad, i, 3) * 8), soort = 0;
-        if (r < 0.1 && d.welvaart > 0.7 && !d.gedempt) { soort = 4; kleur = TAXI; }
-        else if (r < 0.24) { soort = 3; if (hash(zaad, i, 18) < 0.7) kleur = BESTEL; }
-        // Rechts rijden: de strook ligt rechts van de rijrichting.
-        zet(ax + (bx - ax) * p - baan * uy * BAAN * Tw, ay + (by - ay) * p + baan * ux * BAAN * Tw, ux * baan, uy * baan, kleur, soort);
-      }
+      // Trage voertuigen per rijstrook (de stadsbus, een werkwagen) eerst kiezen: de stroom blijft erachter.
+      const tr0 = this.traag[0], tr1 = this.traag[1];
+      tr0.aan = tr1.aan = false;
       // Stadsbus op lange wegen: rijdt, stopt bij twee haltes, rijdt door.
-      if (len >= 2 * Tw && n < MAX && this.n.bussen < PLAFOND.bussen && hash(zaad, 71) < 0.25 + 0.3 * Math.min(1, d.welvaart) && !d.ziek) {
-        const v = AUTO_SNELHEID * Tw * 0.7, dw = 0.14;
-        const P = (len * rijd) / v / (1 - 2 * dw);
+      if (len >= 2 * Tw && this.n.bussen < PLAFOND.bussen && hash(zaad, 71) < 0.25 + 0.3 * Math.min(1, d.welvaart) && !d.ziek) {
         const baan = hash(zaad, 73) < 0.5 ? 1 : -1;
-        let f = haltePos(frac(this.klok / P + hash(zaad, 72)), 2, dw);
-        if (baan < 0) f = 1 - f;
-        const p = rand + f * rijd;
-        const voor = n;
-        zet(ax + (bx - ax) * p - baan * uy * BAAN * Tw, ay + (by - ay) * p + baan * ux * BAAN * Tw, ux * baan, uy * baan, d.gedempt ? 9 : BUS, 2);
-        if (n > voor) this.n.bussen++;
+        this.traagKies(baan, 2, d.gedempt ? 9 : BUS, AUTO_SNELHEID * Tw * 0.7, 2, 0.14, hash(zaad, 72), hash(zaad, 74), 'bussen', len, rand, rijd);
         // de haltes zelf: een abri op de berm aan de kant waar de bus stopt
         for (let hI = 1; hI <= 2 && this.nHalte < PLAFOND.haltes; hI++) {
           const hp = rand + (hI / 3) * rijd, kant = baan * 0.085 * Tw;
@@ -783,31 +847,210 @@ export class LevenLaag {
           this.halte[o] = x; this.halte[o + 1] = y; this.halte[o + 2] = ux; this.halte[o + 3] = uy;
         }
       }
-      // Bij onrust, oorlog of ziekte: politie en ambulances, sneller dan het gewone verkeer.
-      if ((d.oorlog || d.onrust || d.protest > 0.4 || d.ziek) && n < MAX && this.n.hulpdiensten < PLAFOND.hulpdiensten && hash(zaad, 81) < (d.oorlog || d.ziek ? 0.45 : 0.3)) {
+      // Werkverkeer: langzaam, met een zwaailicht, en het laat een spoor na.
+      this.werkverkeer(zaad, len, rand, rijd, d, sneeuw, ochtend);
+      // Rijstroken met een stopstreep (verkeerslicht of zebra) rijden als een stroom die voor rood wacht; de andere
+      // rijden vrij rond zoals altijd. vrij: 0 beide stroken vrij, 1 of -1 alleen die, 2 geen.
+      const stops = iweg ? iweg.stops : null;
+      let vrij = 0;
+      if (stops && (autos > 0 || tr0.aan || tr1.aan)) {
+        const heen = this.stroom(len, rand, zaad, 1, stops, autos ? Math.max(0.3, Math.ceil(autos / 2)) : 0, d, nachtKans);
+        const terug = this.stroom(len, rand, zaad, -1, stops, autos ? Math.max(0.5, Math.floor(autos / 2)) : 0, d, nachtKans);
+        vrij = heen && terug ? 2 : heen ? -1 : terug ? 1 : 0;
+      }
+      for (let i = 0; i < autos && this.nAuto < MAX && vrij !== 2; i++) {
+        if (hash(zaad, i, 13) > nachtKans) continue;
+        const baan = i & 1 ? -1 : 1;
+        if (vrij && baan !== vrij) continue;
+        const v = AUTO_SNELHEID * Tw * (0.85 + 0.3 * hash(zaad, i, 5));
+        let f = frac(this.klok * v / len + hash(zaad, i));
+        if (baan < 0) f = 1 - f;
+        const p = rand + f * rijd;
+        // Een deel van het verkeer is een taxi (welvarend, niet in een gedempt regime), een bestelbus of op lange
+        // wegen een vrachtwagen met oplegger.
+        const r = hash(zaad, i, 17);
+        let kleur = (d.gedempt ? 8 : 0) + Math.floor(hash(zaad, i, 3) * 8), soort = 0;
+        if (r < 0.1 && d.welvaart > 0.7 && !d.gedempt) { soort = 4; kleur = TAXI; }
+        else if (r < 0.24) { soort = 3; if (hash(zaad, i, 18) < 0.7) kleur = BESTEL; }
+        else if (r < 0.31 && len >= 1.6 * Tw && this.n.opleggers < PLAFOND.opleggers) soort = OPLEGGER;
+        // vlak voor het eind slaat een deel af, de garage in: knipperlicht aan die kant
+        const rest = baan > 0 ? 1 - f : f;
+        const knip = rest < 0.14 && hash(zaad, i, 19) < 0.45 ? (hash(zaad, i, 20) < 0.5 ? -1 : 1) : 0;
+        // Rechts rijden: de strook ligt rechts van de rijrichting.
+        const voor = this.nAuto;
+        this.zetAuto(ax + (bx - ax) * p - baan * uy * BAAN * Tw, ay + (by - ay) * p + baan * ux * BAAN * Tw, ux * baan, uy * baan, kleur, soort, 0, knip, hash(zaad, i, 21));
+        if (soort === OPLEGGER && this.nAuto > voor) this.n.opleggers++;
+      }
+      // de trage voertuigen op hun plek (achter de rij voor het licht als ze die inhaalden)
+      for (let k = 0; k < 2 && this.nAuto < MAX; k++) {
+        const tr = this.traag[k];
+        if (!tr.aan) continue;
+        const baan = k ? -1 : 1, p = baan > 0 ? tr.pos : len - tr.pos, voor = this.nAuto;
+        this.zetAuto(ax + ux * p - baan * uy * BAAN * Tw, ay + uy * p + baan * ux * BAAN * Tw, ux * baan, uy * baan, tr.kleur, tr.soort, tr.rem, tr.knip, tr.fase);
+        if (this.nAuto > voor) this.n[tr.plafond]++;
+      }
+      // Bij onrust, oorlog of ziekte: politie en ambulances, sneller dan het gewone verkeer en door rood.
+      if ((d.oorlog || d.onrust || d.protest > 0.4 || d.ziek) && this.nAuto < MAX && this.n.hulpdiensten < PLAFOND.hulpdiensten && hash(zaad, 81) < (d.oorlog || d.ziek ? 0.45 : 0.3)) {
         const amb = (d.oorlog || d.ziek) && hash(zaad, 82) < 0.55;
         const baan = hash(zaad, 83) < 0.5 ? 1 : -1;
         let f = frac(this.klok * AUTO_SNELHEID * Tw * 1.7 / len + hash(zaad, 84));
         if (baan < 0) f = 1 - f;
         const p = rand + f * rijd;
-        const voor = n;
-        zet(ax + (bx - ax) * p - baan * uy * BAAN * Tw, ay + (by - ay) * p + baan * ux * BAAN * Tw, ux * baan, uy * baan, amb ? AMBU : POLITIE, amb ? 6 : 5);
-        if (n > voor) this.n.hulpdiensten++;
+        const voor = this.nAuto;
+        this.zetAuto(ax + (bx - ax) * p - baan * uy * BAAN * Tw, ay + (by - ay) * p + baan * ux * BAAN * Tw, ux * baan, uy * baan, amb ? AMBU : POLITIE, amb ? 6 : 5, 0, 0, hash(zaad, 85));
+        if (this.nAuto > voor) this.n.hulpdiensten++;
       }
       if (konvooi) {
         // Oorlog: een konvooi van drie olijfgroene trucks met vaste tussenruimte.
         const baan = hash(zaad, 7) < 0.5 ? 1 : -1;
         const f0 = frac(this.klok * AUTO_SNELHEID * Tw * 0.75 / len + hash(zaad, 99));
         const stap = (0.25 * Tw) / (len * rijd);
-        for (let j = 0; j < 3 && n < MAX; j++) {
+        for (let j = 0; j < 3 && this.nAuto < MAX; j++) {
           let f = frac(f0 - j * stap);
           if (baan < 0) f = 1 - f;
           const p = rand + f * rijd;
-          zet(ax + (bx - ax) * p - baan * uy * BAAN * Tw, ay + (by - ay) * p + baan * ux * BAAN * Tw, ux * baan, uy * baan, TRUCK, 1);
+          this.zetAuto(ax + (bx - ax) * p - baan * uy * BAAN * Tw, ay + (by - ay) * p + baan * ux * BAAN * Tw, ux * baan, uy * baan, TRUCK, 1, 0, 0, hash(zaad, j, 98));
         }
       }
     }
-    this.nAuto = n;
+  }
+
+  // Een rijstrook met stopstrepen (verkeerslicht of zebra, zie w.stops in infra.js): een stroom auto's die elk op een
+  // vast moment uit de garage komen (volgnummer · tussenpoos plus een vaste schommeling). Wie bij oranje of rood
+  // aankomt, remt af en sluit achteraan de rij; bij groen trekken ze een voor een op. Alles volgt uit zaad en klok:
+  // hoe lang een auto wacht, hangt alleen af van het licht en van de auto's die in dezelfde lichtcyclus voor hem
+  // aankwamen, dus dezelfde klok geeft altijd dezelfde rij. Geeft false als deze richting geen stopstreep heeft.
+  stroom(len, rand, zaad, baan, stops, nBaan, d, nachtKans) {
+    const Tw = this.geo.T, t = this.klok, dNu = this.dNu, wg = this.wg;
+    const S = this.stS, SP = this.stP, SO = this.stO, SG = this.stG;
+    // stops in de rijrichting, als plek van het midden van de auto wanneer zijn neus bij de streep is
+    const sB = rand * len, sE = len - rand * len, hl = 0.055 * Tw;
+    let nS = 0, Pm = 0;
+    for (let i = 0; i < stops.length && nS < MAX_STOP; i += STOP) {
+      if (stops[i + 1] !== baan) continue;
+      const sc = (baan > 0 ? stops[i] : len - stops[i]) - hl;
+      if (sc < sB + 0.02 * Tw || sc > sE - 0.02 * Tw) continue;
+      let k = nS++;
+      while (k > 0 && S[k - 1] > sc) { S[k] = S[k - 1]; SP[k] = SP[k - 1]; SO[k] = SO[k - 1]; SG[k] = SG[k - 1]; k--; }
+      S[k] = sc; SP[k] = stops[i + 2]; SO[k] = stops[i + 3]; SG[k] = stops[i + 4];
+      if (stops[i + 2] / 1000 > Pm) Pm = stops[i + 2] / 1000;
+    }
+    if (!nS) return false;
+    const v = AUTO_SNELHEID * Tw * (0.9 + 0.2 * hash(zaad, baan + 2, 5));
+    const D = (sE - sB) / v;
+    const tus = Math.max(2.2, D / Math.max(0.3, nBaan)), dl = clamp(0.3 * tus, 0.15, 0.6);
+    const tau = 0.8, gap = 0.15 * Tw;
+    // genoeg auto's terug in de tijd dat elke rij van nu compleet is (een lichtcyclus per stop, ruim genomen)
+    const jHi = Math.floor(t / tus);
+    let jLo = Math.floor((t - D - nS * (2 * Pm + 2) - 2) / tus) - 1;
+    if (jHi - jLo + 1 > MAXJ) jLo = jHi - MAXJ + 1;
+    const nJ = jHi - jLo + 1;
+    const T0 = this.sT0, EX = this.sEx, PRE = this.sPre, AR = this.sAr, DE = this.sDe, AS = this.sAs, LP = this.sLp, SL = this.sSl, ST = this.sSt;
+    PRE[0] = 0;
+    for (let k = 0; k < nJ; k++) {
+      const j = jLo + k;
+      T0[k] = (j + 0.6 * hash(zaad, j, 40 + baan)) * tus;
+      EX[k] = nBaan > 0 && hash(zaad, j, 43 + baan) <= nachtKans ? 1 : 0;
+      PRE[k + 1] = PRE[k] + EX[k];
+    }
+    // 1. per stop: aankomst bij de streep, vertrek en de plek in de rij
+    for (let i = 0; i < nS; i++) {
+      const sc = S[i], Pms = SP[i], P = Pms / 1000, o = SO[i], g = SG[i], b = i * MAXJ;
+      let p1 = 0, p2 = 0, vorige = -1;
+      for (let k = 0; k < nJ; k++) {
+        if (!EX[k]) continue;
+        const a = i === 0 ? T0[k] + (sc - sB) / v : DE[b - MAXJ + k] + (sc - S[i - 1]) / v;
+        AR[b + k] = a;
+        // het licht bij aankomst, in dezelfde fase als infra.js en stad.js het tekenen (klok in ms plus het verschil met nu)
+        const f = frac((a * 1000 + dNu) / Pms + o), rood = f >= g;
+        const gS = rood ? a + (1 - f) * P : a - f * P, W0 = rood ? a - (f - g) * P : gS - (1 - g) * P;
+        // wie sinds het begin van dit rood aankwam gaat voor; wie de streep al over is, houdt niemand meer op
+        while (p1 < k && (!EX[p1] || AR[b + p1] < W0)) p1++;
+        if (p2 < p1) p2 = p1;
+        while (p2 < k && (!EX[p2] || DE[b + p2] <= a)) p2++;
+        const c = PRE[k] - PRE[p1];
+        const dep = rood ? gS + c * dl : Math.max(a, gS + c * dl);
+        if (dep - a <= 0.05) { ST[b + k] = 0; DE[b + k] = a; vorige = k; continue; }
+        let sl = sc - (PRE[k] - PRE[p2]) * gap;
+        // staat de auto voor hem er nog, dan sluit hij daar achter aan
+        if (vorige >= 0 && ST[b + vorige] && LP[b + vorige] + tau > a - (sc - sl) / v && sl > SL[b + vorige] - gap) sl = SL[b + vorige] - gap;
+        const as = a - (sc - sl) / v, lp = Math.max(dep - (sc - sl) / v, as + tau / 2);
+        ST[b + k] = 1; AS[b + k] = as; LP[b + k] = lp; SL[b + k] = sl;
+        DE[b + k] = lp + tau / 2 + (sc - sl) / v;
+        vorige = k;
+      }
+    }
+    // 2. waar elke auto nu is: vrij rijden, afremmen naar zijn plek in de rij, wachten, optrekken, doorrijden
+    // van voor naar achter: wie zijn voorganger inhaalt (een rij die tot over de vorige stopstreep terugloopt), blijft
+    // er op een autolengte achter staan
+    // het trage voertuig van deze strook staat in de rij tussen wie voor en na hem de weg op kwam
+    const tr = this.traag[baan > 0 ? 0 : 1];
+    let kop = Infinity, kopRem = 0, trKlaar = !tr.aan;
+    for (let k = 0; k < nJ && this.nAuto < PLAFOND.autos; k++) {
+      if (!trKlaar && EX[k] && T0[k] > tr.t0) {
+        trKlaar = true;
+        if (tr.pos > kop - gap - tr.lang) { tr.pos = kop - gap - tr.lang; tr.rem = kopRem ? 0.9 : 0; }
+        kop = tr.pos - tr.lang; kopRem = tr.rem;
+      }
+      if (!EX[k] || T0[k] > t) continue;
+      let pT = T0[k], pS = sB, pos = 0, klaar = false, rem = 0;
+      for (let i = 0; i < nS && !klaar; i++) {
+        const ki = i * MAXJ + k;
+        if (!ST[ki]) continue;
+        const as = AS[ki], lp = LP[ki], sl = SL[ki];
+        klaar = true;
+        if (t < as - tau / 2) pos = pS + v * (t - pT);
+        else if (t < as + tau / 2) { const u = (t - as + tau / 2) / tau; pos = sl - v * tau * 0.5 * (1 - u) * (1 - u); rem = 1; }
+        else if (t < lp) { pos = sl; rem = 1; }
+        else if (t < lp + tau) { const u = (t - lp) / tau; pos = sl + v * tau * 0.5 * u * u; }
+        else { pT = lp + tau / 2; pS = sl; klaar = false; }
+      }
+      if (!klaar) pos = pS + v * (t - pT);
+      if (pos > kop - gap) { pos = kop - gap; rem = kopRem; }
+      kop = pos; kopRem = rem;
+      if (pos < sB || pos > sE) continue;
+      const j = jLo + k, r = hash(zaad, j, 17 + baan);
+      let kleur = (d.gedempt ? 8 : 0) + Math.floor(hash(zaad, j, 4 + baan) * 8), soort = 0;
+      if (r < 0.1 && d.welvaart > 0.7 && !d.gedempt) { soort = 4; kleur = TAXI; }
+      else if (r < 0.24) { soort = 3; if (hash(zaad, j, 18) < 0.7) kleur = BESTEL; }
+      const knip = sE - pos < 0.3 * Tw && hash(zaad, j, 19 + baan) < 0.45 ? (hash(zaad, j, 22) < 0.5 ? -1 : 1) : 0;
+      const p = baan > 0 ? pos : len - pos, voor = this.nAuto;
+      this.zetAuto(wg.ax + wg.ux * p - baan * wg.uy * BAAN * Tw, wg.ay + wg.uy * p + baan * wg.ux * BAAN * Tw, wg.ux * baan, wg.uy * baan, kleur, soort, rem, knip, hash(zaad, j, 21));
+      if (rem && this.nAuto > voor) this.nWacht++;
+    }
+    if (!trKlaar && tr.pos > kop - gap - tr.lang) { tr.pos = kop - gap - tr.lang; tr.rem = kopRem ? 0.9 : 0; }
+    return true;
+  }
+
+  // Werkverkeer op de weg van verzamelAutos: 's ochtends de vuilniswagen (stopt om de paar huizen; dan staan er twee
+  // man met een kliko naast), bij sneeuw de sneeuwschuiver of de strooiwagen (oranje, met zwaailicht) en overdag bij
+  // droog weer een veegwagen. Langzaam en vast per weg; het spoor dat ze nalaten tekent tekenAutos.
+  werkverkeer(zaad, len, rand, rijd, d, sneeuw, ochtend) {
+    if (d.oorlog || d.ziek) return;
+    const V = AUTO_SNELHEID * this.geo.T;
+    // werkverkeer
+    if (ochtend && hash(zaad, 151) < 0.3) this.werkwagen(zaad, len, rand, rijd, VUIL, d.gedempt ? 13 : VUILKLEUR, V * 0.35, 4, 0.12, 151, 'vuilniswagens');
+    if (sneeuw && hash(zaad, 152) < 0.35) this.werkwagen(zaad, len, rand, rijd, this.wegSneeuw > 0.15 && hash(zaad, 154) < 0.5 ? SCHUIVER : STROOI, WINTERKLEUR, V * 0.5, 0, 0, 152, 'strooiers');
+    else if (!sneeuw && this.nachtVorig < 0.35 && this.nat < 0.5 && hash(zaad, 153) < 0.18) this.werkwagen(zaad, len, rand, rijd, VEEG, VEEGKLEUR, V * 0.25, 0, 0, 153, 'veegwagens');
+  }
+
+  werkwagen(zaad, len, rand, rijd, soort, kleur, v, stops, dw, kh, plafond) {
+    this.traagKies(hash(zaad, kh, 1) < 0.5 ? 1 : -1, soort, kleur, v, stops, dw, hash(zaad, kh, 2), hash(zaad, kh, 3), plafond, len, rand, rijd);
+  }
+
+  // Een traag voertuig op een rijstrook (hoogstens een per strook): rijdt in een vaste ronde van de garage naar de
+  // overkant met stops (bus bij de haltes, vuilniswagen bij de huizen). pos is de afstand in de rijrichting, t0 het
+  // moment dat hij aan deze ronde begon; wie daarna de weg op kwam, rijdt erachter (zie stroom).
+  traagKies(baan, soort, kleur, v, stops, dw, u0, fase, plafond, len, rand, rijd) {
+    const tr = this.traag[baan > 0 ? 0 : 1];
+    if (tr.aan || this.n[plafond] >= PLAFOND[plafond]) return;
+    const P = (len * rijd) / v / (1 - stops * dw), u = frac(this.klok / P + u0);
+    const f = stops ? haltePos(u, stops, dw) : u, staat = stops > 0 && haltePos(u + 0.002, stops, dw) === f;
+    tr.aan = true; tr.soort = soort; tr.kleur = kleur; tr.plafond = plafond; tr.fase = fase;
+    tr.pos = (rand + f * rijd) * len; tr.t0 = this.klok - u * P;
+    // bij de halte: remlicht aan en (de bus) het knipperlicht naar de stoep
+    tr.rem = staat ? 1 : 0; tr.knip = staat && soort === 2 ? 1 : 0;
+    tr.lang = (MAAT[soort][0] - 0.05) * this.geo.T;
   }
 
   tekenAutos(c, a, nu = 0) {
@@ -815,6 +1058,7 @@ export class LevenLaag {
     this.zwaai = false;
     if (!n || a <= 0) return;
     c.globalAlpha = a;
+    if (T >= 120) this.tekenSporen(c);
     // schaduw naar het zuidoosten (licht uit het noordwesten)
     c.fillStyle = 'rgba(0,0,0,0.28)';
     c.beginPath();
@@ -824,7 +1068,7 @@ export class LevenLaag {
     }
     c.fill();
     // carrosserie, één pad per kleur
-    for (let k = 0; k <= AMBU; k++) {
+    for (let k = 0; k <= LAATSTE_KLEUR; k++) {
       let open = false;
       for (let i = 0; i < n; i++) {
         const o = i * AUTO;
@@ -835,6 +1079,7 @@ export class LevenLaag {
       }
       if (open) { c.fillStyle = k === TRUCK ? TRUCK_KLEUR : k < 8 ? AUTO_KLEUREN[k] : k < 16 ? AUTO_GEDEMPT[k - 8] : KLEUR_VOERTUIG[k]; c.fill(); }
     }
+    if (this.n.opleggers || this.werkwagens()) this.tekenOpbouw(c, nu);
     // dak (auto), laadbak met zeil (truck), cabine (bestelbus); de bus krijgt een licht dak
     c.fillStyle = 'rgba(0,0,0,0.24)';
     c.beginPath();
@@ -842,7 +1087,7 @@ export class LevenLaag {
       const o = i * AUTO, hx = b[o + 2], hy = b[o + 3], s = b[o + 5];
       if (s === 1) rechthoek(c, b[o] - hx * T * 0.022, b[o + 1] - hy * T * 0.022, hx, hy, T * 0.055, T * 0.03);
       else if (s === 3) rechthoek(c, b[o] + hx * T * 0.042, b[o + 1] + hy * T * 0.042, hx, hy, T * 0.012, T * 0.026);
-      else if (s !== 2) rechthoek(c, b[o] - hx * T * 0.006, b[o + 1] - hy * T * 0.006, hx, hy, T * 0.024, T * 0.021);
+      else if (s !== 2 && s < OPLEGGER) rechthoek(c, b[o] - hx * T * 0.006, b[o + 1] - hy * T * 0.006, hx, hy, T * 0.024, T * 0.021);
     }
     c.fill();
     if (T * 0.1 >= 9) {
@@ -883,17 +1128,18 @@ export class LevenLaag {
       for (let i = 0; i < n; i++) {
         const o = i * AUTO, s = b[o + 5];
         if (s === 1 || s === 2) continue;
-        const f = s === 3 ? 0.058 : s === 6 ? 0.056 : 0.024;
+        const f = s === 3 ? 0.058 : s === 6 ? 0.056 : s >= OPLEGGER ? MAAT[s][0] - 0.01 : 0.024;
         rechthoek(c, b[o] + b[o + 2] * T * f, b[o + 1] + b[o + 3] * T * f, b[o + 2], b[o + 3], T * 0.006, T * 0.02);
       }
       c.fill();
     }
+    if (T >= DETAIL_T) this.autoDetail(c, nu);
     // zwaailichten: blauw en rood om en om op 2,5 Hz (de ambulance alleen blauw)
     for (let kleur = 0; kleur < 2; kleur++) {
       let open = false;
       for (let i = 0; i < n; i++) {
         const o = i * AUTO, s = b[o + 5];
-        if (s < 5) continue;
+        if (s !== 5 && s !== 6) continue;
         this.zwaai = true;
         const aan = (Math.floor(nu / 200) + i) & 1;
         if (kleur === 0 ? !aan : aan || s === 6) continue;
@@ -904,6 +1150,178 @@ export class LevenLaag {
       if (open) { c.fillStyle = kleur ? '#ff4a3a' : '#4d8dff'; c.fill(); }
     }
     c.globalAlpha = 1;
+  }
+
+  // ---------- voertuigdetail ----------
+
+  // Hoeveel werkwagens (vuilniswagen, schuiver of strooier, veegwagen) er deze frame rijden.
+  werkwagens() { return this.n.vuilniswagens + this.n.strooiers + this.n.veegwagens; }
+
+  // Eén pad in één kleur voor alle voertuigen waarvoor vorm(o, soort, i) iets toevoegt (en dan true geeft).
+  autoPas(c, kleur, vorm, lijn = false) {
+    const n = this.nAuto, b = this.auto;
+    let k = 0;
+    c.beginPath();
+    for (let i = 0; i < n; i++) if (vorm(i * AUTO, b[i * AUTO + 5], i)) k++;
+    if (!k) return;
+    if (lijn) { c.strokeStyle = kleur; c.stroke(); } else { c.fillStyle = kleur; c.fill(); }
+  }
+
+  // Rechthoek en stip op een plek in het voertuig: f tegels naar voren, z tegels naar rechts (de stoepkant).
+  rt(c, o, f, z, l, w) {
+    const b = this.auto, T = this.T, hx = b[o + 2], hy = b[o + 3];
+    rechthoek(c, b[o] + (hx * f - hy * z) * T, b[o + 1] + (hy * f + hx * z) * T, hx, hy, l * T, w * T);
+    return true;
+  }
+  st(c, o, f, z, r) {
+    const b = this.auto, T = this.T, hx = b[o + 2], hy = b[o + 3];
+    stip(c, b[o] + (hx * f - hy * z) * T, b[o + 1] + (hy * f + hx * z) * T, Math.max(0.6, r * T));
+    return true;
+  }
+
+  // Wat voertuigen op de weg achterlaten: een geschoven baan met een richel sneeuw achter de sneeuwschuiver, zout
+  // achter de strooiwagen, een natte baan achter de veegwagen en opspattend water achter alles wat rijdt in de regen.
+  tekenSporen(c) {
+    const T = this.T, regen = this.wr.regen > 0.25 && T >= 150, klok = Math.floor(this.klok * 6);
+    if (!regen && !this.werkwagens()) return;
+    if (this.n.strooiers) {
+      // de geschoven baan en de richel zie je alleen zo sterk als er sneeuw op de weg ligt
+      const ga = c.globalAlpha;
+      c.globalAlpha = ga * clamp(this.wegSneeuw * 1.25, 0, 1);
+      this.autoPas(c, 'rgba(72,75,80,0.6)', (o, s) => s === SCHUIVER && this.rt(c, o, -MAAT[s][0] - 0.19, 0, 0.19, 0.034));
+      this.autoPas(c, 'rgba(250,252,255,0.92)', (o, s) => s === SCHUIVER && this.rt(c, o, -MAAT[s][0] - 0.17, 0.04, 0.18, 0.006));
+      c.globalAlpha = ga;
+      this.autoPas(c, 'rgba(214,206,190,0.9)', (o, s) => {
+        if (s !== STROOI) return false;
+        for (let k = 0; k < 14; k++) this.st(c, o, -0.076 - 0.02 * k - 0.012 * hash(k, klok, 1), (hash(k, klok, 2) - 0.5) * (0.016 + 0.004 * k), 0.0028);
+        return true;
+      });
+    }
+    if (this.n.veegwagens) this.autoPas(c, 'rgba(35,42,50,0.25)', (o, s) => s === VEEG && this.rt(c, o, -0.05 - 0.16, 0, 0.16, 0.03));
+    if (regen) {
+      const b = this.auto;
+      this.autoPas(c, 'rgba(225,230,236,0.2)', (o, s) => {
+        if (b[o + 6]) return false;
+        const l = MAAT[s][0] + 0.018, w = MAAT[s][1] - 0.008;
+        this.st(c, o, -l, w, 0.014); this.st(c, o, -l, -w, 0.014); this.st(c, o, -l - 0.016, 0, 0.012);
+        return true;
+      });
+    }
+  }
+
+  // Opbouw van de vrachtwagen met oplegger en de werkwagens, plus het oranje zwaailicht van de werkwagens.
+  tekenOpbouw(c, nu) {
+    const b = this.auto, T = this.T, fijn = T >= 150;
+    if (this.n.opleggers) {
+      for (let k = 0; k < OPLEGGER_KLEUR.length; k++) this.autoPas(c, OPLEGGER_KLEUR[k], (o, s) => s === OPLEGGER && Math.floor(b[o + 8] * OPLEGGER_KLEUR.length) === k && this.rt(c, o, -0.02, 0, 0.09, 0.035));
+      this.autoPas(c, 'rgba(0,0,0,0.32)', (o, s) => {
+        if (s !== OPLEGGER) return false;
+        this.rt(c, o, 0.071, 0, 0.002, 0.03);
+        if (fijn) for (let j = 0; j < 8; j++) this.rt(c, o, -0.096 + 0.022 * j, 0, 0.0012, 0.035);
+        return true;
+      });
+    }
+    if (!this.werkwagens()) return;
+    // vuilniswagen: witte cabine voorop, donkere pers achterop, ribben op de bak
+    this.autoPas(c, '#e9e7df', (o, s) => s === VUIL && this.rt(c, o, 0.062, 0, 0.016, 0.034));
+    this.autoPas(c, '#2a332d', (o, s) => {
+      if (s !== VUIL) return false;
+      this.rt(c, o, -0.068, 0, 0.01, 0.033);
+      if (fijn) for (let j = 0; j < 4; j++) this.rt(c, o, -0.042 + 0.022 * j, 0, 0.0014, 0.034);
+      return true;
+    });
+    // sneeuwschuiver: schuin blad voorop dat de sneeuw naar de stoepkant duwt; strooiwagen: bak met zout en strooischijf
+    this.autoPas(c, '#8d9298', (o, s) => {
+      if (s !== SCHUIVER) return false;
+      const hx = b[o + 2], hy = b[o + 3], x = b[o], y = b[o + 1];
+      const p = (f, z, eerst) => { const px = x + (hx * f - hy * z) * T, py = y + (hy * f + hx * z) * T; if (eerst) c.moveTo(px, py); else c.lineTo(px, py); };
+      p(0.094, -0.046, true); p(0.078, 0.048); p(0.07, 0.048); p(0.086, -0.046); c.closePath();
+      return true;
+    });
+    this.autoPas(c, '#6b5a46', (o, s) => s === STROOI && this.rt(c, o, -0.018, 0, 0.042, 0.028));
+    this.autoPas(c, '#d8d0c0', (o, s) => s === STROOI && this.rt(c, o, -0.018, 0, 0.034, 0.02));
+    this.autoPas(c, '#2b2d30', (o, s) => (s === STROOI ? this.st(c, o, -0.074, 0, 0.008) : s === SCHUIVER ? this.rt(c, o, -0.02, 0, 0.04, 0.028) : false));
+    // veegwagen: twee gele borstels voorop die ronddraaien
+    if (this.n.veegwagens) {
+      this.autoPas(c, '#d1a93a', (o, s) => s === VEEG && this.st(c, o, 0.046, 0.03, 0.013) && this.st(c, o, 0.046, -0.03, 0.013));
+      if (fijn) {
+        c.lineWidth = Math.max(0.6, T * 0.002);
+        this.autoPas(c, 'rgba(90,70,20,0.85)', (o, s) => {
+          if (s !== VEEG) return false;
+          const hx = b[o + 2], hy = b[o + 3];
+          for (let z = -1; z <= 1; z += 2) {
+            const mx = b[o] + (hx * 0.046 - hy * 0.03 * z) * T, my = b[o + 1] + (hy * 0.046 + hx * 0.03 * z) * T;
+            const a = (nu / 90) * z, r = 0.012 * T, ca = Math.cos(a) * r, sa = Math.sin(a) * r;
+            c.moveTo(mx - ca, my - sa); c.lineTo(mx + ca, my + sa); c.moveTo(mx + sa, my - ca); c.lineTo(mx - sa, my + ca);
+          }
+          return true;
+        }, true);
+      }
+    }
+    // oranje zwaailicht op de cabine, om en om links en rechts
+    this.autoPas(c, '#ffb020', (o, s) => s >= VUIL && this.st(c, o, MAAT[s][0] - 0.03, (Math.floor(nu / 260 + b[o + 8] * 4) & 1 ? 1 : -1) * 0.016, 0.006));
+  }
+
+  // Dichtbij: achter- en remlichten, koplampen, knipperlichten, spiegels, ruitenwissers in de regen, sneeuw op het dak,
+  // de lichtbalk van politie en ambulance met een flits, en bij een stilstaande vuilniswagen twee man met een kliko.
+  autoDetail(c, nu) {
+    const b = this.auto, T = this.T;
+    const lv = (s) => MAAT[s][0], wv = (s) => MAAT[s][1];
+    const ruit = (s) => (s === 3 ? 0.05 : s === 6 ? 0.048 : s === 2 ? 0.104 : s >= OPLEGGER ? MAAT[s][0] - 0.012 : 0.018);
+    this.autoPas(c, '#7e1a16', (o, s) => !b[o + 6] && this.rt(c, o, 0.002 - lv(s), wv(s) - 0.006, 0.002, 0.005) && this.rt(c, o, 0.002 - lv(s), 0.006 - wv(s), 0.002, 0.005));
+    this.autoPas(c, '#ff3a2c', (o, s) => b[o + 6] > 0 && this.rt(c, o, 0.003 - lv(s), wv(s) - 0.006, 0.003, 0.007) && this.rt(c, o, 0.003 - lv(s), 0.006 - wv(s), 0.003, 0.007));
+    this.autoPas(c, '#f4f0d8', (o, s) => this.rt(c, o, lv(s) - 0.002, wv(s) - 0.007, 0.002, 0.006) && this.rt(c, o, lv(s) - 0.002, 0.007 - wv(s), 0.002, 0.006));
+    this.autoPas(c, '#ffae1a', (o, s) => {
+      const k = b[o + 7];
+      if (!k || !(Math.floor(nu / 380 + b[o + 8] * 3) & 1)) return false;
+      const z = k * (wv(s) - 0.004);
+      return this.rt(c, o, lv(s) - 0.003, z, 0.003, 0.004) && this.rt(c, o, 0.003 - lv(s), z, 0.003, 0.004);
+    });
+    this.autoPas(c, 'rgba(25,27,30,0.9)', (o, s) => (s === 0 || s >= 3) && s <= 6 && this.rt(c, o, ruit(s), wv(s) + 0.004, 0.003, 0.004) && this.rt(c, o, ruit(s), -wv(s) - 0.004, 0.003, 0.004));
+    if (this.wr.regen > 0.15) {
+      c.lineWidth = Math.max(0.6, T * 0.0018);
+      this.autoPas(c, 'rgba(15,15,18,0.85)', (o, s) => {
+        if (s === 1) return false;
+        const hx = b[o + 2], hy = b[o + 3], f = ruit(s) - 0.005;
+        const a = 0.7 + 0.7 * Math.sin(nu / 250 + b[o + 8] * TAU), ca = Math.cos(a) * 0.016, sa = Math.sin(a) * 0.009;
+        for (let k = 0; k < 2; k++) {
+          const z = -0.016 + 0.018 * k;
+          c.moveTo(b[o] + (hx * f - hy * z) * T, b[o + 1] + (hy * f + hx * z) * T);
+          c.lineTo(b[o] + (hx * (f + sa) - hy * (z + ca)) * T, b[o + 1] + (hy * (f + sa) + hx * (z + ca)) * T);
+        }
+        return true;
+      }, true);
+    }
+    if (this.sz.sneeuw > 0.3 || this.wr.sneeuw > 0.3) {
+      this.autoPas(c, 'rgba(246,248,251,0.92)', (o, s) => {
+        if (b[o + 8] < 0.2 || s === SCHUIVER || s === STROOI) return false;
+        if (s === 1 || s === OPLEGGER) return this.rt(c, o, -0.02, 0, 0.07, 0.028);
+        if (s === 2) return this.rt(c, o, 0, 0, 0.09, 0.02);
+        if (s === 3) return this.rt(c, o, -0.012, 0, 0.04, 0.024);
+        if (s >= VUIL) return this.rt(c, o, -0.012, 0, 0.04, 0.026);
+        return this.rt(c, o, -0.006, 0, 0.02, 0.017);
+      });
+    }
+    // lichtbalk: donkere balk, de helft die aan is licht op; bij elke flits een gloed over het dak
+    if (this.zwaaiDetail()) {
+      this.autoPas(c, '#2b2f36', (o, s) => (s === 5 || s === 6) && this.rt(c, o, 0.004, 0, 0.004, 0.021));
+      this.autoPas(c, '#8fbaff', (o, s, i) => (s === 5 || s === 6) && ((Math.floor(nu / 200) + i) & 1) === 1 && this.rt(c, o, 0.004, -0.011, 0.004, 0.009));
+      this.autoPas(c, '#ff6a5a', (o, s, i) => s === 5 && ((Math.floor(nu / 200) + i) & 1) === 0 && this.rt(c, o, 0.004, 0.011, 0.004, 0.009));
+      this.autoPas(c, 'rgba(110,160,255,0.16)', (o, s, i) => (s === 5 || s === 6) && ((Math.floor(nu / 200) + i) & 1) === 1 && this.st(c, o, 0.004, 0, 0.07));
+    }
+    // vuilniswagen bij een stop: twee man in oranje hesjes en een groene kliko aan de stoepkant
+    if (this.n.vuilniswagens) {
+      const man = (o, s) => s === VUIL && b[o + 6] === 1; // 0,9: wacht in de rij voor het licht
+      this.autoPas(c, '#2f5c3a', (o, s) => man(o, s) && this.rt(c, o, 0.03 - lv(s) + 0.02 * Math.sin(this.klok * 2), wv(s) + 0.03, 0.007, 0.007));
+      this.autoPas(c, '#ff7a1a', (o, s) => man(o, s) && this.st(c, o, -lv(s) - 0.014, wv(s) + 0.012, 0.009) && this.st(c, o, 0.012 - lv(s), wv(s) + 0.026, 0.009));
+      this.autoPas(c, '#f2f2ee', (o, s) => man(o, s) && this.st(c, o, -lv(s) - 0.014, wv(s) + 0.011, 0.0048) && this.st(c, o, 0.012 - lv(s), wv(s) + 0.025, 0.0048));
+    }
+  }
+
+  zwaaiDetail() {
+    const b = this.auto;
+    for (let i = 0; i < this.nAuto; i++) { const s = b[i * AUTO + 5]; if (s === 5 || s === 6) return true; }
+    return false;
   }
 
   // Bushaltes: een abri met een glazen dak en een paaltje met het bord.
@@ -957,7 +1375,8 @@ export class LevenLaag {
             for (let i = 0; i < aantal && this.nMens < MAX; i++) {
               const h = hash(t, i, 1);
               const snel = 0.05 + 0.03 * hash(t, i, 2);
-              const pos = tri(this.klok * snel + hash(t, i, 3));
+              const v = this.klok * snel + hash(t, i, 3), pos = tri(v);
+              let rich = triRichting(v);
               const stap = (Math.floor(this.klok * 4 + h * 4) % 2) * bob;
               const kant = hash(t, i, 4) < 0.5 ? -1 : 1;
               let a, langs;
@@ -965,6 +1384,7 @@ export class LevenLaag {
                 // In de hoofdstad staat het regeringsgebouw op de kruising: lopen op de vier armen.
                 const arm = Math.floor(h * 4);
                 langs = (arm & 1 ? -1 : 1) * (0.24 + pos * 0.25);
+                if (arm & 1) rich = -rich;
                 a = arm < 2 ? 0 : 1;
               } else {
                 langs = (pos - 0.5) * 0.96;
@@ -973,8 +1393,14 @@ export class LevenLaag {
               const dwars = kant * STOEP;
               const kl = Math.floor(hash(t, i, 6) * 6), hu = Math.floor(hash(t, i, 7) * 3);
               const sch = this.paraplu(t, i);
-              if (a === 0) this.zetMens(x + langs * Tw, y + dwars * Tw + stap, kl, hu, sch);
-              else this.zetMens(x + dwars * Tw + stap, y + langs * Tw, kl, hu, sch);
+              if (a === 0) this.zetMens(x + langs * Tw, y + dwars * Tw + stap, kl, hu, sch, rich, 0, h);
+              else this.zetMens(x + dwars * Tw + stap, y + langs * Tw, kl, hu, sch, 0, rich, h);
+            }
+            // groepjes die op de stoep blijven staan praten, overdag en als het droog is: in de hoofdstad twee, in een
+            // woonwijk soms een
+            if (this.zoom >= 9 && this.nachtVorig < 0.4 && this.nat < 0.4 && d.protest < 0.3 && !d.ziek && !d.oorlog) {
+              const nG = soort === HOOFD ? 2 : hash(t, 131) < 0.6 * Math.min(1, d.mensenFactor + 0.3) ? 1 : 0;
+              for (let g = 0; g < nG && this.n.groepjes < PLAFOND.groepjes; g++) if (this.groepje(t, x, y, soort === HOOFD, g)) this.n.groepjes++;
             }
           } else if (soort === KOLONIE) {
             // Kolonie: rondlopen over het ringpad.
@@ -983,7 +1409,7 @@ export class LevenLaag {
               const richting = hash(t, i, 2) < 0.5 ? -1 : 1;
               const hoek = this.klok * (0.04 + 0.03 * hash(t, i, 3)) * TAU * richting + hash(t, i, 1) * TAU;
               const straal = (0.38 + (hash(t, i, 4) - 0.5) * 0.03) * Tw;
-              this.zetMens(x + Math.cos(hoek) * straal, y + Math.sin(hoek) * straal, Math.floor(hash(t, i, 6) * 6), Math.floor(hash(t, i, 7) * 3));
+              this.zetMens(x + Math.cos(hoek) * straal, y + Math.sin(hoek) * straal, Math.floor(hash(t, i, 6) * 6), Math.floor(hash(t, i, 7) * 3), 0, -Math.sin(hoek) * richting, Math.cos(hoek) * richting, hash(t, i, 5));
             }
           } else if (!(soort === FABRIEK && d.staking)) {
             if (soort === SCHOOL) this.schoolplein(t, x, y, d);
@@ -993,8 +1419,8 @@ export class LevenLaag {
             const kans = Math.min(1, d.mensenFactor) * nachtFactor;
             for (let i = 0; i < aantal && this.nMens < MAX; i++) {
               if (hash(t, i, 11) > kans) continue;
-              const pos = tri(this.klok * (0.07 + 0.04 * hash(t, i, 2)) + hash(t, i, 3));
-              this.zetMens(ingang + (pos - 0.5) * 0.14 * Tw, y + (0.455 + (hash(t, i, 4) - 0.5) * 0.03) * Tw, Math.floor(hash(t, i, 6) * 6), Math.floor(hash(t, i, 7) * 3));
+              const v = this.klok * (0.07 + 0.04 * hash(t, i, 2)) + hash(t, i, 3), pos = tri(v);
+              this.zetMens(ingang + (pos - 0.5) * 0.14 * Tw, y + (0.455 + (hash(t, i, 4) - 0.5) * 0.03) * Tw, Math.floor(hash(t, i, 6) * 6), Math.floor(hash(t, i, 7) * 3), 0, triRichting(v), 0, hash(t, i, 5));
             }
           }
         }
@@ -1013,13 +1439,16 @@ export class LevenLaag {
         const rand = Math.min(0.45, (Tw * 0.45) / len), loop = 1 - 2 * rand;
         const tun = this.heeftTunnel(zaad);
         for (let i = 0; i < aantal && this.nMens < MAX; i++) {
-          const p = rand + loop * tri(this.klok * (0.9 + 0.4 * hash(zaad, i, 31)) * 0.12 * Tw / len + hash(zaad, i, 32));
+          const v = this.klok * (0.9 + 0.4 * hash(zaad, i, 31)) * 0.12 * Tw / len + hash(zaad, i, 32), p = rand + loop * tri(v), rich = triRichting(v);
           if (tun && this.inTunnel(zaad, p * len)) continue;
           const kant = (hash(zaad, i, 33) < 0.5 ? -1 : 1) * 0.075 * Tw;
           const stap = (Math.floor(this.klok * 4 + hash(zaad, i, 34) * 4) % 2) * bob;
           const x = ax + (bx - ax) * p - uy * (kant + stap), y = ay + (by - ay) * p + ux * (kant + stap);
-          this.zetMens(x, y, Math.floor(hash(zaad, i, 36) * 6), Math.floor(hash(zaad, i, 37) * 3), this.paraplu(zaad, i + 50));
+          this.zetMens(x, y, Math.floor(hash(zaad, i, 36) * 6), Math.floor(hash(zaad, i, 37) * 3), this.paraplu(zaad, i + 50), ux * rich, uy * rich, hash(zaad, i, 35));
         }
+        // oversteken bij de zebra's van de infralaag, als het voetgangerslicht groen is
+        const iw = this.infW ? this.infraIdx[w] : -1;
+        if (iw >= 0 && this.infW[iw].zebras && this.zoom >= DREMPEL_INFRA.zebra - 0.5) this.oversteken(this.infW[iw].zebras, zaad, ax, ay, ux, uy, d, nachtFactor);
         // een fietser op de berm, niet als het hard regent of sneeuw ligt
         if (hash(zaad, 91) < 0.55 * d.mensenFactor * nachtFactor * (1 - 0.8 * this.nat) * (1 - 0.7 * this.sz.sneeuw)) {
           const r = frac(this.klok * 0.35 * Tw / len + hash(zaad, 92));
@@ -1062,13 +1491,60 @@ export class LevenLaag {
 
   // Eén persoon in de buffer; wie buiten beeld loopt telt niet mee voor het plafond. Het plafond geldt hier
   // zelf, zodat ook wie buiten de tellende lussen om wordt gezet (de kopers op de markt) de buffer niet overloopt.
-  zetMens(wx, wy, kleding, huid, scherm = 0) {
-    if (this.nMens >= PLAFOND.mensen) return;
+  // hx, hy: looprichting (0, 0 staat stil), fase: eigen pas en armzwaai, houding: 0 lopen, 1 staan, 2 praten.
+  zetMens(wx, wy, kleding, huid, scherm = 0, hx = 0, hy = 0, fase = 0, houding = 0) {
+    if (this.nMens >= PLAFOND.mensen) return false;
     const x = wx * this.sc + this.ox, y = wy * this.sc + this.oy;
-    if (x < -10 || y < -10 || x > this.w + 10 || y > this.h + 10) return;
+    if (x < -10 || y < -10 || x > this.w + 10 || y > this.h + 10) return false;
     const o = this.nMens++ * MENS, b = this.mens;
     if (scherm && this.n.paraplus < PLAFOND.paraplus) this.n.paraplus++; else scherm = 0;
     b[o] = x; b[o + 1] = y; b[o + 2] = kleding; b[o + 3] = huid; b[o + 4] = scherm;
+    b[o + 5] = hx; b[o + 6] = hy; b[o + 7] = fase; b[o + 8] = houding;
+    return true;
+  }
+
+  // Twee of drie mensen die op de stoep in een kringetje staan te praten; om beurten praat er een met zijn handen.
+  groepje(t, x, y, hoofd, g = 0) {
+    const Tw = this.geo.T, arm = (hash(t, g, 132) < 0.5 ? 0 : 1) ^ g, kant = hash(t, g, 133) < 0.5 ? -1 : 1;
+    // niet op de kruising van het straatkruis (daar loopt de andere straat), en in de hoofdstad niet op het plein
+    const langs = (hash(t, g, 134) < 0.5 ? -1 : 1) * (hoofd ? 0.3 + 0.15 * hash(t, g, 135) : 0.12 + 0.26 * hash(t, g, 135)) * Tw;
+    const dwars = kant * (STOEP + 0.004) * Tw;
+    const mx = arm === 0 ? x + langs : x + dwars, my = arm === 0 ? y + dwars : y + langs;
+    const m = 2 + (hash(t, g, 136) < 0.5 ? 1 : 0), prater = Math.floor(this.klok / 3.5 + hash(t, g, 137) * m) % m;
+    let gezet = false;
+    for (let i = 0; i < m; i++) {
+      const a = hash(t, g, 138) * TAU + (i / m) * TAU, ca = Math.cos(a), sa = Math.sin(a), r = 0.011 * Tw, j = i + g * 4;
+      if (this.zetMens(mx + ca * r, my + sa * r, Math.floor(hash(t, j, 139) * 6), Math.floor(hash(t, j, 140) * 3), 0, -ca, -sa, hash(t, j, 141), i === prater ? 2 : 1)) { gezet = true; this.nPraat++; }
+    }
+    return gezet;
+  }
+
+  // Oversteken bij de zebra's van een weg (w.zebras uit infra.js): in het venster waarin het voetgangerslicht groen
+  // is, lopen ze over; vlak daarvoor wachten ze aan de stoeprand. Een deel van de kruispunten krijgt ook een fietser.
+  oversteken(Z, zaad, ax, ay, ux, uy, d, nachtFactor) {
+    const Tw = this.geo.T, tijd = this.klok * 1000 + this.dNu;
+    const kans = Math.min(1, d.mensenFactor) * nachtFactor * this.buiten;
+    for (let i = 0; i < Z.length && this.n.overstekers < PLAFOND.overstekers; i += ZEBRA) {
+      const q = Z[i], P = Z[i + 1], van = Z[i + 3], tot = Z[i + 4], f = frac(tijd / P + Z[i + 2]), duur = tot - van;
+      const m = Math.round(0.6 + 2.6 * kans * hash(zaad, i, 161));
+      for (let j = 0; j < m && this.n.overstekers < PLAFOND.overstekers; j++) {
+        const kant = hash(zaad, i * 8 + j, 162) < 0.5 ? 1 : -1, wacht = 0.2 * hash(zaad, i * 8 + j, 163);
+        const u = (f - van) / duur * 1.3 - wacht, langs = q + (hash(zaad, i * 8 + j, 164) - 0.5) * 0.028 * Tw;
+        let dw, hx = 0, hy = 0, houding = 1;
+        if (f >= van && f < tot && u >= 0 && u <= 1) { dw = kant * (-0.075 + 0.15 * u); hx = -uy * kant; hy = ux * kant; houding = 0; }
+        else if (f < van && f > van - 0.3 * duur - 0.08) { dw = -kant * 0.08; hx = -uy * kant; hy = ux * kant; }
+        else continue;
+        if (this.zetMens(ax + ux * langs - uy * dw * Tw, ay + uy * langs + ux * dw * Tw, Math.floor(hash(zaad, i * 8 + j, 165) * 6), Math.floor(hash(zaad, i * 8 + j, 166) * 3), this.paraplu(zaad, i * 8 + j + 200), houding ? 0 : hx, houding ? 0 : hy, hash(zaad, i * 8 + j, 167), houding ? 1 : 0)) this.n.overstekers++;
+      }
+      // soms een fietser die sneller oversteekt, in hetzelfde groen
+      if (hash(zaad, i, 168) < 0.3 && f >= van && f < tot && this.nat < 0.6) {
+        const u = ((f - van) / duur) * 1.8, kant = hash(zaad, i, 169) < 0.5 ? 1 : -1;
+        if (u <= 1) {
+          const dw = kant * (-0.075 + 0.15 * u), l = q + 0.02 * Tw * kant;
+          this.zetFig(ax + ux * l - uy * dw * Tw, ay + uy * l + ux * dw * Tw, -uy * kant, ux * kant, FIETS, Math.floor(hash(zaad, i, 170) * 10), Math.floor(hash(zaad, i, 171) * 3), 0, 0);
+        }
+      }
+    }
   }
 
   // Paraplu bij regen of natte sneeuw: 0 voor geen, anders de kleur + 1. Vast per persoon.
@@ -1078,7 +1554,7 @@ export class LevenLaag {
   }
 
   // Figuur op straat of in het park, met een eigen plafond per soort; buiten beeld telt niet mee.
-  zetFig(wx, wy, hx, hy, soort, kleding, huid, scherm, fase) {
+  zetFig(wx, wy, hx, hy, soort, kleding, huid, scherm, fase, stil = 0) {
     const naam = FIGUUR[soort];
     if (this.n[naam] >= PLAFOND[naam]) return;
     const x = wx * this.sc + this.ox, y = wy * this.sc + this.oy;
@@ -1086,7 +1562,7 @@ export class LevenLaag {
     this.n[naam]++;
     if (scherm && this.n.paraplus < PLAFOND.paraplus) this.n.paraplus++; else scherm = 0;
     const o = this.nFig++ * FIG, b = this.fig;
-    b[o] = x; b[o + 1] = y; b[o + 2] = hx; b[o + 3] = hy; b[o + 4] = soort; b[o + 5] = kleding; b[o + 6] = huid; b[o + 7] = scherm; b[o + 8] = fase;
+    b[o] = x; b[o + 1] = y; b[o + 2] = hx; b[o + 3] = hy; b[o + 4] = soort; b[o + 5] = kleding; b[o + 6] = huid; b[o + 7] = scherm; b[o + 8] = fase; b[o + 9] = stil;
   }
 
   // Fietsers op de rijbaan, joggers, hondenuitlaters en kinderwagens op de stoep van het straatkruis.
@@ -1096,9 +1572,9 @@ export class LevenLaag {
     const hoofd = soort === HOOFD;
     // positie langs een arm van het kruis; in de hoofdstad niet over het regeringsplein
     const langsVan = (pos, i) => (hoofd ? (hash(t, i, 59) < 0.5 ? -1 : 1) * (0.2 + pos * 0.28) : (pos - 0.5) * 0.96);
-    const zet = (langs, dwars, richting, arm, sk, kl, hu, sch, fase) => {
-      if (arm === 0) this.zetFig(x + langs * Tw, y + dwars * Tw, richting, 0, sk, kl, hu, sch, fase);
-      else this.zetFig(x + dwars * Tw, y + langs * Tw, 0, richting, sk, kl, hu, sch, fase);
+    const zet = (langs, dwars, richting, arm, sk, kl, hu, sch, fase, stil = 0) => {
+      if (arm === 0) this.zetFig(x + langs * Tw, y + dwars * Tw, richting, 0, sk, kl, hu, sch, fase, stil);
+      else this.zetFig(x + dwars * Tw, y + langs * Tw, 0, richting, sk, kl, hu, sch, fase, stil);
     };
     // fietsers rijden rechts op de rijbaan, minder bij regen en als er sneeuw ligt
     const nF = Math.round((hoofd ? 4 : 3) * f * (1 - 0.75 * nat) * (1 - 0.7 * this.sz.sneeuw));
@@ -1120,9 +1596,11 @@ export class LevenLaag {
     // hondenuitlaters: langzaam, de hond loopt voorop en snuffelt heen en weer
     const nH = Math.round(1.6 * f * (1 - 0.5 * nat));
     for (let i = 0; i < nH; i++) {
-      const v = klok * 0.03 * (0.8 + 0.4 * hash(t, i, 71)) + hash(t, i, 72);
+      // om de paar seconden blijft de hond staan snuffelen: dan staat de tijd voor het tweetal even stil
+      const P = 7 + 5 * hash(t, i, 78), ph = klok / P + hash(t, i, 79), k = Math.floor(ph), r = ph - k;
+      const v = (k * 0.7 + Math.min(r, 0.7)) * P * 0.03 * (0.8 + 0.4 * hash(t, i, 71)) + hash(t, i, 72);
       const arm = hash(t, i, 73) < 0.5 ? 0 : 1, kant = hash(t, i, 74) < 0.5 ? -1 : 1;
-      zet(langsVan(tri(v), i + 20), kant * STOEP, triRichting(v), arm, HOND, Math.floor(hash(t, i, 75) * 6), Math.floor(hash(t, i, 76) * 3), this.paraplu(t, i + 30), hash(t, i, 77));
+      zet(langsVan(tri(v), i + 20), kant * STOEP, triRichting(v), arm, HOND, Math.floor(hash(t, i, 75) * 6), Math.floor(hash(t, i, 76) * 3), this.paraplu(t, i + 30), hash(t, i, 77), r > 0.7 ? 1 : 0);
     }
     // kinderwagens: overdag
     const nK = dag ? Math.round(1.1 * f * (1 - 0.6 * nat)) : 0;
@@ -1302,7 +1780,12 @@ export class LevenLaag {
         if (kleur !== k) continue;
         if (!open) { c.beginPath(); open = true; }
         voorwerp(o);
-        if (s === HOND) { ovaal(c, vx, vy, b[o + 2], b[o + 3], T * 0.01, T * 0.0055); stip(c, vx + b[o + 2] * T * 0.011, vy + b[o + 3] * T * 0.011, T * 0.0045); }
+        if (s === HOND) {
+          // snuffelen: de kop gaat omlaag en schuift heen en weer langs de grond
+          const sn = b[o + 9] ? Math.sin(this.klok * 11 + b[o + 8] * 9) * T * 0.004 : 0, kv = b[o + 9] ? 0.014 : 0.011;
+          ovaal(c, vx, vy, b[o + 2], b[o + 3], T * 0.01, T * 0.0055);
+          stip(c, vx + b[o + 2] * T * kv - b[o + 3] * sn, vy + b[o + 3] * T * kv + b[o + 2] * sn, T * (b[o + 9] ? 0.004 : 0.0045));
+        }
         else rechthoek(c, vx, vy, b[o + 2], b[o + 3], T * 0.012, T * (s === SLEE ? 0.006 : 0.008));
       }
       if (open) { c.fillStyle = k < 3 ? VACHT[k] : k < 7 ? WAGEN[k - 3] : '#b8322a'; c.fill(); }
@@ -1433,20 +1916,48 @@ export class LevenLaag {
     if (a <= 0) return;
     const b = this.mens, T = this.T;
     const r = T * 0.011, rh = T * 0.006; // lichaam 0.022 tegel, hoofd 0.012 tegel
+    // dichtbij (vanaf zoom 12): benen en armen die meebewegen, jassen en mutsen in de winter, blote armen in de zomer,
+    // tassen en haar
+    const fijn = T >= 250, winter = this.sz.koud > 0.5, zomer = this.sz.zomer > 0.5 && !winter;
     c.globalAlpha = a;
     c.fillStyle = 'rgba(0,0,0,0.3)';
     c.beginPath();
     for (let i = van; i < tot; i++) stip(c, b[i * MENS] + T * 0.004, b[i * MENS + 1] + T * 0.005, r);
     c.fill();
+    if (fijn) this.ledematen(c, van, tot, zomer, winter);
     for (let k = 0; k < KLEDING.length; k++) {
       let open = false;
       for (let i = van; i < tot; i++) {
         const o = i * MENS;
         if (b[o + 2] !== k) continue;
         if (!open) { c.beginPath(); open = true; }
-        stip(c, b[o], b[o + 1], r);
+        stip(c, b[o], b[o + 1], fijn && winter ? r * 1.12 : r);
       }
-      if (open) { c.fillStyle = KLEDING[k]; c.fill(); }
+      if (open) { c.fillStyle = fijn && winter ? JAS[k] : KLEDING[k]; c.fill(); }
+    }
+    // per persoon één keer uitrekenen welke tas en wat op het hoofd (vast per persoon, uit zijn fase): 0 niets,
+    // anders kleur + 1; muts in de winter (zeven op de tien), anders haar
+    const nT = TAS.length, nM = MUTS.length, nH = HAAR.length;
+    if (fijn) {
+      const TK = (this.tasKl ??= new Uint8Array(PLAFOND.mensen)), HK = (this.hoofdKl ??= new Uint8Array(PLAFOND.mensen));
+      for (let i = van; i < tot; i++) {
+        const fa = b[i * MENS + 7];
+        TK[i] = frac(fa * 7) < 0.3 ? 1 + Math.floor(frac(fa * 11) * nT) : 0;
+        // onder de paraplu zie je het hoofd niet
+        HK[i] = b[i * MENS + 4] ? 0 : winter && frac(fa * 3) < 0.7 ? 1 + Math.floor(frac(fa * 5) * nM) : 1 + nM + Math.floor(frac(fa * 13) * nH);
+      }
+      // tas aan de rechterhand
+      for (let k = 1; k <= nT; k++) {
+        let open = false;
+        for (let i = van; i < tot; i++) {
+          if (TK[i] !== k) continue;
+          const o = i * MENS;
+          if (!open) { c.beginPath(); open = true; }
+          const l = Math.hypot(b[o + 5], b[o + 6]), ex = l ? b[o + 5] / l : 1, ey = l ? b[o + 6] / l : 0;
+          rechthoek(c, b[o] - ey * r * 1.25, b[o + 1] + ex * r * 1.25, ex, ey, r * 0.42, r * 0.22);
+        }
+        if (open) { c.fillStyle = TAS[k - 1]; c.fill(); }
+      }
     }
     // hoofdjes pas als ze groot genoeg zijn om te onderscheiden
     if (rh >= 0.9) {
@@ -1461,7 +1972,64 @@ export class LevenLaag {
         if (open) { c.fillStyle = HUID[k]; c.fill(); }
       }
     }
+    if (fijn) {
+      // muts, of haar op de achterkant van het hoofd
+      const HK = this.hoofdKl;
+      for (let k = 1; k <= nM + nH; k++) {
+        let open = false;
+        const muts = k <= nM;
+        for (let i = van; i < tot; i++) {
+          if (HK[i] !== k) continue;
+          const o = i * MENS, hx = b[o + 5], hy = b[o + 6];
+          if (!open) { c.beginPath(); open = true; }
+          stip(c, b[o] - hx * rh * 0.3, b[o + 1] - r * 0.15 - hy * rh * 0.3, rh * (muts ? 0.9 : 0.75));
+        }
+        if (open) { c.fillStyle = muts ? MUTS[k - 1] : HAAR[k - 1 - nM]; c.fill(); }
+      }
+    }
     c.globalAlpha = 1;
+  }
+
+  // Benen (donker, stappend in de looprichting) en armen die tegengesteld meezwaaien; wie praat, beweegt zijn handen.
+  // Armen in de kleur van de kleding, in de zomer bloot (huidskleur).
+  ledematen(c, van, tot, zomer, winter) {
+    const b = this.mens, T = this.T, r = T * 0.011, klok = this.klok;
+    c.lineCap = 'round';
+    c.lineWidth = Math.max(0.8, T * 0.0042);
+    c.strokeStyle = BROEK;
+    c.beginPath();
+    for (let i = van; i < tot; i++) {
+      const o = i * MENS, hx = b[o + 5], hy = b[o + 6];
+      if (b[o + 8] || (!hx && !hy)) continue;
+      const sw = Math.sin(klok * 9 + b[o + 7] * TAU) * r * 0.95, x = b[o], y = b[o + 1];
+      for (let z = -1; z <= 1; z += 2) {
+        const bx = x - hy * z * r * 0.4, by = y + hx * z * r * 0.4;
+        c.moveTo(bx, by); c.lineTo(bx + hx * sw * z, by + hy * sw * z);
+      }
+    }
+    c.stroke();
+    c.lineWidth = Math.max(0.7, T * 0.0034);
+    const n = zomer ? HUID.length : KLEDING.length;
+    for (let k = 0; k < n; k++) {
+      let open = false;
+      for (let i = van; i < tot; i++) {
+        const o = i * MENS;
+        if ((zomer ? b[o + 3] : b[o + 2]) !== k) continue;
+        const hx = b[o + 5], hy = b[o + 6], houding = b[o + 8];
+        if (houding === 1 || (!hx && !hy && !houding)) continue;
+        if (!open) { c.beginPath(); open = true; }
+        const x = b[o], y = b[o + 1];
+        const sw = houding === 2 ? 0 : Math.sin(klok * 9 + b[o + 7] * TAU) * r * 0.8;
+        for (let z = -1; z <= 1; z += 2) {
+          const sx = x - hy * z * r * 0.95, sy = y + hx * z * r * 0.95;
+          // praten: handen afwisselend naar voren, lopen: tegengesteld aan het been aan dezelfde kant
+          const v = houding === 2 ? r * (0.4 + 0.6 * tri(klok * 1.3 + b[o + 7] + (z > 0 ? 0.5 : 0))) : -sw * z;
+          c.moveTo(sx, sy); c.lineTo(sx + hx * v - hy * z * r * 0.25, sy + hy * v + hx * z * r * 0.25);
+        }
+      }
+      if (open) { c.strokeStyle = zomer ? HUID[k] : winter ? JAS[k] : KLEDING[k]; c.stroke(); }
+    }
+    c.lineCap = 'butt';
   }
 
   tekenSpandoeken(c, a) {
@@ -3051,9 +3619,35 @@ export class LevenLaag {
       const rr = Math.max(1.2, T * 0.018);
       for (let i = 0; i < nA && n < MAX; i++) {
         const o = i * AUTO, hx = b[o + 2], hy = b[o + 3];
-        const l = T * MAAT[b[o + 5]][0];
-        c.drawImage(this.roodSprite, b[o] - hx * l - rr, b[o + 1] - hy * l - rr, rr * 2, rr * 2);
+        const l = T * MAAT[b[o + 5]][0], q = b[o + 6] > 0 ? rr * 1.7 : rr; // remlicht: groter en feller
+        c.drawImage(this.roodSprite, b[o] - hx * l - q, b[o + 1] - hy * l - q, q * 2, q * 2);
         n++;
+      }
+      // natte weg: elke lamp spiegelt als een lange streep naar beneden in het asfalt
+      if (this.wr.regen > 0.2 && T >= 120) {
+        c.globalAlpha = nacht * autoA * 0.35 * smooth(0.2, 0.5, this.wr.regen);
+        const r = Math.max(2, T * 0.03);
+        for (let i = 0; i < nA && n + 2 <= MAX; i++) {
+          const o = i * AUTO, hx = b[o + 2], hy = b[o + 3], l = T * MAAT[b[o + 5]][0];
+          c.drawImage(sprite, b[o] + hx * l - r * 0.2, b[o + 1] + hy * l, r * 0.4, r * 2.4);
+          c.drawImage(this.roodSprite, b[o] - hx * l - r * 0.15, b[o + 1] - hy * l, r * 0.3, r * 1.8);
+          n += 2;
+        }
+      }
+      // knipperlichten en de oranje zwaailichten van de werkwagens
+      this.amberSprite ??= gloedSprite(255, 170, 40);
+      c.globalAlpha = nacht * autoA;
+      const ra = Math.max(1.5, T * 0.022);
+      for (let i = 0; i < nA && n < MAX; i++) {
+        const o = i * AUTO, s = b[o + 5], k = b[o + 7], hx = b[o + 2], hy = b[o + 3];
+        if (k && Math.floor(nu / 380 + b[o + 8] * 3) & 1) {
+          const l = T * MAAT[s][0], w = T * MAAT[s][1] * k;
+          c.drawImage(this.amberSprite, b[o] + hx * l - hy * w - ra, b[o + 1] + hy * l + hx * w - ra, ra * 2, ra * 2);
+          n++;
+        } else if (s >= VUIL && Math.floor(nu / 260 + b[o + 8] * 4) & 1) {
+          c.drawImage(this.amberSprite, b[o] - ra * 2, b[o + 1] - ra * 2, ra * 4, ra * 4);
+          n++;
+        }
       }
     }
     // toplicht op elke boot
@@ -3073,7 +3667,7 @@ export class LevenLaag {
       const r = Math.max(3, T * 0.07);
       for (let i = 0; i < nA && n < MAX; i++) {
         const o = i * AUTO;
-        if (b[o + 5] < 5 || !((Math.floor(nu / 200) + i) & 1)) continue;
+        if ((b[o + 5] !== 5 && b[o + 5] !== 6) || !((Math.floor(nu / 200) + i) & 1)) continue;
         c.drawImage(this.blauwSprite, b[o] - r, b[o + 1] - r, r * 2, r * 2);
         n++;
       }
@@ -3125,6 +3719,8 @@ export class LevenLaag {
     const t = { autos: this.nAuto, mensen: this.nMens, boten: this.nBoot, vogels: this.nVogel, rook: this.nGevecht ?? 0, stoom: this.nStoom, lichten: this.nLicht };
     for (const k of PLUS) t[k] = this.n[k];
     t.haltes = this.nHalte;
+    t.wachtend = this.nWacht;
+    t.praters = this.nPraat ?? 0;
     return t;
   }
 }

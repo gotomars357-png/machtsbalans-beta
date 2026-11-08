@@ -39,10 +39,27 @@ export function zetCanvasFabriek(fn) { fabriek = fn ?? standaardFabriek; }
 // ---------- vaste waarden ----------
 
 // Harde plafonds per beeld: een drukke wereld mag nooit de framerate opeten.
-export const PLAFOND = { sporen: 60, treinen: 24, wagons: 160, masten: 240, lantaarns: 260, haltes: 16, borden: 120, bomen: 220, verkeerslichten: 80, kruisingen: 40, vliegtuigen: 16, kranen: 24, lichten: 600, bakken: 2, bruggen: 40, voetbruggen: 16, tunnels: 16, viaducten: 16 };
+export const PLAFOND = { sporen: 60, treinen: 24, wagons: 160, masten: 240, lantaarns: 260, haltes: 16, borden: 120, bomen: 220, verkeerslichten: 80, kruisingen: 40, vliegtuigen: 16, kranen: 24, lichten: 600, bakken: 2, bruggen: 40, voetbruggen: 16, tunnels: 16, viaducten: 16, wegwerk: 8, hekjes: 160, wegwerkers: 16 };
 // Vanaf welke zoom iets verschijnt (de kaart wordt 'diep' op zoom 4). Andere lagen mogen dit lezen.
 export const DREMPEL = { spoor: 4, kades: 4, vliegveld: 4, hoogspanning: 4.5, pijp: 4.5, tunnel: 4.5, brugtype: 5, dwarsliggers: 5.5, stoeprand: 5.5, voetbrug: 6.5, markering: 8, lantaarn: 8, zebra: 8, bovenleiding: 8, halte: 9, overweg: 9, verkeerslicht: 11, bord: 11, sein: 11, klein: 13 };
 const MAX_SPRITES = 40, MAX_BYTES = 48 * 1024 * 1024, MAX_P = 640, MAX_KLEIN = 400;
+
+// Verkeerslichten: periode (ms) en waar groen en oranje ophouden, als deel van de periode; de rest is rood, met aan
+// het eind een kort moment waarop alles rood is. stad.js rekent zijn voetgangerslichten met dezelfde periodes en
+// fasen (14000 bij de stadsingang met hash(zaad, kant, 7), 16000 op het kruispunt met hash(zaad, 3); arm B een halve
+// periode later) en geeft voetgangers alleen groen binnen het rood van de auto's.
+export const CYCLUS = { ingang: [14000, 0.45, 0.52], kruispunt: [16000, 0.4, 0.47] };
+// Zebra zonder licht op een T-splitsing: af en toe steekt iemand over; dan wacht het verkeer (groen tot ZEBRA_VRIJ).
+const ZEBRA_VRIJ = 0.84;
+// Stand van een licht bij fase f (0..1): 2 groen, 1 oranje, 0 rood.
+export function lichtStand(f, groen, oranje) { return f < groen ? 2 : f < oranje ? 1 : 0; }
+// Stopplekken langs een weg, voor leven.js (w.stops, STOP getallen per stop): afstand vanaf A tot de stopstreep
+// (wereld; daar staat de neus van de voorste auto), richting (+1 rijdt naar B), periode (ms), fase (0..1), groen,
+// oranje, soort (0 stadsingang, 1 kruispunt, 2 zebra). Oversteekplekken (w.zebras, ZEBRA getallen): afstand vanaf A,
+// periode, fase en het venster waarin voetgangers lopen.
+export const STOP = 7, ZEBRA = 5;
+// Wegwerkzaamheden: per 24 speldagen ligt op een paar wegvakken één rijstrook open (zie werkOp).
+const WERK_DAGEN = 24, WERK_KANS = 0.18; // kans per kandidaat-vak
 
 // Brugsoorten. De breedte van het water kiest de soort: stenen bogen over een beek, staal of beton over een brede
 // rivier, tuien of een hangbrug over de breedste monding en over zee; het spoor krijgt eigen vormen.
@@ -76,6 +93,7 @@ const BORDEN = 5;
 
 // Lichtsoorten in de lichtbuffer (index in this.gloed; 0 is de warme gloed van de kaart).
 const WARM = 0, ROOD = 1, GROEN = 2, KOEL = 3, BLAUW = 4, AMBER = 5;
+const SPIEGEL = 8; // soort + SPIEGEL: dezelfde kleur als spiegeling in de natte weg
 const LICHTKLEUR = [null, [255, 50, 40], [70, 255, 120], [235, 242, 255], [90, 140, 255], [255, 170, 40]];
 
 // Stride van de buffers.
@@ -462,7 +480,7 @@ export class InfraLaag {
   }
 
   nul() {
-    this.n = { sporen: 0, treinen: 0, wagons: 0, masten: 0, lantaarns: 0, haltes: 0, borden: 0, verkeerslichten: 0, kruisingen: 0, vliegtuigen: 0, kranen: 0, lichten: 0, bomen: 0, bruggen: 0, voetbruggen: 0, tunnels: 0, viaducten: 0 };
+    this.n = { sporen: 0, treinen: 0, wagons: 0, masten: 0, lantaarns: 0, haltes: 0, borden: 0, verkeerslichten: 0, kruisingen: 0, vliegtuigen: 0, kranen: 0, lichten: 0, bomen: 0, bruggen: 0, voetbruggen: 0, tunnels: 0, viaducten: 0, wegwerk: 0, hekjes: 0, wegwerkers: 0, spiegels: 0, sporenSneeuw: 0 };
     this.nLicht = 0; this.nLucht = 0; this.nZw = 0; this.nZr = 0;
   }
 
@@ -705,6 +723,7 @@ export class InfraLaag {
     this.bouwOverwegen();
     this.bouwVoetbruggen();
     this.bouwVlakken();
+    this.bouwStops();
     // De bitmapcache blijft staan: de sleutels beschrijven de bitmap volledig (tegel, stand, seizoen, maat), dus een
     // nieuw gebouw ergens in de wereld hoeft niet alles opnieuw te laten bakken. Wat niet meer gebruikt wordt, valt
     // vanzelf uit de LRU.
@@ -1208,6 +1227,77 @@ export class InfraLaag {
   // Bruggen als rechthoeken (ax, ay, bx, by, halve breedte; wereldeenheden), alleen-lezen voor andere lagen.
   brugVlakken() { return { data: this.vlak, n: this.nVlak }; }
 
+  // Stopstrepen en oversteekplekken per weg (w.stops en w.zebras, zie STOP en ZEBRA) voor de wachtende auto's en de
+  // overstekers van leven.js, plus één kandidaat-vak voor wegwerk (w.werk). Na bouwLand: een T-splitsing naar een
+  // gereserveerde tegel heeft geen zebra (tekenKruisingen slaat hem over), dus daar stopt ook niemand.
+  bouwStops() {
+    const Tw = this.geo.T, W = this.wegen, [Pi, gi, oi] = CYCLUS.ingang, [Pk, gk, ok] = CYCLUS.kruispunt;
+    const st = [], zb = [];
+    for (let i = 0; i < W.length; i++) {
+      const w = W[i];
+      st.length = 0; zb.length = 0;
+      for (let kant = 0; kant <= 1; kant++) {
+        if (kant ? !w.stadB : !w.stadA) continue;
+        const o = hash(w.zaad, kant, 7), z = kant ? w.s1 - 0.045 * Tw : w.s0 + 0.045 * Tw, r = kant ? -1 : 1;
+        // naar binnen voor de stopstreep, naar buiten net voor de zebra; beide richtingen volgen hetzelfde licht
+        st.push(z + r * 0.04 * Tw, -r, Pi, o, gi, oi, 0, z - r * 0.029 * Tw, r, Pi, o, gi, oi, 0);
+        zb.push(z, Pi, o, 0.58, 0.95);
+      }
+      for (const k of this.kruisingen) {
+        if (k.a !== i && k.b !== i) continue;
+        const q = (k.x - w.ax) * w.ux + (k.y - w.ay) * w.uy;
+        if (k.zij) {
+          if (this.res[k.tg]) continue;
+          // de zebra ligt 0,09 tegel voorbij de splitsing (zie tekenKruisingen)
+          const P = 20000 + Math.floor(hash(k.zaad, 71) * 8) * 1000, o = hash(k.zaad, 72), z = q + 0.09 * Tw;
+          st.push(z - 0.035 * Tw, 1, P, o, ZEBRA_VRIJ, ZEBRA_VRIJ, 2, z + 0.035 * Tw, -1, P, o, ZEBRA_VRIJ, ZEBRA_VRIJ, 2);
+          zb.push(z, P, o, ZEBRA_VRIJ + 0.02, 0.985);
+        } else if (!k.rotonde) {
+          const oA = hash(k.zaad, 3), o = frac(oA + (k.b === i ? 0.5 : 0));
+          st.push(q - 0.14 * Tw, 1, Pk, o, gk, ok, 1, q + 0.14 * Tw, -1, Pk, o, gk, ok, 1);
+          // voetgangers lopen terwijl deze arm rood heeft: de vensters van stad.js, in de fase van arm A
+          const van = k.b === i ? 0.04 : 0.54, tot = k.b === i ? 0.46 : 0.96;
+          zb.push(q - 0.11 * Tw, Pk, oA, van, tot, q + 0.11 * Tw, Pk, oA, van, tot);
+        }
+      }
+      w.stops = st.length ? Float32Array.from(st) : null;
+      w.zebras = zb.length ? Float32Array.from(zb) : null;
+      // wegwerk: een vak van 0,32 tegel op een kwart, op tweederde of net voor het midden van de weg, vrij van
+      // stopstrepen, kruisingen, de bushalte van deze laag en die van leven.js (op een derde en twee derde van het stuk
+      // dat de bus rijdt, zie verzamelAutos daar), bruggen, tunnels, water en bouwwerken; de pionnen en het bord
+      // staan tot 0,3 tegel voor het vak, dus ook die stukken moeten droog en vrij zijn
+      w.werk = null;
+      const L = w.s1 - w.s0;
+      if (L < 1.1 * Tw) continue;
+      const bus = w.len >= 2 * Tw && hash(w.zaad, 71) < 0.55, rb = Math.min(0.45, (Tw * 0.42) / w.len) * w.len;
+      const eerst = hash(w.zaad, 142) < 0.5 ? 0.22 : 0.64;
+      for (const fr of [eerst, 0.86 - eerst, 0.4]) {
+        const q0 = w.s0 + L * fr, q1 = q0 + 0.32 * Tw;
+        let vrij = q1 < w.s1 - 0.25 * Tw;
+        const bij = (q, m) => q > q0 - m && q < q1 + m;
+        for (let j = 0; vrij && j < st.length; j += STOP) if (bij(st[j], 0.3 * Tw)) vrij = false;
+        for (const k of this.kruisingen) if (vrij && (k.a === i || k.b === i) && bij((k.x - w.ax) * w.ux + (k.y - w.ay) * w.uy, 0.3 * Tw)) vrij = false;
+        if (vrij && hash(w.zaad, 21) <= 0.35 && L >= 1.2 * Tw && bij((w.s0 + w.s1) / 2, 0.12 * Tw)) vrij = false;
+        for (let h = 1; vrij && bus && h <= 2; h++) if (bij(rb + (h / 3) * (w.len - 2 * rb), 0.2 * Tw)) vrij = false;
+        for (let f = 0; vrij && f <= 6; f++) {
+          const q = q0 - 0.3 * Tw + (q1 - q0 + 0.6 * Tw) * f / 6, x = w.ax + w.ux * q, y = w.ay + w.uy * q;
+          if (this.waterSoort(x, y) || this.opBouwwerk(x, y) || this.inTunnel(w, q) || this.opBrug(w, q)) vrij = false;
+        }
+        if (vrij) { w.werk = [q0, q1, hash(w.zaad, 143) < 0.5 ? 1 : -1]; break; }
+      }
+    }
+  }
+
+  // Ligt er op deze weg op deze speldag wegwerk? Zo ja: this.werk0 en this.werk1 (afstand vanaf A, wereld) en
+  // this.werkKant (de afgesloten rijstrook is die van het verkeer in die richting). Elke 24 dagen verhuist het werk.
+  // Voor leven.js, dat er het verkeer omheen laat slingeren.
+  werkOp(w, dag) {
+    const k = w.werk;
+    if (!k || hash(w.zaad, Math.floor(dag / WERK_DAGEN), 141) >= WERK_KANS) return false;
+    this.werk0 = k[0]; this.werk1 = k[1]; this.werkKant = k[2];
+    return true;
+  }
+
   // Punt op afstand q langs een route (wereld): this.px, this.py en de richting this.hx, this.hy.
   punt(r, q) {
     const S = r.s, X = r.x, Y = r.y, n = r.n;
@@ -1245,6 +1335,14 @@ export class InfraLaag {
     b[o] = x; b[o + 1] = y; b[o + 2] = r; b[o + 3] = soort; b[o + 4] = a;
   }
 
+  // Spiegeling van een licht in de natte weg (alleen als het regent): een lange, zwakke streep naar beneden.
+  zetSpiegel(x, y, r, soort, a) {
+    if (this.nat < 0.03) return;
+    const voor = this.nLicht;
+    this.zetLicht(x, y + r, r * 2, soort + SPIEGEL, a * this.nat);
+    if (this.nLicht > voor) this.n.spiegels++;
+  }
+
   // Tussen de wegen en de gebouwen: alles wat op de grond ligt of rijdt.
   teken(c, view, sc, nu, dt = 0, tempo = 0) {
     if (tempo > 0) this.klok += dt;
@@ -1266,6 +1364,8 @@ export class InfraLaag {
     this.gs = this.sz.winter > 0.5 ? 2 : this.sz.herfst > 0.5 ? 1 : 0;
     this.nacht = view.nacht ?? 0;
     this.nu = nu;
+    // natte weg: hoe sterk lichten erin spiegelen (alleen dichtbij, waar je de lampen ziet)
+    this.nat = z >= DREMPEL.markering ? smooth(0.2, 0.45, this.wr.regen) : 0;
     this.bakTeller = 0;
     this.gloed ??= LICHTKLEUR.map((k) => { if (!k) return null; const cv = fabriek(32, 32); if (cv) bakGloed(cv, k); return cv; });
     // zichtbare wegen
@@ -1286,6 +1386,7 @@ export class InfraLaag {
     this.tekenSporen(c, a);
     if (z >= DREMPEL.stoeprand) this.tekenWegdetail(c, nu);
     if (z >= DREMPEL.stoeprand) this.tekenKruisingen(c, nu);
+    if (z >= DREMPEL.halte - 0.5) this.tekenWegwerk(c);
     if (z >= 6) this.tekenOverwegen(c, nu);
     if (z >= 6.5) this.tekenLaanbomen(c, smooth(6.5, 7.5, z));
     if (z >= DREMPEL.lantaarn - 0.5) this.tekenStraatmeubilair(c, nu);
@@ -2099,8 +2200,26 @@ export class InfraLaag {
       evenwijdig(0.073 * Tw, '#eef1f3', T * 0.014);
       c.setLineDash([]);
     }
+    // terwijl het sneeuwt (of als er hartje winter veel ligt) blijft er een laagje op de rijbaan, met in elke strook twee
+    // bandensporen waar het asfalt doorkomt; de strepen en zebra's eronder zie je dan nog maar half
+    const vers = clamp(Math.max(this.wr.sneeuw * 1.8, (this.sz.sneeuw - 0.6) * 2.5), 0, 1);
+    if (vers > 0.04) {
+      c.globalAlpha = smooth(5.5, 6.5, z) * vers * 0.8;
+      c.strokeStyle = '#e9edf0'; c.lineWidth = T * 0.104; c.beginPath();
+      for (let i = 0; i < nz; i++) { const w = W[this.zw[i]]; c.moveTo((w.ax + w.ux * w.s0) * sc + this.ox, (w.ay + w.uy * w.s0) * sc + this.oy); c.lineTo((w.ax + w.ux * w.s1) * sc + this.ox, (w.ay + w.uy * w.s1) * sc + this.oy); }
+      c.stroke();
+      if (z >= 7) {
+        // sporen: de wielen lopen 0,02 tegel naast het hart van elke strook (zie BAAN in leven.js); ze slingeren licht
+        c.globalAlpha = smooth(7, 8, z) * vers * 0.75;
+        c.setLineDash([T * 0.3, T * 0.004, T * 0.12, T * 0.006]);
+        evenwijdig(0.011 * Tw, 'rgba(92,94,96,0.75)', T * 0.009);
+        evenwijdig(0.049 * Tw, 'rgba(92,94,96,0.75)', T * 0.009);
+        c.setLineDash([]);
+        this.n.sporenSneeuw = nz;
+      }
+    }
     if (z < DREMPEL.markering - 0.5) { c.globalAlpha = 1; return; }
-    const aM = smooth(7.5, 8.5, z);
+    const aM = smooth(7.5, 8.5, z) * (1 - 0.6 * vers);
     c.globalAlpha = aM;
     // kantstrepen
     evenwijdig(0.046 * Tw, '#e4e2d8', Math.max(0.5, T * 0.0035));
@@ -2304,16 +2423,136 @@ export class InfraLaag {
           }
           c.fill();
         }
+        if (z >= DREMPEL.zebra) {
+          // stopstrepen op de inkomende rijstrook van elke arm, waar de auto's van leven.js wachten
+          c.fillStyle = WIT; c.beginPath();
+          for (const w of [A, B]) for (const sg of [-1, 1]) {
+            const ex = x + w.ux * sg * T * 0.14, ey = y + w.uy * sg * T * 0.14;
+            rechthoek(c, ex + w.uy * sg * T * 0.03, ey - w.ux * sg * T * 0.03, -w.uy, w.ux, T * 0.028, T * 0.003);
+          }
+          c.fill();
+        }
         if (z >= DREMPEL.verkeerslicht) {
-          const groenA = frac(nu / 16000 + hash(k.zaad, 3)) < 0.5;
-          for (const [w, groen] of [[A, groenA], [B, !groenA]]) for (const sg of [-1, 1]) {
+          // groen, oranje en dan rood, met een kort moment waarop beide armen rood hebben (zie CYCLUS)
+          const [P, g, o] = CYCLUS.kruispunt, fA = frac(nu / P + hash(k.zaad, 3));
+          for (const [w, f] of [[A, fA], [B, frac(fA + 0.5)]]) for (const sg of [-1, 1]) {
             const px = x + w.ux * sg * T * 0.15 - w.uy * sg * T * 0.08, py = y + w.uy * sg * T * 0.15 + w.ux * sg * T * 0.08;
-            this.verkeerslicht(c, px, py, groen ? 2 : 0);
+            this.verkeerslicht(c, px, py, lichtStand(f, g, o));
           }
         }
       }
     }
     this.n.kruisingen = n;
+    c.globalAlpha = 1;
+  }
+
+  // Wegwerk op een enkel wegvak (zie werkOp): vers asfalt op de afgesloten strook, rood-witte hekjes met oranje
+  // lampjes die als een looplicht knipperen, pionnen in een schuine lijn ervoor, een waarschuwingsbord voor het
+  // naderende verkeer en overdag een wals die heen en weer rijdt met twee werkers in oranje erbij.
+  tekenWegwerk(c) {
+    const T = this.T, Tw = this.geo.T, sc = this.sc, z = this.zoom, W = this.wegen, dag = this.state.dag, nu = this.nu;
+    let n = 0, nh = 0, nw = 0;
+    const a = smooth(8.5, 9.3, z);
+    c.globalAlpha = a;
+    for (let i = 0; i < this.nZw && n < PLAFOND.wegwerk; i++) {
+      const w = W[this.zw[i]];
+      if (!this.werkOp(w, dag)) continue;
+      const q0 = this.werk0, q1 = this.werk1, kant = this.werkKant, ux = w.ux, uy = w.uy, nx = -uy * kant, ny = ux * kant;
+      // schermpunt op afstand q langs de weg en d tegels dwars (positief: de afgesloten strook in)
+      const P = (q, d) => { this.qx = (w.ax + ux * q + nx * d * Tw) * sc + this.ox; this.qy = (w.ay + uy * q + ny * d * Tw) * sc + this.oy; };
+      // dicht is de buitenste helft van de strook (0,032 tot 0,058 tegel uit het hart); de rest blijft open, zodat
+      // het verkeer er met wat slingeren langs kan (zie leven.js)
+      P((q0 + q1) / 2, 0.045);
+      if (!this.opScherm(this.qx, this.qy, T * 0.45)) continue;
+      n++;
+      const mx = this.qx, my = this.qy, L = ((q1 - q0) * sc) / 2;
+      // het verkeer van deze strook komt van de kant qa; rq wijst van het vak naar dat verkeer toe
+      const qa = kant > 0 ? q0 : q1, rq = kant > 0 ? -1 : 1;
+      c.fillStyle = '#2b2c2b'; c.beginPath(); rechthoek(c, mx, my, ux, uy, L, T * 0.013); c.fill();
+      if (z >= DREMPEL.verkeerslicht) {
+        // naad van het verse asfalt en het glimmende bitumen erlangs
+        c.strokeStyle = 'rgba(170,170,160,0.4)'; c.lineWidth = Math.max(0.5, T * 0.0018); c.beginPath();
+        for (const d of [0.033, 0.057]) { P(q0, d); c.moveTo(this.qx, this.qy); P(q1, d); c.lineTo(this.qx, this.qy); }
+        c.stroke();
+      }
+      // pionnen: dichtbij het vak op de middenlijn, verder weg naar de buitenkant (het verkeer slingert erlangs)
+      const R = Math.max(0.8, T * 0.0055);
+      c.fillStyle = 'rgba(0,0,0,0.3)'; c.beginPath();
+      for (let k = 0; k < 5; k++) { P(qa + rq * (0.03 + k * 0.045) * Tw, 0.034 + k * 0.0055); stip(c, this.qx + R * 0.7, this.qy + R * 0.9, R); }
+      c.fill();
+      c.fillStyle = '#e8641e'; c.beginPath();
+      for (let k = 0; k < 5; k++) { P(qa + rq * (0.03 + k * 0.045) * Tw, 0.034 + k * 0.0055); stip(c, this.qx, this.qy, R); }
+      c.fill();
+      if (z >= DREMPEL.verkeerslicht) {
+        c.fillStyle = '#f4f2ea'; c.beginPath();
+        for (let k = 0; k < 5; k++) { P(qa + rq * (0.03 + k * 0.045) * Tw, 0.034 + k * 0.0055); stip(c, this.qx - R * 0.15, this.qy - R * 0.15, R * 0.5); }
+        c.fill();
+      }
+      // hekjes langs de binnenkant en dwars over beide koppen: wit met rode vakken
+      const hb = Math.max(0.7, T * 0.005);
+      c.lineCap = 'butt';
+      for (let laag = 0; laag < 3; laag++) {
+        c.strokeStyle = laag === 0 ? 'rgba(0,0,0,0.28)' : laag === 1 ? '#f2f0ea' : '#c8322b';
+        c.lineWidth = hb;
+        if (laag === 2) c.setLineDash([T * 0.012, T * 0.012]);
+        const dx = laag === 0 ? T * 0.004 : 0, dy = laag === 0 ? T * 0.005 : 0;
+        c.beginPath();
+        P(q0, 0.058); c.moveTo(this.qx + dx, this.qy + dy); P(q0, 0.032); c.lineTo(this.qx + dx, this.qy + dy);
+        P(q1, 0.032); c.lineTo(this.qx + dx, this.qy + dy); P(q1, 0.058); c.lineTo(this.qx + dx, this.qy + dy);
+        c.stroke();
+      }
+      c.setLineDash([]);
+      nh += Math.ceil((q1 - q0) / (0.04 * Tw)) + 2;
+      // lampjes op de hekjes: een looplicht naar de kant waar je omheen moet; 's nachts met gloed
+      const nL = Math.max(2, Math.round((q1 - q0) / (0.06 * Tw)));
+      c.fillStyle = '#ffb02e'; c.beginPath();
+      for (let k = 0; k <= nL; k++) {
+        const t = kant > 0 ? k / nL : 1 - k / nL;
+        if (frac(nu / 1400 - t * 0.6) > 0.22) continue;
+        P(q0 + (q1 - q0) * (k / nL), 0.032);
+        stip(c, this.qx, this.qy - T * 0.006, Math.max(0.7, T * 0.003));
+        if (this.nacht > 0.05) this.zetLicht(this.qx, this.qy - T * 0.006, Math.max(2, T * 0.02), AMBER, 0.9);
+      }
+      c.fill();
+      // waarschuwingsbord op de berm voor het naderende verkeer: paal schuin omhoog, witte driehoek met rode rand
+      if (z >= DREMPEL.verkeerslicht) {
+        P(qa + rq * 0.3 * Tw, 0.085);
+        const bx = this.qx, by = this.qy, H = T * 0.04, s = T * 0.012;
+        c.strokeStyle = 'rgba(0,0,0,0.28)'; c.lineWidth = Math.max(0.5, T * 0.003); c.beginPath(); c.moveTo(bx, by); c.lineTo(bx + H * SCHUIN, by + H * SCHUIN); c.stroke();
+        c.strokeStyle = PAAL; c.beginPath(); c.moveTo(bx, by); c.lineTo(bx, by - H); c.stroke();
+        c.fillStyle = '#c8322b'; c.beginPath(); c.moveTo(bx, by - H - s); c.lineTo(bx + s, by - H + s * 0.7); c.lineTo(bx - s, by - H + s * 0.7); c.closePath(); c.fill();
+        c.fillStyle = '#f4f2ea'; c.beginPath(); c.moveTo(bx, by - H - s * 0.55); c.lineTo(bx + s * 0.62, by - H + s * 0.42); c.lineTo(bx - s * 0.62, by - H + s * 0.42); c.closePath(); c.fill();
+        if (z >= DREMPEL.klein) { c.fillStyle = '#1d1f21'; c.beginPath(); stip(c, bx - s * 0.08, by - H - s * 0.05, s * 0.12); rechthoek(c, bx + s * 0.05, by - H + s * 0.2, 0.6, 0.8, s * 0.22, s * 0.06); c.fill(); }
+      }
+      // overdag: tandemwals en twee werkers
+      if (this.nacht < 0.45 && z >= DREMPEL.verkeerslicht - 1) {
+        const f = tri(this.klok / 18 + hash(w.zaad, 144));
+        P(q0 + 0.06 * Tw + (q1 - q0 - 0.12 * Tw) * f, 0.045);
+        const x = this.qx, y = this.qy, l = T * 0.026, b = T * 0.012;
+        c.fillStyle = 'rgba(0,0,0,0.3)'; c.beginPath(); rechthoek(c, x + T * 0.008, y + T * 0.01, ux, uy, l * 1.1, b * 1.1); c.fill();
+        c.fillStyle = '#d9a63a'; c.beginPath(); rechthoek(c, x, y, ux, uy, l * 0.7, b * 0.85); c.fill();
+        // trommels voor en achter, met een lichte rand aan de noordwestkant
+        c.fillStyle = '#6d7175'; c.beginPath();
+        for (const e of [-1, 1]) rechthoek(c, x + ux * e * l * 0.82, y + uy * e * l * 0.82, ux, uy, l * 0.2, b);
+        c.fill();
+        c.fillStyle = 'rgba(255,255,255,0.25)'; c.beginPath();
+        for (const e of [-1, 1]) rechthoek(c, x + ux * e * l * 0.82 - T * 0.002, y + uy * e * l * 0.82 - T * 0.002, ux, uy, l * 0.08, b * 0.9);
+        c.fill();
+        c.fillStyle = '#2f3336'; c.beginPath(); rechthoek(c, x - ux * l * 0.15, y - uy * l * 0.15, ux, uy, l * 0.28, b * 0.55); c.fill();
+        if (frac(nu / 600) < 0.5) { c.fillStyle = '#ffb02e'; c.beginPath(); stip(c, x - ux * l * 0.15, y - uy * l * 0.15, Math.max(0.7, T * 0.0035)); c.fill(); }
+        // werkers: oranje hesje met een gele streep, witte helm; de een leunt op een schop
+        for (let k = 0; k < 2 && nw < PLAFOND.wegwerkers; k++, nw++) {
+          P(k ? q1 - 0.04 * Tw : q0 + 0.05 * Tw, 0.043 + 0.008 * k);
+          const wx = this.qx + Math.sin(this.klok * 1.3 + k * 2) * T * 0.002, wy = this.qy, r = Math.max(0.8, T * 0.0095);
+          c.fillStyle = 'rgba(0,0,0,0.3)'; c.beginPath(); stip(c, wx + r * 0.5, wy + r * 0.6, r); c.fill();
+          if (k === 0 && z >= DREMPEL.verkeerslicht) { c.strokeStyle = '#6b5236'; c.lineWidth = Math.max(0.5, T * 0.0022); c.beginPath(); c.moveTo(wx + ux * r, wy + uy * r); c.lineTo(wx + ux * r * 2.6, wy + uy * r * 2.6 + r * 0.4); c.stroke(); }
+          c.fillStyle = '#f07a1f'; c.beginPath(); stip(c, wx, wy, r); c.fill();
+          c.fillStyle = '#e8e23a'; c.beginPath(); rechthoek(c, wx, wy, -uy, ux, r * 0.95, r * 0.18); c.fill();
+          c.fillStyle = '#f4f4ef'; c.beginPath(); stip(c, wx - r * 0.1, wy - r * 0.25, r * 0.55); c.fill();
+        }
+      }
+    }
+    this.n.wegwerk = n; this.n.hekjes = nh; this.n.wegwerkers = nw;
     c.globalAlpha = 1;
   }
 
@@ -2395,7 +2634,10 @@ export class InfraLaag {
     for (let j = 0; j < 3; j++) if (j !== stand) stip(c, x, y - hgt - T * 0.01 + j * T * 0.009, T * 0.0035);
     c.fill();
     c.fillStyle = kleur; c.beginPath(); stip(c, x, ly, T * 0.004); c.fill();
-    this.zetLicht(x, ly, Math.max(2, T * 0.02), stand === 0 ? ROOD : stand === 1 ? AMBER : GROEN, 0.9);
+    const soort = stand === 0 ? ROOD : stand === 1 ? AMBER : GROEN;
+    this.zetLicht(x, ly, Math.max(2, T * 0.02), soort, 0.9);
+    // op een natte weg spiegelt het licht als een lange streep onder de paal
+    this.zetSpiegel(x + T * 0.004, y + T * 0.004, Math.max(2, T * 0.016), soort, 0.7);
   }
 
   tekenOverwegen(c, nu) {
@@ -2640,8 +2882,9 @@ export class InfraLaag {
     if (this.nacht > 0.05) for (let k = 0; k < n; k++) {
       const o = k * 4, hx = buf[o] - buf[o + 2] * arm, hy = buf[o + 1] - H - buf[o + 3] * arm;
       this.zetLicht(hx, hy, Math.max(2, T * 0.03), WARM, 0.9);
-      // lichtplas op het asfalt onder de lamp
+      // lichtplas op het asfalt onder de lamp, en in de regen een spiegeling in de natte weg
       this.zetLicht(buf[o] - buf[o + 2] * arm * 1.5, buf[o + 1] - buf[o + 3] * arm * 1.5, T * 0.09, WARM, 0.22);
+      this.zetSpiegel(buf[o] - buf[o + 2] * arm * 1.2, buf[o + 1] - buf[o + 3] * arm * 1.2, T * 0.028, WARM, 0.55);
     }
     // afvalbakken (elke derde lantaarn) en brandkranen op het kleinste niveau, per kleur één pad
     if (z >= DREMPEL.klein && n) {
@@ -2668,8 +2911,7 @@ export class InfraLaag {
         for (const kant of [0, 1]) {
           if (kant ? !w.stadB : !w.stadA) continue;
           const q = kant ? w.s1 - 0.1 * Tw : w.s0 + 0.1 * Tw, rich = kant ? -1 : 1;
-          const fase = frac(nu / 14000 + hash(w.zaad, kant, 7));
-          const stand = fase < 0.45 ? 2 : fase < 0.55 ? 1 : 0;
+          const [P, g, o] = CYCLUS.ingang, stand = lichtStand(frac(nu / P + hash(w.zaad, kant, 7)), g, o);
           const wx = w.ax + w.ux * q - w.uy * rich * 0.085 * Tw, wy = w.ay + w.uy * q + w.ux * rich * 0.085 * Tw;
           if (this.opBouwwerk(wx, wy)) continue;
           this.verkeerslicht(c, wx * sc + this.ox, wy * sc + this.oy, stand);
@@ -3207,11 +3449,16 @@ export class InfraLaag {
     c.globalCompositeOperation = 'lighter';
     const b = this.licht;
     for (let i = 0; i < this.nLicht; i++) {
-      const o = i * LICHT, soort = b[o + 3], r = b[o + 2];
+      const o = i * LICHT, r = b[o + 2];
+      let soort = b[o + 3];
+      const spiegel = soort >= SPIEGEL;
+      if (spiegel) soort -= SPIEGEL;
       const sprite = soort === WARM ? view.lichtSprite : this.gloed[soort];
       if (!sprite) continue;
       c.globalAlpha = k * b[o + 4];
-      c.drawImage(sprite, b[o] - r, b[o + 1] - r, r * 2, r * 2);
+      // een spiegeling is smal en lang (r is hier de halve lengte)
+      if (spiegel) c.drawImage(sprite, b[o] - r * 0.22, b[o + 1] - r, r * 0.44, r * 2);
+      else c.drawImage(sprite, b[o] - r, b[o + 1] - r, r * 2, r * 2);
     }
     c.restore();
     void sc; void nu;

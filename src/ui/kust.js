@@ -47,9 +47,19 @@ export function zetCanvasFabriek(fn) { fabriek = fn ?? standaardFabriek; }
 // ---------- plafonds en drempels ----------
 
 // Hooguit zoveel per beeld (wat in beeld is); de wereldlijsten zelf zijn ook begrensd.
-export const PLAFOND = { vuurtorens: 10, pieren: 8, havenhoofden: 16, jachthavens: 6, boeien: 48, rotsen: 90, zeehonden: 16, spatten: 24, rollers: 90, kades: 40, woonboten: 24, aken: 12, stuwen: 6, dammen: 2, windparken: 4, turbines: 48, booreilanden: 4, viskwekerijen: 8, lichten: 260, bakken: 2 };
+export const PLAFOND = {
+  vuurtorens: 10, pieren: 8, havenhoofden: 16, jachthavens: 6, boeien: 48, rotsen: 90, zeehonden: 16, spatten: 24, rollers: 90, kades: 40, woonboten: 24, aken: 12, stuwen: 6, dammen: 2, windparken: 4, turbines: 48, booreilanden: 4, viskwekerijen: 8, lichten: 260, bakken: 2,
+  // strand en kust van dichtbij (pakket D)
+  strandpunten: 700, getij: 24, vloedlijn: 260, aangespoeld: 30, sporen: 24, huisjes: 40, paviljoens: 3, reddingsposten: 4, velden: 4, stoelsets: 30, schermen: 24, handdoeken: 60,
+  kastelen: 16, gaten: 8, mensen: 140, lopers: 24, honden: 12, duinpaden: 8, rekken: 6, helm: 180, konijnen: 16, dijken: 8, schapen: 30, zandbanken: 4, bankzeehonden: 14,
+  hengelaars: 16, sloepen: 20, kraantjes: 6, vissershavens: 3, kotters: 9, meeuwen: 24, veerstoepen: 4, autos: 24,
+};
 // Vanaf welke zoom iets verschijnt (4-6 grof, 8-10 middel, 12-14 klein).
-export const DREMPEL = { groot: 4, havenhoofd: 4.5, viskweek: 5, aak: 5, rots: 5.5, kade: 5.5, stuw: 5.5, pier: 6, jachthaven: 6, boei: 7, woonboot: 7, zeehond: 8, fijn: 8, roller: 9, spat: 9, klein: 11, kleinst: 13 };
+export const DREMPEL = {
+  groot: 4, havenhoofd: 4.5, viskweek: 5, aak: 5, rots: 5.5, kade: 5.5, stuw: 5.5, pier: 6, jachthaven: 6, boei: 7, woonboot: 7, zeehond: 8, fijn: 8, roller: 9, spat: 9, klein: 11, kleinst: 13,
+  dijk: 7, veerstoep: 7.5, zandbank: 7.5, getij: 8, vissershaven: 8, paviljoen: 8.5, huisje: 9, duinpad: 9, schaap: 9, sloep: 9.5, auto: 9.5, strandmens: 10, loper: 10,
+  hengel: 10, kraan: 10, meeuw: 10, veld: 10, vloedlijn: 11, hek: 11, helm: 11, konijn: 11, netten: 11, kasteel: 11.5, aangespoeld: 12, spoor: 12.5, emmer: 13,
+};
 const MAX_SPRITES = 32, MAX_BYTES = 32 * 1024 * 1024, MAX_P = 640;
 
 const W = 1000, H = 620; // wereld in eenheden (gelijk aan het eigenaarbeeld)
@@ -70,6 +80,37 @@ const LADING = ['#c9b07a', '#3b3734', '#b8442f', '#2f6d9a', '#8a8173'];
 const WOONBOOT = ['#3d6b5a', '#8a4a3a', '#3f5d7a', '#7a6a3a', '#5e4a6a'];
 const JACHT = ['#f4f2ec', '#f4f2ec', '#f4f2ec', '#1f3550', '#e9dfc7', '#7a2a24'];
 const ZEEHOND = ['#6e6a62', '#857a68', '#5b5853'];
+// strand (pakket D): mensen, handdoeken, huisjes (dak in het licht, dak in de schaduw, wand), parasols, honden
+const KLEDING = ['#c0392b', '#2e86c1', '#f0b429', '#ecefe9', '#34495e', '#2f9e5b', '#e8669a', '#3fc0c0'];
+const HUID = ['#f1c9a5', '#c68e5d', '#7d5136'];
+const DOEK = [['#e8433a', '#f6f2e6'], ['#2f7fc1', '#f0d34a'], ['#f0b429', '#e86a3a'], ['#3fbf9a', '#f6f2e6'], ['#8a4bb8', '#f0b429'], ['#ff7aa8', '#ffffff'], ['#2d4f8a', '#e8e4d8']];
+const HUISJE = [['#f2efe6', '#cfcabd', '#8fb8c9'], ['#eaf1f2', '#c3ccd0', '#e5a29a'], ['#f4efd8', '#d1c9a8', '#9fc49a'], ['#e9e6de', '#c4bfb4', '#f0d57a'], ['#eef0f4', '#c6c9d2', '#b9a6d0'], ['#f6f3ea', '#d4cfc2', '#6f9fc4']];
+const SCHERM = ['#e8433a', '#f6f2e6', '#2f7fc1', '#f0b429', '#3fbf9a', '#e86a3a'];
+const PARASOL = [['#2f6fb0', '#f2efe6'], ['#e8433a', '#f2efe6'], ['#f0b429', '#ffffff'], ['#2f9e5b', '#f2e7b8']];
+const VACHT = ['#8a5a34', '#2a2522', '#e3d3b0', '#c9a06a'];
+const EMMER = ['#e8433a', '#f0d34a', '#2f7fc1', '#3fbf5a', '#ff7aa8'];
+const FIETS = ['#2a2c30', '#a8322d', '#2f5d8a', '#3d6b48', '#d9d9d4', '#e09a2a'];
+const AUTO = ['#d9d9d4', '#f1efe8', '#2a2c30', '#a8322d', '#2f5d8a', '#d9a63a', '#3d6b48', '#7a5236'];
+const KRAT = ['#2f6fb0', '#e8e4d8', '#c0392b', '#3a8a5a'];
+const KOTTER = ['#2b4a6a', '#7a2a24', '#2f5a48', '#3a3f45', '#c9b07a'];
+const KOTTER_U = [-2.3, 0, 2.3]; // ligplaatsen langs de kade van een vissershaven (u, eenheden)
+// noordwest (waar het licht vandaan komt) als eenheidsvector
+const NWX = -Math.SQRT1_2, NWY = -Math.SQRT1_2;
+const S_DUIN = 1, S_DIJK = 2, S_DROOG = 4; // vlaggen per strandpunt (vast per wereld)
+const P_VRIJ = 1, P_PAD = 2, P_BEZET = 4; // per strandpunt, per toestand (druk in de bits 4-5)
+const STAP = 1.5; // afstand tussen strandpunten langs de waterlijn (eenheden)
+// strandinrichting: soort, x, y, nx, ny, zaad, druk, extra
+const DING = 8;
+const HUISJE_S = 0, STOEL_S = 1, SCHERM_S = 2, DOEK_S = 3, PAVILJOEN_S = 4, POST_S = 5, VELD_S = 6, KASTEEL_S = 7, GAT_S = 8, REK_S = 9;
+// lopers langs de waterlijn: eerste punt, laatste punt, soort, zaad, snelheid, afstand tot de waterlijn, druk
+const LOOP = 7;
+const WANDEL = 0, JOGGER = 1, IJSKAR = 2, JUTTER = 3;
+// mensen en honden op het strand worden eerst verzameld en dan per kleur in één keer getekend
+const MENS = 8; // X, Y, hx, hy, houding (0 staand, 1 liggend, 2 zittend, 3 kind, 4 alleen hoofd), kleding, huid, fase
+const STAAND = 0, LIGGEND = 1, ZITTEND = 2, KIND = 3, HOOFD_S = 4;
+const HOND = 6; // X, Y, hx, hy, vacht, fase
+const DRUK_F = [0.2, 0.45, 0.75, 1]; // hoeveel van de inrichting bezet is, per drukte (stil strand .. badplaats)
+const D_TELLERS = ['strandpunten', 'getij', 'vloedlijn', 'aangespoeld', 'sporen', 'huisjes', 'paviljoens', 'reddingsposten', 'velden', 'stoelsets', 'schermen', 'handdoeken', 'kastelen', 'gaten', 'mensen', 'lopers', 'honden', 'duinpaden', 'rekken', 'helm', 'konijnen', 'dijken', 'schapen', 'zandbanken', 'bankzeehonden', 'hengelaars', 'sloepen', 'kraantjes', 'vissershavens', 'kotters', 'meeuwen', 'veerstoepen', 'autos'];
 // Lichtjes op de hoeken van het booreilanddek, ten opzichte van het anker (tegels).
 const BOOR_LICHT = [[-0.09, -0.02], [0.09, -0.02], [-0.09, -0.14], [0.09, -0.14]];
 // Havenarmen in het havenkader (u langs de kade, v het water in vanaf de kade; u maal de kant, v plus dq).
@@ -475,12 +516,14 @@ function analyse(geo, b, tl) {
   dammen.sort((p, q) => q.score - p.score || p.ri - q.ri || p.i - q.i);
   // water dat leven.js gebruikt en dat niet van de toestand afhangt: zeilboten, eenden, visgronden, strand en veerboten
   // (zelfde regels als laadPlus en laad daar, op tegels en vaste hashes)
-  const leven = levenWater(geo, b.eigenaar);
-  return { kapen: kaap, rotsen: Float32Array.from(rots), rollers: Float32Array.from(rol), baaien, aakRuns, dammen, leven };
+  const veer = [];
+  const leven = levenWater(geo, b.eigenaar, veer);
+  return { kapen: kaap, rotsen: Float32Array.from(rots), rollers: Float32Array.from(rol), baaien, aakRuns, dammen, leven, veer, strand: strandKetens(geo, b, tl), zandbanken: zandbankPlekken(geo, b), land: landBezet(geo, b, tl) };
 }
 
-// Schijven (x, y, r) waar leven.js boten, eenden of zwemmers heeft, alleen uit de kaart.
-function levenWater(geo, eig) {
+// Schijven (x, y, r) waar leven.js boten, eenden of zwemmers heeft, alleen uit de kaart. In veer komen de
+// veerroutes: begin, eind en welke schijven bij die route horen (ax, ay, bx, by, eerste schijf, laatste schijf).
+function levenWater(geo, eig, veer = []) {
   const T = geo.T, uit = [], kol = geo.kol, rij = geo.rij;
   const zee = (x, y) => { const px = Math.floor(x), py = Math.floor(y); if (px < 0 || py < 0 || px >= W || py >= H) return true; return eig[py * W + px] === -1; };
   const ringZee = (cx, cy, rx, ry) => { for (let i = 0; i < 8; i++) if (!zee(cx + Math.cos((i * TAU) / 8) * rx, cy + Math.sin((i * TAU) / 8) * ry)) return false; return true; };
@@ -536,11 +579,155 @@ function levenWater(geo, eig) {
     }
     if (beste) {
       nVeer++;
-      const d = Math.hypot(beste.x - a.x, beste.y - a.y), k = Math.ceil(d / (0.2 * T));
+      const d = Math.hypot(beste.x - a.x, beste.y - a.y), k = Math.ceil(d / (0.2 * T)), eerste = uit.length / 3;
       for (let s = 0; s <= k; s++) uit.push(a.x + ((beste.x - a.x) * s) / k, a.y + ((beste.y - a.y) * s) / k, 0.24 * T);
+      veer.push(a.x, a.y, beste.x, beste.y, eerste, uit.length / 3 - 1);
     }
   }
   return Float32Array.from(uit);
+}
+
+// Stranden als ketens van punten op de waterlijn, om de STAP eenheden, met de zeewaartse normaal. Zelfde
+// strandregel als de rollers hierboven en de krabben in zee.js: zand of duin, geen klif, open zee ervoor, geen
+// riviermonding. Per punt: S_DROOG (de zandstrook erachter is droog land), S_DUIN (duinen erachter) of S_DIJK (laag
+// land zonder duinen: daar ligt een dijk). Vast per wereld.
+function strandKetens(geo, b, tl) {
+  const sd = b.sd, eig = b.eigenaar, Tw = geo.T, kol = geo.kol, rij = geo.rij, n2 = [0, 0];
+  const tegel = (x, y) => clamp(Math.floor(y / Tw), 0, rij - 1) * kol + clamp(Math.floor(x / Tw), 0, kol - 1);
+  const zee = (x, y) => { const px = Math.floor(x), py = Math.floor(y); if (px < 0 || py < 0 || px >= W || py >= H) return true; return eig[py * W + px] === -1; };
+  const droog = (x, y) => !zee(x, y) && tl.rivierAfstand(x, y) > 0.4 && !tl.isMeer(x, y);
+  const soort = (x, y, nx, ny) => {
+    if (x < 10 || y < 10 || x > W - 10 || y > H - 10) return -1;
+    const t = tegel(x - nx * 2.5, y - ny * 2.5), tg = geo.tegels[t];
+    if (!tg || tg.terrein === 'water' || b.klif[t] || !(b.duin[t] || (tg.terrein === 'kust' && tg.hoogte < 0.5))) return -1;
+    if (!zee(x + nx * 0.8, y + ny * 0.8) || sdOp(sd, x + nx * 6, y + ny * 6) < 3) return -1;
+    if (tl.rivierAfstand(x - nx * 1.2, y - ny * 1.2) < 1.5 || tl.isMeer(x - nx, y - ny)) return -1;
+    let f = 0;
+    const op = (d) => droog(x - nx * d, y - ny * d);
+    if (op(0.45) && op(1.3) && op(2.3) && sdOp(sd, x - nx * 2.3, y - ny * 2.3) < -1) f |= S_DROOG;
+    if (f & S_DROOG) {
+      if (b.duin[tegel(x - nx * 3.5, y - ny * 3.5)] && op(3.4) && op(4.8) && op(6.2)) f |= S_DUIN;
+      else if (!b.duin[t] && tg.hoogte < 0.42 && hash(t, 701) < 0.6 && op(3.3)) f |= S_DIJK;
+    }
+    return f;
+  };
+  const q = { x: 0, y: 0, nx: 0, ny: 0 };
+  // naar de waterlijn trekken (sd = 0) langs de normaal
+  const proj = (x, y) => {
+    for (let k = 0; k < 3; k++) { if (normaal(sd, x, y, n2) < 0.1) return false; const s = sdOp(sd, x, y); x -= n2[0] * s; y -= n2[1] * s; }
+    if (normaal(sd, x, y, n2) < 0.1 || Math.abs(sdOp(sd, x, y)) > 1) return false;
+    q.x = x; q.y = y; q.nx = n2[0]; q.ny = n2[1];
+    return true;
+  };
+  const px = [], py = [], pnx = [], pny = [], pf = [], cel = new Int32Array(RW * RH).fill(-1);
+  const vrijVan = (x, y, a, b2) => {
+    const cx = Math.floor(x / RC), cy = Math.floor(y / RC);
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const gx = cx + dx, gy = cy + dy;
+      if (gx < 0 || gy < 0 || gx >= RW || gy >= RH) continue;
+      const k = cel[gy * RW + gx];
+      if (k >= 0 && k !== a && k !== b2 && Math.hypot(px[k] - x, py[k] - y) < 1.1) return false;
+    }
+    return true;
+  };
+  const zet = (f) => { const i = px.length; px.push(q.x); py.push(q.y); pnx.push(q.nx); pny.push(q.ny); pf.push(f); cel[Math.floor(q.y / RC) * RW + Math.floor(q.x / RC)] = i; return i; };
+  const loop = (i0, sgn, uit) => {
+    let i = i0, vorig = -1;
+    while (uit.length < 400 && px.length < 14000) {
+      const tx = -pny[i] * sgn, ty = pnx[i] * sgn;
+      if (!proj(px[i] + tx * STAP, py[i] + ty * STAP)) break;
+      const d = Math.hypot(q.x - px[i], q.y - py[i]);
+      if (d < 0.7 || d > 2.6 || q.nx * pnx[i] + q.ny * pny[i] < 0.5) break;
+      const f = soort(q.x, q.y, q.nx, q.ny);
+      if (f < 0 || !vrijVan(q.x, q.y, i, vorig)) break;
+      const j = zet(f);
+      uit.push(j); vorig = i; i = j;
+    }
+  };
+  const ketens = [];
+  for (let y = 10; y < H - 10; y += 3) for (let x = 10; x < W - 10; x += 3) {
+    const s = sdOp(sd, x, y);
+    if (s < -1 || s > 1 || !proj(x, y)) continue;
+    const f = soort(q.x, q.y, q.nx, q.ny);
+    if (f < 0 || !vrijVan(q.x, q.y, -1, -1)) continue;
+    const i0 = zet(f), voor = [], terug = [];
+    loop(i0, 1, voor); loop(i0, -1, terug);
+    if (voor.length + terug.length >= 3) ketens.push([...terug.reverse(), i0, ...voor]);
+  }
+  // in ketenvolgorde achter elkaar: een loper of een strook loopt gewoon van punt i naar i + 1
+  let n = 0;
+  for (const k of ketens) n += k.length;
+  const X = new Float32Array(n), Y = new Float32Array(n), NX = new Float32Array(n), NY = new Float32Array(n), F = new Uint8Array(n);
+  const ks = new Int32Array(ketens.length), kn = new Int32Array(ketens.length), kader = new Float32Array(ketens.length * 4);
+  let o = 0;
+  for (let k = 0; k < ketens.length; k++) {
+    ks[k] = o; kn[k] = ketens[k].length;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const i of ketens[k]) {
+      X[o] = px[i]; Y[o] = py[i]; NX[o] = pnx[i]; NY[o] = pny[i]; F[o] = pf[i];
+      x0 = Math.min(x0, px[i]); x1 = Math.max(x1, px[i]); y0 = Math.min(y0, py[i]); y1 = Math.max(y1, py[i]);
+      o++;
+    }
+    kader[k * 4] = x0 - 7; kader[k * 4 + 1] = y0 - 7; kader[k * 4 + 2] = x1 + 7; kader[k * 4 + 3] = y1 + 7;
+  }
+  return { x: X, y: Y, nx: NX, ny: NY, f: F, ks, kn, kader, n };
+}
+
+// Zandbanken die bij eb droogvallen: langgerekt evenwijdig aan een strand, een paar eenheden uit de kust.
+function zandbankPlekken(geo, b) {
+  const sd = b.sd, eig = b.eigenaar, n2 = [0, 0], kand = [];
+  const zee = (x, y) => { const px = Math.floor(x), py = Math.floor(y); if (px < 0 || py < 0 || px >= W || py >= H) return true; return eig[py * W + px] === -1; };
+  for (let y = 14; y < H - 14; y += 4) for (let x = 14; x < W - 14; x += 4) {
+    const s = sdOp(sd, x, y);
+    if (s < 2.2 || s > 4.4 || hash(x, y, 711) > 0.25 || normaal(sd, x, y, n2) < 0.1) continue;
+    const nx = n2[0], ny = n2[1], tx = -ny, ty = nx, rx = 1.6 + hash(x, y, 712) * 1.2, ry = 0.42 + hash(x, y, 713) * 0.3;
+    // het strand erachter (geen klif) en open zee ervoor
+    const lx = x - nx * (s + 2.5), ly = y - ny * (s + 2.5), t = clamp(Math.floor(ly / geo.T), 0, geo.rij - 1) * geo.kol + clamp(Math.floor(lx / geo.T), 0, geo.kol - 1), tg = geo.tegels[t];
+    if (!tg || tg.terrein === 'water' || b.klif[t] || sdOp(sd, x + nx * 5, y + ny * 5) < 4) continue;
+    let ok = true;
+    for (let i = 0; i < 10 && ok; i++) { const a = (i * TAU) / 10, ex = Math.cos(a) * (rx + 0.6), ey = Math.sin(a) * (ry + 0.5), qx = x + tx * ex + nx * ey, qy = y + ty * ex + ny * ey; if (!zee(qx, qy) || sdOp(sd, qx, qy) < 1.3) ok = false; }
+    if (ok) kand.push({ x, y, nx, ny, rx, ry, score: hash(x, y, 714), zaad: (x * 131 + y * 17) | 0 });
+  }
+  kand.sort((p, q) => q.score - p.score || p.y - q.y || p.x - q.x);
+  const uit = [];
+  for (const k of kand) { if (uit.length >= 24) break; if (!uit.some((o) => Math.hypot(o.x - k.x, o.y - k.y) < 40)) uit.push(k); }
+  return uit;
+}
+
+// Wat leven.js en natuur.js vast op het land aan de kust zetten, alleen uit de kaart (zelfde regels als daar): de
+// parasols per kusttegel (strand() in leven.js), de weides met een kudde, vlieger, sneeuwpop of sleetjes (een schijf
+// om het midden van de tegel) en de tegels met ooievaars of wolven (natuur.js). Daar komt geen strandinrichting.
+function landBezet(geo, b, tl) {
+  const T = geo.T, kol = geo.kol, rij = geo.rij, n = geo.tegels.length;
+  const parS = new Int32Array(n + 1), xy = [], weiR = new Float32Array(n), mijd = new Uint8Array(n);
+  for (let t = 0; t < n; t++) {
+    parS[t] = xy.length / 2;
+    const tg = geo.tegels[t];
+    if (tg.terrein !== 'kust' && tg.terrein !== 'vlakte') continue;
+    const wei = tg.eig >= 0 && hash(t, 61) < 0.6 && !(tg.terrein === 'vlakte' && hash(t, 3) < 0.45);
+    if (wei) weiR[t] = (hash(t, 111) < 0.42 ? 0.4 : hash(t, 121) < 0.18 || hash(t, 131) < 0.3 || hash(t, 134) < 0.35 ? 0.31 : 0) * T;
+    const nat = b.moeras[t] || tl.rivierAfstand(tg.x, tg.y) < 6.5;
+    if (nat && hash(t, 421) < (b.moeras[t] ? 0.35 : 0.1)) mijd[t] = 1;
+    if (hash(t, 471) <= 0.06) for (let dr = -1; dr <= 1; dr++) for (let dk = -1; dk <= 1; dk++) {
+      const k = tg.k + dk, r = tg.r + dr;
+      if (k < 0 || r < 0 || k >= kol || r >= rij) continue;
+      const nb = geo.tegels[r * kol + k];
+      if (nb.terrein === 'bos' || nb.terrein === 'berg') mijd[t] = 1;
+    }
+    if (tg.terrein !== 'kust' || wei || hash(t, 175) >= 0.6) continue;
+    let wx = 0, wy = 0;
+    for (let dr = -1; dr <= 1; dr++) for (let dk = -1; dk <= 1; dk++) { const k = tg.k + dk, r = tg.r + dr; if (k < 0 || r < 0 || k >= kol || r >= rij) continue; if (geo.tegels[r * kol + k].terrein === 'water') { wx += dk; wy += dr; } }
+    const l = Math.hypot(wx, wy);
+    if (!l) continue;
+    wx /= l; wy /= l;
+    for (let i = 0; i < 5; i++) {
+      if (hash(t, i, 179) > 0.7) continue;
+      const zij = (i - 2) * 0.13 * T, af = (0.22 + 0.08 * hash(t, i, 180)) * T;
+      xy.push(tg.x + wx * af - wy * zij, tg.y + wy * af + wx * zij);
+    }
+  }
+  parS[n] = xy.length / 2;
+  return { parS, parXY: Float32Array.from(xy), weiR, mijd };
 }
 
 // ---------- de laag ----------
@@ -564,6 +751,9 @@ export class KustLaag {
     this.bakTeller = 0;
     this.licht = new Float32Array(PLAFOND.lichten * LICHT);
     this.bundels = new Float32Array(PLAFOND.vuurtorens * 4); // x, y, hoek, lengte (scherm)
+    this.mens = new Float32Array(PLAFOND.mensen * MENS);
+    this.hond = new Float32Array(PLAFOND.honden * HOND);
+    this.tij = 0; // getij in eenheden: + vloed (de waterlijn schuift het strand op), - eb
     this.gloed = null;
     this.bundel = null;
     this.nul();
@@ -574,11 +764,16 @@ export class KustLaag {
     this.kades = []; this.woonboten = []; this.aken = []; this.stuwen = []; this.dammen = []; this.windparken = [];
     this.turbines = new Float32Array(0); this.booreilanden = []; this.viskwekerijen = [];
     this.rotsen = new Float32Array(0); this.rollers = new Float32Array(0); this.plekLijst = [];
+    // pakket D: strandinrichting, lopers, duinpaden, dijken, konijnen, zandbanken; havens van dichtbij
+    this.dingen = new Float32Array(0); this.lopers = new Float32Array(0); this.duinpaden = []; this.dijken = []; this.schapen = new Float32Array(0);
+    this.konijnen = new Float32Array(0); this.zandbanken = []; this.hengelplekken = new Float32Array(0); this.sloepen = []; this.kraantjes = [];
+    this.vissershavens = []; this.veerstoepen = [];
   }
 
   nul() {
     this.n = { vuurtorens: 0, pieren: 0, havenhoofden: 0, jachthavens: 0, boeien: 0, rotsen: 0, zeehonden: 0, spatten: 0, rollers: 0, kades: 0, woonboten: 0, aken: 0, stuwen: 0, dammen: 0, windparken: 0, turbines: 0, booreilanden: 0, viskwekerijen: 0, lichten: 0 };
-    this.nLicht = 0; this.nBundel = 0;
+    for (const k of D_TELLERS) this.n[k] = 0;
+    this.nLicht = 0; this.nBundel = 0; this.nMens = 0; this.nHond = 0;
   }
 
   // Na het laden van een spel (of een andere wereld): alles opnieuw afleiden.
@@ -696,6 +891,10 @@ export class KustLaag {
     this.kiesBooreilanden();
     this.kiesViskwekerijen();
     this.kiesRotsenRollers();
+    this.kiesHengelplekken();
+    this.kiesVissershavens(inf);
+    this.kiesVeerstoepen();
+    this.kiesStrand();
   }
 
   bouwSoorten() {
@@ -1226,6 +1425,374 @@ export class KustLaag {
     if (rol.length) this.plek('strand', rol[0], rol[1]);
   }
 
+  // ---------- pakket D: kiezen voor strand, duinen, dijken en havens ----------
+
+  // Mag hier op het land iets van het strand staan? Droog land, vrij van wegen, gebouwen en de rest van deze laag, en
+  // niet op de parasols, kuddes, vliegers en sneeuwpoppen van leven.js of de ooievaars en wolven van natuur.js.
+  landVrij(x, y, r) {
+    if (!this.droog(x, y) || this.sd(x, y) > -0.15 || !this.vrij(x, y, r, INFRA | GEBOUW | KUST)) return false;
+    const L = this.wereld.land, geo = this.geo, Tw = geo.T, k0 = Math.floor(x / Tw), r0 = Math.floor(y / Tw);
+    for (let dr = -1; dr <= 1; dr++) for (let dk = -1; dk <= 1; dk++) {
+      const k = k0 + dk, rr = r0 + dr;
+      if (k < 0 || rr < 0 || k >= geo.kol || rr >= geo.rij) continue;
+      const t = rr * geo.kol + k, tg = geo.tegels[t];
+      if (L.weiR[t] && Math.hypot(tg.x - x, tg.y - y) < L.weiR[t] + r) return false;
+      for (let j = L.parS[t]; j < L.parS[t + 1]; j++) if (Math.hypot(L.parXY[j * 2] - x, L.parXY[j * 2 + 1] - y) < 1.25 + r) return false;
+    }
+    return !L.mijd[this.tegel(x, y)];
+  }
+
+  // Ligt er binnen 5 eenheden land van een ander land? Daar tekent grens.js zijn palen en posten.
+  grensBij(x, y) {
+    const e = this.eigenaar, eig = e[clamp(y | 0, 0, H - 1) * W + clamp(x | 0, 0, W - 1)];
+    for (let i = 0; i < 12; i++) {
+      const a = (i * TAU) / 12, r = i & 1 ? 5 : 2.5, px = clamp((x + Math.cos(a) * r) | 0, 0, W - 1), py = clamp((y + Math.sin(a) * r) | 0, 0, H - 1), v = e[py * W + px];
+      if (v !== -1 && v !== eig) return true;
+    }
+    return false;
+  }
+
+  // Hoe druk het strand is: 3 vlak bij een woonwijk of de hoofdstad, 2 binnen drie tegels, 1 bewoond land, 0 wild.
+  drukBij(x, y) {
+    const geo = this.geo, Tw = geo.T, k0 = Math.floor(x / Tw), r0 = Math.floor(y / Tw);
+    let d = 9;
+    for (let dr = -3; dr <= 3; dr++) for (let dk = -3; dk <= 3; dk++) {
+      const k = k0 + dk, r = r0 + dr;
+      if (k < 0 || r < 0 || k >= geo.kol || r >= geo.rij) continue;
+      const s = this.soort[r * geo.kol + k];
+      if (s === STAD || s === HOOFD) d = Math.min(d, Math.max(Math.abs(dk), Math.abs(dr)));
+    }
+    if (d <= 1) return 3;
+    if (d <= 3) return 2;
+    return this.eigenaar[clamp(y | 0, 0, H - 1) * W + clamp(x | 0, 0, W - 1)] >= 0 ? 1 : 0;
+  }
+
+  // Markeer alleen landvakjes (midden ruim achter de waterlijn): de surfers, boten en kwallen in zee.js blijven
+  // gewoon in de branding, maar stad.js, hemel.js en de krabben houden het strand vrij.
+  merkLand(x, y, r, bit) {
+    const g = this.raster, rr = (r + 1.42) * (r + 1.42), sd = this.basis.sd;
+    const c0 = Math.max(0, Math.floor((x - r) / RC)), c1 = Math.min(RW - 1, Math.floor((x + r) / RC));
+    const r0 = Math.max(0, Math.floor((y - r) / RC)), r1 = Math.min(RH - 1, Math.floor((y + r) / RC));
+    for (let cy = r0; cy <= r1; cy++) for (let cx = c0; cx <= c1; cx++) {
+      const dx = cx * RC + 1 - x, dy = cy * RC + 1 - y;
+      if (dx * dx + dy * dy <= rr && sdOp(sd, cx * RC + 1, cy * RC + 1) < -0.9) g[cy * RW + cx] |= bit;
+    }
+  }
+
+  // Hengelaars op de pieren en havenhoofden: x, y, kant (naar het water), zaad, soort (0 pier, 1 havenhoofd).
+  kiesHengelplekken() {
+    const Tw = this.geo.T, uit = [];
+    for (const p of this.pieren) {
+      const tx = -p.ny, ty = p.nx;
+      for (let k = 0; k < 4; k++) {
+        const zaad = (p.zaad * 7 + k * 13) | 0, v = (0.3 + k * 0.14) * p.L, zij = hash(zaad, 1) < 0.5 ? -1 : 1;
+        if (hash(zaad, 2) > 0.7) continue;
+        uit.push(p.x + (p.nx * v + tx * zij * 0.021) * Tw, p.y + (p.ny * v + ty * zij * 0.021) * Tw, tx * zij, ty * zij, zaad, 0);
+      }
+    }
+    for (const a of this.havenhoofden) {
+      const q = a.pts, m = q.length / 2;
+      for (let j = 2; j + 1 < m; j += 3) {
+        const zaad = (a.zaad * 11 + j * 5) | 0;
+        if (hash(zaad, 3) > 0.55) continue;
+        const dx = q[j * 2 + 2] - q[j * 2 - 2], dy = q[j * 2 + 3] - q[j * 2 - 1], l = Math.hypot(dx, dy) || 1, zij = hash(zaad, 4) < 0.5 ? -1 : 1;
+        const hx = (-dy / l) * zij, hy = (dx / l) * zij;
+        uit.push(q[j * 2] + hx * 0.012 * Tw, q[j * 2 + 1] + hy * 0.012 * Tw, hx, hy, zaad, 1);
+      }
+    }
+    this.hengelplekken = Float32Array.from(uit.slice(0, 6 * 120));
+    if (uit.length) this.plek('hengelaars', uit[0], uit[1]);
+    // sloepjes langs de kades in de stad, en hier en daar een hijskraantje op de kademuur
+    const sloep = [], kraan = [], winter = [];
+    for (const ak of this.aken) { this.aakStand(ak, true); winter.push(this.ax, this.ay); }
+    for (const kd of this.kades) {
+      const p = kd.pts, m = p.length / 4;
+      let laatst = -99, n = 0;
+      for (let i = 1; i + 1 < m && sloep.length < 80; i++) {
+        const zaad = (kd.zaad * 31 + i * 7) | 0;
+        if (i - laatst < 3 || hash(zaad, 1) > 0.35) continue;
+        const wx = p[i * 4 + 2], wy = p[i * 4 + 3];
+        let fx = p[i * 4 + 4] - p[i * 4 - 4], fy = p[i * 4 + 5] - p[i * 4 - 3];
+        const fl = Math.hypot(fx, fy) || 1;
+        fx /= fl; fy /= fl;
+        const x = p[i * 4] + wx * 0.62, y = p[i * 4 + 1] + wy * 0.62, tl = this.tl;
+        if (tl.rivierAfstand(x + fx * 0.45, y + fy * 0.45) > -0.2 || tl.rivierAfstand(x - fx * 0.45, y - fy * 0.45) > -0.2 || tl.rivierAfstand(x, y) > -0.3 || tl.rivierAfstand(x + wx * 0.45, y + wy * 0.45) > -0.6) continue;
+        if (!this.vrij(x, y, 0.35, KUST | INFRA | LEVEN)) continue;
+        let vrijVanAak = true;
+        for (let j = 0; j < winter.length; j += 2) if (Math.hypot(winter[j] - x, winter[j + 1] - y) < 2.4) vrijVanAak = false;
+        if (!vrijVanAak) continue;
+        sloep.push({ x, y, fx, fy, wx, wy, zaad });
+        this.merk(x, y, 0.45, KUST);
+        laatst = i; n++;
+      }
+      if (n && kraan.length < 30 && hash(kd.zaad, 9) < 0.6) {
+        const i = Math.floor(m / 2), x = p[i * 4] - p[i * 4 + 2] * 0.12, y = p[i * 4 + 1] - p[i * 4 + 3] * 0.12;
+        if (this.vrij(x, y, 0.2, INFRA | KUST)) { kraan.push({ x, y, wx: p[i * 4 + 2], wy: p[i * 4 + 3], zaad: (kd.zaad * 5 + 1) | 0 }); this.merk(x, y, 0.3, KUST); }
+      }
+    }
+    this.sloepen = sloep;
+    this.kraantjes = kraan;
+    if (sloep.length) this.plek('sloepen', sloep[0].x, sloep[0].y);
+  }
+
+  // Een vissershaventje aan de kust bij een woonwijk: kademuur met bolders, een visafslag met kratten, netten die
+  // op de kade geboet worden, kotters aan de trossen, een hijskraantje en meeuwen. In een eigen kader (u langs de
+  // kade, v het water in), maten in eenheden.
+  kiesVissershavens(inf) {
+    const geo = this.geo, Tw = geo.T, uit = [], n2 = [0, 0], havens = inf?.havens ?? [];
+    for (let t = 0; t < geo.tegels.length && uit.length < 6; t++) {
+      if (this.soort[t] !== STAD && this.soort[t] !== HOOFD) continue;
+      const tg = geo.tegels[t];
+      if (this.sd(tg.x, tg.y) < -3 * Tw || uit.some((o) => Math.hypot(o.x - tg.x, o.y - tg.y) < 4 * Tw)) continue;
+      const kand = this.kustPunten(tg.x, tg.y, 3 * Tw, -0.8, 0.8);
+      for (let j = 0; j * 3 < kand.length && j < 300; j++) {
+        const x = kand[j * 3], y = kand[j * 3 + 1];
+        if (normaal(this.basis.sd, x, y, n2) < 0.1 || this.basis.klif[this.tegel(x, y)]) continue;
+        if (havens.some((h) => Math.hypot(h.x - x, h.y - y) < 1.0 * Tw) || this.jachthavens.some((h) => Math.hypot(h.ax - x, h.ay - y) < 1.2 * Tw) || this.pieren.some((p) => Math.hypot(p.x - x, p.y - y) < 1.0 * Tw) || uit.some((o) => Math.hypot(o.x - x, o.y - y) < 3 * Tw)) continue;
+        const nx = n2[0], ny = n2[1], tx = -ny, ty = nx, P = (u, v) => { this.vhx = x + tx * u + nx * v; this.vhy = y + ty * u + ny * v; };
+        let ok = true;
+        for (let u = -3.5; u <= 3.51 && ok; u += 1.75) for (const v of [0.35, 0.9, 1.6, 2.4]) {
+          P(u, v);
+          if (!this.isZee(this.vhx, this.vhy) || this.sd(this.vhx, this.vhy) < (v < 0.5 ? 0.02 : 0.3) || (v > 0.5 && !this.vrij(this.vhx, this.vhy, 0.2, LEVEN | INFRA | KUST))) { ok = false; break; }
+        }
+        for (let u = -3.2; u <= 3.21 && ok; u += 1.6) for (const v of [-0.9, -1.8, -2.7]) {
+          P(u, v);
+          if (!this.landVrij(this.vhx, this.vhy, 0.2) || (v > -1 && this.sd(this.vhx, this.vhy) > -0.25)) { ok = false; break; }
+        }
+        if (!ok) continue;
+        const zaad = (t * 97 + j * 3) | 0, nk = 2 + (hash(zaad, 1) < 0.5 ? 1 : 0);
+        uit.push({ x, y, nx, ny, tx, ty, zaad, nk, x0: x - 6, y0: y - 6, x1: x + 6, y1: y + 6 });
+        for (let u = -3.5; u <= 3.51; u += 1.75) for (const v of [-2.6, -1.2, 0.4, 1.4]) { P(u, v); this.merk(this.vhx, this.vhy, 0.8, KUST); }
+        this.plek('vissershaven', x, y);
+        break;
+      }
+    }
+    this.vissershavens = uit;
+  }
+
+  // Waar de veerboten van leven.js aanleggen: een veerstoep van de achtersteven naar de wal, met een rij wachtende
+  // auto's. De boot zelf blijft van leven.js; hier alleen de stoep en de auto's die eraf en erop rijden.
+  kiesVeerstoepen() {
+    const F = this.wereld.veer, L = this.wereld.leven, Tw = this.geo.T, uit = [];
+    for (let i = 0; i * 6 < F.length; i++) {
+      const ax = F[i * 6], ay = F[i * 6 + 1], bx = F[i * 6 + 2], by = F[i * 6 + 3], e0 = F[i * 6 + 4], e1 = F[i * 6 + 5];
+      const len = Math.hypot(bx - ax, by - ay);
+      if (len < 1) continue;
+      const ux = (bx - ax) / len, uy = (by - ay) / len;
+      for (let zij = 0; zij < 2; zij++) {
+        const p = zij ? 0.92 : 0.08, bx0 = zij ? ux : -ux, by0 = zij ? uy : -uy;
+        const sx = ax + (bx - ax) * p + bx0 * 0.125 * Tw, sy = ay + (by - ay) * p + by0 * 0.125 * Tw;
+        // de kortste weg naar de wal in een waaier rond het verlengde van de boot; de eerste die past, telt
+        const kand = [];
+        for (let k = -3; k <= 3; k++) {
+          const h = Math.atan2(by0, bx0) + k * 0.35, ex = Math.cos(h), ey = Math.sin(h);
+          for (let w = 0; w <= 1.6 * Tw; w += 0.25) { const qx = sx + ex * w, qy = sy + ey * w; if (!this.isZee(qx, qy) && this.sd(qx, qy) < -0.5) { if (w >= 0.3) kand.push(w + Math.abs(k) * 0.8, w, ex, ey); break; } }
+        }
+        const volg = [];
+        for (let k = 0; k < kand.length; k += 4) volg.push(k);
+        volg.sort((q, r) => kand[q] - kand[r] || q - r);
+        for (const k of volg) {
+          const v = kand[k + 1], ex = kand[k + 2], ey = kand[k + 3];
+          const Lj = v + 0.7, kx = sx + ex * Lj, ky = sy + ey * Lj;
+          if (!this.droog(kx, ky) || !this.vrij(kx, ky, 0.3, INFRA | GEBOUW | KUST)) continue;
+          let ok = true;
+          for (let w = 0; w <= v && ok; w += 0.6) {
+            const qx = sx + ex * w, qy = sy + ey * w;
+            if (!this.vrij(qx, qy, 0.25, INFRA | KUST)) ok = false;
+            for (let j = 0; j * 3 < L.length && ok; j++) if ((j < e0 || j > e1) && Math.hypot(L[j * 3] - qx, L[j * 3 + 1] - qy) < L[j * 3 + 2] + 0.35) ok = false;
+          }
+          if (!ok) continue;
+          // wachtrij op de wal, zolang het droog en vrij is
+          let nq = 0;
+          while (nq < 3) { const qx = kx + ex * (0.6 + nq * 0.6), qy = ky + ey * (0.6 + nq * 0.6); if (!this.droog(qx, qy) || !this.vrij(qx, qy, 0.2, INFRA | GEBOUW | KUST)) break; nq++; }
+          const zaad = (i * 53 + zij * 7 + 1) | 0;
+          uit.push({ i, zij, sx, sy, ex, ey, L: Lj, nq, len, zaad, x0: Math.min(sx, kx) - 4, y0: Math.min(sy, ky) - 4, x1: Math.max(sx, kx) + 4, y1: Math.max(sy, ky) + 4 });
+          for (let w = v; w <= Lj + nq * 0.6 + 0.3; w += 0.6) this.merk(sx + ex * w, sy + ey * w, 0.3, KUST);
+          for (let w = 0; w < v; w += 0.6) this.merk(sx + ex * w, sy + ey * w, 0.35, KUST);
+          this.plek('veerstoep', kx, ky);
+          break;
+        }
+      }
+    }
+    this.veerstoepen = uit;
+  }
+
+  // Het strand zelf: per strandpunt of het vrij is en hoe druk; dan percelen van drie punten met een vaste
+  // inrichting (strandhuisjes achteraan, een paviljoen op palen, een reddingspost, een volleybalveld, stoelen,
+  // schermen en handdoeken, zandkastelen en gaten vooraan); lopers langs de waterlijn; duinpaden met een fietsenrek;
+  // helm en konijnen in de duinen; dijken met schapen op laag land; zandbanken met zeehonden. Wie er is en wat er
+  // staat hangt per beeld af van seizoen, weer en tijd van de dag (zie tekenStrand); hier alleen de plekken.
+  kiesStrand() {
+    const A = this.wereld.strand, n = A.n;
+    if (!this.pv || this.pv.length !== n) { this.pv = new Uint8Array(n); this.isDijk = new Uint8Array(n); }
+    const pv = this.pv, isDijk = this.isDijk;
+    pv.fill(0); isDijk.fill(0);
+    for (let i = 0; i < n; i++) {
+      if (!(A.f[i] & S_DROOG)) continue;
+      const bx = A.x[i] - A.nx[i] * 1.3, by = A.y[i] - A.ny[i] * 1.3;
+      if (!this.landVrij(bx, by, 0.4) || this.grensBij(bx, by)) continue;
+      pv[i] = P_VRIJ | (this.drukBij(bx, by) << 4);
+    }
+    const D = [], merk = [], lopers = [], paden = [], konijn = [], dijken = [], schaap = [];
+    this.postXY = []; this.pavXY = [];
+    for (let k = 0; k < A.ks.length; k++) {
+      const s0 = A.ks[k], m = A.kn[k];
+      // dijken: aaneengesloten laag land zonder duinen
+      let a = -1;
+      for (let j = 0; j <= m; j++) {
+        const i = s0 + j, ok = j < m && A.f[i] & S_DIJK && pv[i] & P_VRIJ && this.landVrij(A.x[i] - A.nx[i] * 2.6, A.y[i] - A.ny[i] * 2.6, 0.5);
+        if (ok && a < 0) a = j;
+        if (!ok && a >= 0) {
+          if (j - a >= 4 && dijken.length < 60) {
+            const i0 = s0 + a, i1 = s0 + j - 1;
+            let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+            for (let q = i0; q <= i1; q++) {
+              isDijk[q] = 1;
+              x0 = Math.min(x0, A.x[q]); x1 = Math.max(x1, A.x[q]); y0 = Math.min(y0, A.y[q]); y1 = Math.max(y1, A.y[q]);
+              merk.push(A.x[q] - A.nx[q] * 1.6, A.y[q] - A.ny[q] * 1.6, 1.4);
+              const zq = (q * 977 + 41) | 0;
+              if (hash(zq, 1) < 0.45 && schaap.length < 3 * 400) schaap.push(q, hash(zq, 2) < 0.55 ? 1.15 + hash(zq, 3) * 0.35 : 2.25 + hash(zq, 3) * 0.4, zq);
+            }
+            dijken.push({ i0, i1, zaad: (i0 * 31 + i1) | 0, x0: x0 - 4, y0: y0 - 4, x1: x1 + 4, y1: y1 + 4 });
+          }
+          a = -1;
+        }
+      }
+      // percelen van drie punten
+      for (let j = 1; j + 1 < m; j += 3) {
+        const i = s0 + j;
+        if (!(pv[i - 1] & pv[i] & pv[i + 1] & P_VRIJ) || isDijk[i - 1] || isDijk[i] || isDijk[i + 1]) continue;
+        this.richtPerceel(i, pv[i] >> 4, D, merk);
+      }
+    }
+    // tweede ronde, nu alle inrichting er staat: lopers, duinpaden en konijnen
+    for (let k = 0; k < A.ks.length; k++) {
+      const s0 = A.ks[k], m = A.kn[k];
+      let a;
+      // lopers: stukken van aaneengesloten vrije punten, hooguit 24 punten per loper
+      a = -1;
+      for (let j = 0; j <= m; j++) {
+        const i = s0 + j, ok = j < m && pv[i] & P_VRIJ && !isDijk[i];
+        if (ok && a < 0) a = j;
+        if (!ok && a >= 0) {
+          for (let q = a; q + 6 <= j && lopers.length < LOOP * 300; q += 24) {
+            const i0 = s0 + q, i1 = s0 + Math.min(j - 1, q + 23), zq = (i0 * 613 + i1 * 7) | 0;
+            lopers.push(i0, i1, 0, zq, 0, 0, Math.max(pv[i0] >> 4, pv[i1] >> 4));
+          }
+          a = -1;
+        }
+      }
+      // duinpaden over de duinen naar het strand, met een fietsenrek aan het eind; konijnen in de duinen
+      let laatst = -99;
+      for (let j = 2; j + 2 < m; j++) {
+        const i = s0 + j;
+        if (!(A.f[i] & S_DUIN) || !(pv[i] & P_VRIJ)) continue;
+        const x = A.x[i], y = A.y[i], nx = A.nx[i], ny = A.ny[i], zq = (i * 389 + 5) | 0;
+        if (hash(zq, 41) < 0.05 && konijn.length < 3 * 120) {
+          const d = 3.6 + hash(zq, 42) * 1.8, kx = x - nx * d, ky = y - ny * d;
+          if (this.landVrij(kx, ky, 0.3)) konijn.push(kx, ky, zq);
+        }
+        if (j - laatst < 14 || paden.length >= 40 || (pv[i] >> 4) < 1 || hash(zq, 43) > 0.45) continue;
+        // niet dwars door de strandhuisjes, het paviljoen of de reddingspost waar het pad op het strand uitkomt
+        let ok = true;
+        for (let q = 0; q < D.length && ok; q += DING) {
+          const sq = D[q], r = sq === PAVILJOEN_S ? 1.3 : sq === HUISJE_S || sq === POST_S ? 0.6 : 0;
+          if (r && (Math.hypot(D[q + 1] - (x - nx * 2.1), D[q + 2] - (y - ny * 2.1)) < r || Math.hypot(D[q + 1] - (x - nx * 2.6), D[q + 2] - (y - ny * 2.6)) < r)) ok = false;
+        }
+        for (let d = 2.6; d <= 5.9 && ok; d += 0.8) if (!this.landVrij(x - nx * d, y - ny * d, 0.25)) ok = false;
+        if (!ok) continue;
+        const tx = -ny, ty = nx, rx = x - nx * 6.1 + tx * 0.75, ry = y - ny * 6.1 + ty * 0.75, rek = this.landVrij(rx, ry, 0.3);
+        paden.push({ i, x, y, nx, ny, zaad: zq, rek, druk: pv[i] >> 4, x0: x - 8, y0: y - 8, x1: x + 8, y1: y + 8 });
+        for (let d = 2.4; d <= 6.2; d += 1.2) merk.push(x - nx * d, y - ny * d, 0.4);
+        if (rek) merk.push(rx, ry, 0.4);
+        laatst = j;
+      }
+    }
+    // zandbanken: vrij van de boten van leven.js en de rest van deze laag
+    const banken = [];
+    for (const z of this.wereld.zandbanken) {
+      if (banken.length >= 12 || !this.vrij(z.x, z.y, z.rx + 0.4, LEVEN | INFRA | KUST)) continue;
+      banken.push(z);
+      this.merk(z.x, z.y, z.rx * 0.8, KUST);
+    }
+    // nu pas merken: binnen een perceel botsen de dingen niet met hun eigen merktekens
+    for (let j = 0; j < merk.length; j += 3) this.merkLand(merk[j], merk[j + 1], merk[j + 2], KUST);
+    this.dingen = Float32Array.from(D);
+    this.lopers = Float32Array.from(lopers);
+    this.duinpaden = paden;
+    this.konijnen = Float32Array.from(konijn);
+    this.dijken = dijken;
+    this.schapen = Float32Array.from(schaap);
+    this.zandbanken = banken;
+    // plekken om naartoe te zoomen
+    const eerste = (soort) => { for (let j = 0; j < D.length; j += DING) if (D[j] === soort) return j; return -1; };
+    for (const [soort, naam] of [[PAVILJOEN_S, 'paviljoen'], [POST_S, 'reddingspost'], [VELD_S, 'volleybal'], [HUISJE_S, 'strandhuisjes'], [KASTEEL_S, 'zandkastelen']]) {
+      const j = eerste(soort);
+      if (j >= 0) this.plek(naam, D[j + 1], D[j + 2]);
+    }
+    if (paden.length) this.plek('duinovergang', paden[0].x - paden[0].nx * 3, paden[0].y - paden[0].ny * 3);
+    if (dijken.length) { const q = (dijken[0].i0 + dijken[0].i1) >> 1; this.plek('dijk', A.x[q] - A.nx[q] * 1.6, A.y[q] - A.ny[q] * 1.6); }
+    if (banken.length) this.plek('zandbank', banken[0].x, banken[0].y);
+    if (konijn.length) this.plek('konijnen', konijn[0], konijn[1]);
+    for (let j = 0; j < lopers.length; j += LOOP) if (lopers[j + 6] === 0) { const q = lopers[j]; this.plek('stil strand', A.x[q] - A.nx[q], A.y[q] - A.ny[q]); break; }
+  }
+
+  // Eén perceel: drie strandpunten (zo'n 4,5 eenheid langs de waterlijn). Kader: u langs het strand, d landinwaarts.
+  // Achteraan (d 1,8-2,25) strandhuisjes, een paviljoen of een reddingspost; in het midden (d 1-1,5) een veld of
+  // het ligvak; vooraan (d 0,4-0,6) zandkastelen en gaten.
+  richtPerceel(i, druk, D, merk) {
+    const A = this.wereld.strand, x = A.x[i], y = A.y[i], nx = A.nx[i], ny = A.ny[i], tx = -ny, ty = nx;
+    const zaad = (Math.round(x * 7) * 131 + Math.round(y * 7) * 17) | 0;
+    if (druk === 0) return;
+    const wx = (u, d) => x + tx * u - nx * d, wy = (u, d) => y + ty * u - ny * d;
+    const past = (u, d, hu, hd) => {
+      for (let k = 0; k < 5; k++) {
+        const pu = k === 4 ? u : u + (k & 1 ? hu : -hu), pd = k === 4 ? d : d + (k & 2 ? hd : -hd);
+        if (!this.landVrij(wx(pu, pd), wy(pu, pd), 0)) return false;
+      }
+      return true;
+    };
+    const zet = (soort, u, d, extra, r) => {
+      const X = wx(u, d), Y = wy(u, d), z2 = (zaad * 7 + D.length) | 0;
+      D.push(soort, X, Y, tx, ty, z2, druk, extra);
+      merk.push(X, Y, r);
+    };
+    const r = hash(zaad, 1);
+    let midden = true, achter = true, vrijU = 0; // vrijU: ligvak alleen buiten |u| < vrijU
+    // een paviljoen (ook een enkele strandtent op een rustig strand), hooguit om de 24 eenheden strand
+    if (r < [0, 0.04, 0.14, 0.3][druk] && !this.pavXY.some((p, j) => j % 2 === 0 && Math.hypot(p - x, this.pavXY[j + 1] - y) < 24) && past(0, 1.75, 0.75, 0.55)) {
+      this.pavXY.push(x, y);
+      zet(PAVILJOEN_S, 0, 1.75, Math.floor(hash(zaad, 2) * 4), 1.1);
+      achter = false; vrijU = 1.05;
+    } else if (r < (druk >= 2 ? 0.3 : 0.12) && !this.postXY.some((p, j) => j % 2 === 0 && Math.hypot(p - x, this.postXY[j + 1] - y) < 28)) {
+      const u = (hash(zaad, 3) - 0.5) * 2;
+      if (past(u, 1.65, 0.4, 0.4)) { zet(POST_S, u, 1.65, 0, 0.7); this.postXY.push(x, y); achter = false; vrijU = 0; midden = hash(zaad, 4) < 0.5; }
+    }
+    if (achter && (druk === 3 ? hash(zaad, 5) < 0.85 : druk === 2 ? hash(zaad, 5) < 0.55 : hash(zaad, 5) < 0.18)) {
+      // een rij huisjes, links of rechts beginnend; elk huisje kijkt naar zee
+      const nh = druk === 3 ? 5 + Math.floor(hash(zaad, 6) * 3) : 2 + Math.floor(hash(zaad, 6) * 3), u0 = -((nh - 1) * 0.62) / 2;
+      for (let h = 0; h < nh; h++) { const u = u0 + h * 0.62; if (past(u, 2.02, 0.26, 0.2)) zet(HUISJE_S, u, 2.02, Math.floor(hash(zaad, 20 + h) * HUISJE.length), 0.4); }
+    }
+    if (midden && druk >= 2 && vrijU === 0 && hash(zaad, 7) < 0.3 && past(0, 1.25, 0.9, 0.42)) {
+      zet(VELD_S, 0, 1.25, 0, 1.0);
+    } else if (midden) {
+      const kans = [0, 0.35, 0.6, 0.8][druk];
+      for (let s = 0; s < 8; s++) {
+        const u = -1.85 + s * 0.53, zs = hash(zaad, 30 + s);
+        if (Math.abs(u) < vrijU || zs > kans) continue;
+        const soort = druk >= 2 && hash(zaad, 40 + s) < 0.3 ? STOEL_S : hash(zaad, 50 + s) < 0.3 ? SCHERM_S : DOEK_S;
+        const d = 1.18 + (hash(zaad, 60 + s) - 0.5) * 0.2;
+        if (past(u, d, 0.22, 0.26)) zet(soort, u, d, Math.floor(hash(zaad, 70 + s) * 64), 0.3);
+      }
+    }
+    // vooraan: zandkastelen en gaten (waar kinderen zijn)
+    for (let s = 0; s < 2; s++) {
+      if (hash(zaad, 80 + s) > (druk >= 2 ? 0.4 : 0.15)) continue;
+      const u = (s ? 0.4 : -1.2) + hash(zaad, 82 + s) * 0.8;
+      if (past(u, 0.5, 0.2, 0.15)) zet(hash(zaad, 84 + s) < 0.7 ? KASTEEL_S : GAT_S, u, 0.5, Math.floor(hash(zaad, 86 + s) * 64), 0.25);
+    }
+  }
+
   // ---------- per beeld ----------
 
   kader(view, sc) {
@@ -1318,21 +1885,40 @@ export class KustLaag {
     this.bruggen = view.infraLaag?.brugVlakken ? view.infraLaag.brugVlakken() : null;
     const a = smooth(3.6, 4.4, z);
     this.vervaag = a; // ook de lichtjes komen bij het inzoomen geleidelijk op (zie tekenLichten)
+    // eb en vloed: een getij van drie minuten op de klok, alleen beeld
+    this.tij = 0.55 * Math.sin((TAU * nu) / 180000 + 0.7);
+    this.strandWeer();
+    this.nZr = 0;
+    if (z >= DREMPEL.getij - 0.5) this.strandZicht();
+    const op = (drempel) => a * smooth(drempel - 0.5, drempel + 0.3, z);
     c.save();
     c.lineCap = 'butt';
     c.lineJoin = 'round';
+    if (this.nZr) this.tekenGetij(c, op(DREMPEL.getij));
     if (z >= DREMPEL.roller - 0.5) this.tekenRollers(c, a * smooth(DREMPEL.roller - 0.5, DREMPEL.roller + 0.5, z));
+    if (z >= DREMPEL.zandbank - 0.5) this.tekenZandbanken(c, op(DREMPEL.zandbank));
+    if (z >= DREMPEL.dijk - 0.5) this.tekenDijken(c, op(DREMPEL.dijk));
     this.tekenDammen(c, a);
     if (z >= DREMPEL.viskweek - 0.5) this.tekenViskwekerijen(c, a * smooth(DREMPEL.viskweek - 0.5, DREMPEL.viskweek + 0.3, z));
     if (z >= DREMPEL.stuw - 0.5) this.tekenStuwen(c, a * smooth(DREMPEL.stuw - 0.5, DREMPEL.stuw + 0.3, z));
     if (z >= DREMPEL.kade - 0.5) this.tekenKades(c, a * smooth(DREMPEL.kade - 0.5, DREMPEL.kade + 0.3, z));
     if (z >= DREMPEL.woonboot - 0.5) this.tekenWoonboten(c, a * smooth(DREMPEL.woonboot - 0.5, DREMPEL.woonboot + 0.3, z));
+    if (z >= DREMPEL.sloep - 0.5) this.tekenSloepen(c, op(DREMPEL.sloep));
     if (z >= DREMPEL.aak - 0.5) this.tekenAken(c, a * smooth(DREMPEL.aak - 0.5, DREMPEL.aak + 0.3, z));
     if (z >= DREMPEL.boei - 0.5) this.tekenBoeien(c, a * smooth(DREMPEL.boei - 0.5, DREMPEL.boei + 0.3, z));
     if (z >= DREMPEL.havenhoofd - 0.4) this.tekenHavenhoofden(c, a * smooth(DREMPEL.havenhoofd - 0.4, DREMPEL.havenhoofd + 0.3, z));
     if (z >= DREMPEL.jachthaven - 0.5) this.tekenJachthavens(c, a * smooth(DREMPEL.jachthaven - 0.5, DREMPEL.jachthaven + 0.3, z));
+    if (z >= DREMPEL.veerstoep - 0.5) this.tekenVeerstoepen(c, op(DREMPEL.veerstoep));
     if (z >= DREMPEL.pier - 0.5) this.tekenPieren(c, a * smooth(DREMPEL.pier - 0.5, DREMPEL.pier + 0.3, z));
+    if (z >= DREMPEL.vissershaven - 0.5) this.tekenVissershavens(c, op(DREMPEL.vissershaven));
     if (z >= DREMPEL.rots - 0.5) this.tekenRotsen(c, a * smooth(DREMPEL.rots - 0.5, DREMPEL.rots + 0.3, z));
+    // het strand van dichtbij: vloedlijn, duinen, inrichting, lopers, hengelaars; de mensen en honden als laatste
+    if (this.nZr && z >= DREMPEL.vloedlijn - 0.5) this.tekenVloedlijn(c, op(DREMPEL.vloedlijn));
+    if (z >= DREMPEL.duinpad - 0.5) this.tekenDuinen(c, op(DREMPEL.duinpad));
+    if (z >= DREMPEL.paviljoen - 0.5) this.tekenStrand(c, op(DREMPEL.paviljoen));
+    if (z >= DREMPEL.loper - 0.5) this.tekenLopers(c, op(DREMPEL.loper));
+    if (z >= DREMPEL.hengel - 0.5) this.tekenHengelaars(c, op(DREMPEL.hengel));
+    if (this.nMens || this.nHond) { c.globalAlpha = op(DREMPEL.strandmens); this.tekenMensen(c); }
     this.tekenWindparken(c, a);
     this.tekenBooreilanden(c, a);
     this.tekenVuurtorens(c, a);
@@ -1365,7 +1951,7 @@ export class KustLaag {
           const p = frac(nu / 5200 + zaad + k * 0.5);
           // laag 0: de golf die aanrolt; laag 1: het breken vlak voor de kust
           if (laag === 0 ? p > 0.74 : p <= 0.74) continue;
-          const d = 0.4 + (1 - p) * 5.5, cx = x + nx * d, cy = y + ny * d, hl = L * (0.55 + 0.45 * p);
+          const d = Math.max(0.3, 0.4 + (1 - p) * 5.5 - this.tij * 0.9), cx = x + nx * d, cy = y + ny * d, hl = L * (0.55 + 0.45 * p);
           const ax = cx - ny * hl, ay = cy + nx * hl, bx = cx + ny * hl, by = cy - nx * hl;
           if (sdOp(sd, ax, ay) < 0.25 || sdOp(sd, bx, by) < 0.25) continue;
           c.moveTo(ax * sc + ox, ay * sc + oy);
@@ -2012,6 +2598,1060 @@ export class KustLaag {
     void sc; void nu;
   }
 
+  // ---------- pakket D: strand, getij, duinen, dijken en havens van dichtbij ----------
+
+  // Weer en seizoen voor het strand, per beeld: bez is hoe vol het strand is (0 leeg .. 1 een warme zonnige
+  // zomerdag), seizoenStrand of de huisjes en stoelen er staan (in de winter zijn ze weggehaald).
+  strandWeer() {
+    const sz = this.sz, wr = this.wr;
+    this.dagL = 1 - smooth(0.3, 0.7, this.nacht);
+    this.warm = smooth(0.62, 0.12, sz.koud);
+    this.zon = smooth(0.95, 0.4, wr.wolken) * (1 - smooth(0.02, 0.2, wr.regen + wr.sneeuw)) * (1 - clamp(+wr.onweer || 0, 0, 1));
+    // in oorlog (openbaar: state.oorlogen) blijven de meeste mensen van het strand weg
+    this.oorlogHier = this.oorlogInBeeld();
+    this.bez = this.dagL * this.warm * this.zon * (this.oorlogHier ? 0.25 : 1);
+    this.seizoenStrand = clamp(sz.zomer + sz.lente * 0.6 + sz.herfst * 0.3, 0, 1);
+    this.dagNr = Math.floor(this.state.dag) | 0;
+    this.windX = Math.cos(this.wd.hoek); this.windY = Math.sin(this.wd.hoek);
+  }
+
+  // Is een land in beeld in oorlog? Negen punten over het beeld; zelfde partijregel als hemel.js.
+  oorlogInBeeld() {
+    const s = this.state, O = s.oorlogen;
+    if (!O || !O.length) return false;
+    for (let q = 0; q < 9; q++) {
+      const x = this.wx0 + ((q % 3) + 0.5) * (this.wx1 - this.wx0) / 3, y = this.wy0 + (Math.floor(q / 3) + 0.5) * (this.wy1 - this.wy0) / 3;
+      const e = this.eigenaar[clamp(Math.floor(y), 0, H - 1) * W + clamp(Math.floor(x), 0, W - 1)], l = e >= 0 ? s.landen[e] : null;
+      if (!l) continue;
+      const p = l.alignment && l.alignment !== 'zwevend' ? l.alignment : `land:${l.idx}`;
+      for (let i = 0; i < O.length; i++) if (O[i].a === p || O[i].b === p) return true;
+    }
+    return false;
+  }
+
+  // De strandpunten in beeld, in stukken (runs) langs de ketens; uitgezoomd elk tweede punt.
+  strandZicht() {
+    const A = this.wereld.strand, zp = this.zp ??= new Int32Array(PLAFOND.strandpunten), zr = this.zr ??= new Int32Array(PLAFOND.getij + 1);
+    const stap = this.zoom < 11 ? 2 : 1;
+    let m = 0, nr = 0;
+    for (let k = 0; k < A.ks.length && m < zp.length; k++) {
+      if (!this.inBeeld(A.kader[k * 4], A.kader[k * 4 + 1], A.kader[k * 4 + 2], A.kader[k * 4 + 3], 0)) continue;
+      let open = false;
+      for (let j = 0; j < A.kn[k] && m < zp.length; j += stap) {
+        const i = A.ks[k] + j;
+        if (!this.puntInBeeld(A.x[i], A.y[i], 7)) { open = false; continue; }
+        if (!open) { if (nr >= PLAFOND.getij) break; zr[nr++] = m; open = true; }
+        zp[m++] = i;
+      }
+    }
+    zr[nr] = m;
+    this.nZp = m; this.nZr = nr;
+    this.n.strandpunten = m;
+  }
+
+  // Eb en vloed (alleen beeld): de waterlijn schuift langzaam op en neer met de klok. Bij eb glinstert het natte
+  // zand, bij vloed ligt er een strook ondiep water over het strand; de schuimrand volgt de lijn van dat moment.
+  tekenGetij(c, a) {
+    const A = this.wereld.strand, zp = this.zp, zr = this.zr, nr = this.nZr, sc = this.sc, ox = this.ox, oy = this.oy, T = this.T, tij = this.tij, nu = this.nu, z = this.zoom;
+    if (!nr) return;
+    let runs = 0;
+    c.globalAlpha = a * Math.min(1, Math.abs(tij) / 0.3);
+    c.fillStyle = tij < 0 ? 'rgba(128,112,80,0.36)' : 'rgba(96,150,168,0.45)';
+    c.beginPath();
+    for (let r = 0; r < nr; r++) {
+      const b0 = zr[r], b1 = zr[r + 1];
+      if (b1 - b0 < 2) continue;
+      runs++;
+      for (let j = b0; j < b1; j++) { const i = zp[j], X = A.x[i] * sc + ox, Y = A.y[i] * sc + oy; if (j === b0) c.moveTo(X, Y); else c.lineTo(X, Y); }
+      for (let j = b1 - 1; j >= b0; j--) { const i = zp[j]; c.lineTo((A.x[i] - A.nx[i] * tij) * sc + ox, (A.y[i] - A.ny[i] * tij) * sc + oy); }
+      c.closePath();
+    }
+    c.fill();
+    this.n.getij = runs;
+    // glinsteringen op het natte zand bij eb
+    if (tij < -0.1 && z >= DREMPEL.klein) {
+      c.globalAlpha = a * smooth(-0.1, -0.3, tij);
+      c.fillStyle = 'rgba(255,255,250,0.85)'; c.beginPath();
+      const g = Math.max(0.8, T * 0.0028);
+      for (let j = 0; j < zr[nr]; j++) {
+        const i = zp[j];
+        if (frac(nu / 900 + hash(i, 5) * 7) > 0.2) continue;
+        const d = tij * (0.15 + 0.7 * hash(i, 6)), u = (hash(i, 7) - 0.5) * 1.2;
+        c.rect((A.x[i] - A.nx[i] * d - A.ny[i] * u) * sc + ox - g / 2, (A.y[i] - A.ny[i] * d + A.nx[i] * u) * sc + oy - g / 2, g, g);
+      }
+      c.fill();
+    }
+    // de schuimrand op de waterlijn van nu, en daarachter losse vlokken zeeschuim
+    c.globalAlpha = a;
+    c.strokeStyle = 'rgba(250,252,250,0.78)'; c.lineWidth = Math.max(0.6, T * 0.0035); c.lineCap = 'round';
+    c.beginPath();
+    for (let r = 0; r < nr; r++) {
+      const b0 = zr[r], b1 = zr[r + 1];
+      if (b1 - b0 < 2) continue;
+      for (let j = b0; j < b1; j++) {
+        const i = zp[j], d = tij + 0.04 * Math.sin(nu / 700 + i * 0.9);
+        const X = (A.x[i] - A.nx[i] * d) * sc + ox, Y = (A.y[i] - A.ny[i] * d) * sc + oy;
+        if (j === b0) c.moveTo(X, Y); else c.lineTo(X, Y);
+      }
+    }
+    c.stroke();
+    if (z >= DREMPEL.klein) {
+      c.fillStyle = 'rgba(248,250,246,0.6)'; c.beginPath();
+      const r0 = Math.max(0.6, T * 0.0032);
+      for (let j = 0; j < zr[nr]; j++) {
+        const i = zp[j];
+        if (hash(i, 8) > 0.45) continue;
+        const d = tij - 0.12 - 0.35 * frac(hash(i, 9) + nu / 6000), u = (hash(i, 10) - 0.5) * 1.3;
+        stip(c, (A.x[i] - A.nx[i] * d - A.ny[i] * u) * sc + ox, (A.y[i] - A.ny[i] * d + A.nx[i] * u) * sc + oy, r0 * (0.6 + hash(i, 11)));
+      }
+      c.fill();
+    }
+    c.lineCap = 'butt';
+  }
+
+  // Vloedlijn met wier en schelpen, en wat de zee aanspoelt (zeesterren en kwallen) waar het nu droog ligt.
+  tekenVloedlijn(c, a) {
+    const A = this.wereld.strand, zp = this.zp, zr = this.zr, nr = this.nZr, sc = this.sc, ox = this.ox, oy = this.oy, T = this.T, tij = this.tij, z = this.zoom, isDijk = this.isDijk;
+    if (!nr) return;
+    let nv = 0;
+    c.globalAlpha = a;
+    c.strokeStyle = this.sn ? 'rgba(90,96,80,0.4)' : 'rgba(78,84,48,0.62)'; c.lineWidth = Math.max(0.5, T * 0.0026); c.lineCap = 'round';
+    c.beginPath();
+    for (let r = 0; r < nr; r++) {
+      let open = false;
+      for (let j = zr[r]; j < zr[r + 1]; j++) {
+        const i = zp[j];
+        if (isDijk[i] || nv >= PLAFOND.vloedlijn) { open = false; continue; }
+        nv++;
+        const d = 0.8 + 0.07 * Math.sin(i * 1.7), X = (A.x[i] - A.nx[i] * d) * sc + ox, Y = (A.y[i] - A.ny[i] * d) * sc + oy;
+        if (open) c.lineTo(X, Y); else { c.moveTo(X, Y); open = true; }
+      }
+    }
+    c.stroke();
+    this.n.vloedlijn = nv;
+    if (z >= DREMPEL.kasteel) {
+      c.fillStyle = '#f2ebe0'; c.beginPath();
+      const g = Math.max(0.6, T * 0.0022);
+      for (let j = 0; j < zr[nr]; j++) {
+        const i = zp[j];
+        if (isDijk[i]) continue;
+        for (let s = 0; s < 2; s++) { const d = 0.74 + hash(i, s, 12) * 0.16, u = (hash(i, s, 13) - 0.5) * 1.4; c.rect((A.x[i] - A.nx[i] * d - A.ny[i] * u) * sc + ox, (A.y[i] - A.ny[i] * d + A.nx[i] * u) * sc + oy, g, g * 0.8); }
+      }
+      c.fill();
+    }
+    // aangespoeld: alleen waar het water nu niet staat
+    if (z < DREMPEL.aangespoeld - 0.5) return;
+    let na = 0;
+    const zs = this.zsZicht ??= new Int32Array(PLAFOND.aangespoeld * 2);
+    for (let j = 0; j < zr[nr] && na < PLAFOND.aangespoeld; j++) {
+      const i = zp[j];
+      if (isDijk[i] || hash(i, 14) > 0.1) continue;
+      const d = 0.1 + 0.4 * hash(i, 15);
+      if (d < tij + 0.06) continue;
+      zs[na * 2] = i; zs[na * 2 + 1] = hash(i, 16) < 0.55 ? 0 : 1; na++;
+    }
+    this.n.aangespoeld = na;
+    if (!na) return;
+    const R = T * 0.0055;
+    c.strokeStyle = '#e0763a'; c.lineWidth = Math.max(0.6, T * 0.0024); c.beginPath();
+    for (let q = 0; q < na; q++) {
+      if (zs[q * 2 + 1]) continue;
+      const i = zs[q * 2], d = 0.1 + 0.4 * hash(i, 15), X = (A.x[i] - A.nx[i] * d) * sc + ox, Y = (A.y[i] - A.ny[i] * d) * sc + oy, h0 = hash(i, 17) * TAU;
+      for (let s = 0; s < 5; s++) { const h = h0 + (s * TAU) / 5; c.moveTo(X, Y); c.lineTo(X + Math.cos(h) * R, Y + Math.sin(h) * R * 0.8); }
+    }
+    c.stroke();
+    c.fillStyle = 'rgba(196,222,236,0.6)'; c.beginPath();
+    for (let q = 0; q < na; q++) { if (!zs[q * 2 + 1]) continue; const i = zs[q * 2], d = 0.1 + 0.4 * hash(i, 15); stip(c, (A.x[i] - A.nx[i] * d) * sc + ox, (A.y[i] - A.ny[i] * d) * sc + oy, R * 1.1); }
+    c.fill();
+    c.strokeStyle = 'rgba(150,120,190,0.55)'; c.lineWidth = Math.max(0.5, T * 0.0014); c.beginPath();
+    for (let q = 0; q < na; q++) { if (!zs[q * 2 + 1]) continue; const i = zs[q * 2], d = 0.1 + 0.4 * hash(i, 15), X = (A.x[i] - A.nx[i] * d) * sc + ox, Y = (A.y[i] - A.ny[i] * d) * sc + oy; c.moveTo(X + R * 0.5, Y); c.arc(X, Y, R * 0.5, 0, TAU); }
+    c.stroke();
+    c.lineCap = 'butt';
+  }
+
+  // Dijken op laag land: basalt aan de zeekant, grastaluds die in het licht of in de schaduw liggen, een pad over
+  // de kruin, een sloot aan de teen, en schapen op de helling.
+  tekenDijken(c, a) {
+    const A = this.wereld.strand, sc = this.sc, ox = this.ox, oy = this.oy, T = this.T, z = this.zoom, nu = this.nu, S = SCHUIN;
+    let n = 0, ns = 0;
+    const stap = z < 10 ? 2 : 1, h = 0.45 * sc; // kruinhoogte op het scherm
+    c.globalAlpha = a;
+    // banden: van d, tot d, hoogte bij van, hoogte bij tot (fractie van h)
+    const band = (i0, i1, d0, d1, h0, h1) => {
+      for (let i = i0; i <= i1; i += stap) { const X = (A.x[i] - A.nx[i] * d0) * sc + ox, Y = (A.y[i] - A.ny[i] * d0) * sc + oy - h0 * h; if (i === i0) c.moveTo(X, Y); else c.lineTo(X, Y); }
+      const e = i0 + Math.floor((i1 - i0) / stap) * stap;
+      for (let i = e; i >= i0; i -= stap) c.lineTo((A.x[i] - A.nx[i] * d1) * sc + ox, (A.y[i] - A.ny[i] * d1) * sc + oy - h1 * h);
+      c.closePath();
+    };
+    for (const dk of this.dijken) {
+      if (n >= PLAFOND.dijken || !this.inBeeld(dk.x0, dk.y0, dk.x1, dk.y1, 1)) continue;
+      n++;
+      const q = (dk.i0 + dk.i1) >> 1, licht = A.nx[q] * NWX + A.ny[q] * NWY; // > 0: de zeekant kijkt naar de zon
+      const gras = this.sn ? ['#eef1f2', '#dfe4e7', '#cdd4d9'] : ['#8fb162', '#76984f', '#5d7d40'];
+      c.fillStyle = this.sn ? '#c9cfd3' : '#4a5057'; c.beginPath(); band(dk.i0, dk.i1, 0.25, 0.9, 0, 0.2); c.fill();
+      c.fillStyle = gras[licht > 0.3 ? 0 : licht > -0.3 ? 1 : 2]; c.beginPath(); band(dk.i0, dk.i1, 0.9, 1.55, 0.2, 1); c.fill();
+      c.fillStyle = gras[licht < -0.3 ? 0 : licht < 0.3 ? 1 : 2]; c.beginPath(); band(dk.i0, dk.i1, 1.85, 2.75, 1, 0); c.fill();
+      c.fillStyle = this.sn ? '#f2f4f5' : '#bdb59f'; c.beginPath(); band(dk.i0, dk.i1, 1.55, 1.85, 1, 1); c.fill();
+      if (z >= DREMPEL.fijn + 2) {
+        // stenen in het basalt en de sloot langs de teen
+        c.strokeStyle = 'rgba(20,24,28,0.35)'; c.lineWidth = Math.max(0.4, T * 0.0012); c.beginPath();
+        for (let i = dk.i0; i <= dk.i1; i++) for (let s = 0; s < 3; s++) { const d = 0.35 + s * 0.18, X = (A.x[i] - A.nx[i] * d) * sc + ox, Y = (A.y[i] - A.ny[i] * d) * sc + oy - h * 0.06 * s; c.moveTo(X - A.ny[i] * T * 0.004, Y + A.nx[i] * T * 0.004); c.lineTo(X + A.ny[i] * T * 0.004, Y - A.nx[i] * T * 0.004); }
+        c.stroke();
+        c.strokeStyle = this.ijs > 0.5 ? '#cfe0e8' : '#5d808c'; c.lineWidth = Math.max(0.6, T * 0.003); c.beginPath();
+        for (let i = dk.i0; i <= dk.i1; i += stap) { const X = (A.x[i] - A.nx[i] * 2.95) * sc + ox, Y = (A.y[i] - A.ny[i] * 2.95) * sc + oy; if (i === dk.i0) c.moveTo(X, Y); else c.lineTo(X, Y); }
+        c.stroke();
+      }
+      // schapen op de helling (traag grazend)
+      if (z >= DREMPEL.schaap - 0.5 && !this.sn) {
+        const B = this.schapen, r = Math.max(0.7, T * 0.0042);
+        c.fillStyle = 'rgba(0,0,0,0.18)'; c.beginPath();
+        const s0 = ns;
+        for (let j = 0; j < B.length && ns < PLAFOND.schapen; j += 3) {
+          const i = B[j];
+          if (i < dk.i0 || i > dk.i1) continue;
+          ns++;
+          const d = B[j + 1], zq = B[j + 2], u = 0.3 * Math.sin(nu / 9000 + hash(zq, 4) * TAU);
+          const hh = d < 1.7 ? (d - 0.9) / 0.65 : (2.75 - d) / 0.9;
+          const X = (A.x[i] - A.nx[i] * d - A.ny[i] * u) * sc + ox, Y = (A.y[i] - A.ny[i] * d + A.nx[i] * u) * sc + oy - h * hh;
+          c.rect(X - r * 0.6, Y - r * 0.2, r * (1.6 + S), r * 0.7);
+        }
+        c.fill();
+        c.fillStyle = '#f1efe6'; c.beginPath();
+        let k = 0;
+        for (let j = 0; j < B.length && k < ns - s0; j += 3) {
+          const i = B[j];
+          if (i < dk.i0 || i > dk.i1) continue;
+          k++;
+          const d = B[j + 1], zq = B[j + 2], u = 0.3 * Math.sin(nu / 9000 + hash(zq, 4) * TAU);
+          const hh = d < 1.7 ? (d - 0.9) / 0.65 : (2.75 - d) / 0.9;
+          const X = (A.x[i] - A.nx[i] * d - A.ny[i] * u) * sc + ox, Y = (A.y[i] - A.ny[i] * d + A.nx[i] * u) * sc + oy - h * hh;
+          c.rect(X - r, Y - r * 0.9, r * 2, r * 1.2);
+        }
+        c.fill();
+        if (z >= DREMPEL.klein) {
+          c.fillStyle = '#2b2826'; c.beginPath();
+          k = 0;
+          for (let j = 0; j < B.length && k < ns - s0; j += 3) {
+            const i = B[j];
+            if (i < dk.i0 || i > dk.i1) continue;
+            k++;
+            const d = B[j + 1], zq = B[j + 2], u = 0.3 * Math.sin(nu / 9000 + hash(zq, 4) * TAU), kant = hash(zq, 5) < 0.5 ? -1 : 1;
+            const hh = d < 1.7 ? (d - 0.9) / 0.65 : (2.75 - d) / 0.9, graas = Math.sin(nu / 1300 + zq) > 0.2 ? r * 0.35 : 0;
+            const X = (A.x[i] - A.nx[i] * d - A.ny[i] * u) * sc + ox, Y = (A.y[i] - A.ny[i] * d + A.nx[i] * u) * sc + oy - h * hh;
+            c.rect(X + kant * r * 1.05 - r * 0.35, Y - r * 0.85 + graas, r * 0.7, r * 0.6);
+          }
+          c.fill();
+        }
+      }
+    }
+    this.n.dijken = n; this.n.schapen = ns;
+  }
+
+  // Zandbanken die bij eb droogvallen, met zeehonden erop; bij vloed alleen hun koppen in het water.
+  tekenZandbanken(c, a) {
+    const sc = this.sc, ox = this.ox, oy = this.oy, T = this.T, z = this.zoom, tij = this.tij, nu = this.nu;
+    const droog = smooth(-0.05, -0.4, tij);
+    let n = 0, nz = 0;
+    for (const b of this.zandbanken) {
+      if (n >= PLAFOND.zandbanken || !this.puntInBeeld(b.x, b.y, b.rx + 2)) continue;
+      n++;
+      const X = b.x * sc + ox, Y = b.y * sc + oy, rot = Math.atan2(b.nx, -b.ny), rx = b.rx * sc, ry = b.ry * sc;
+      c.globalAlpha = a;
+      c.fillStyle = 'rgba(206,222,196,0.22)'; c.beginPath(); c.ellipse(X, Y, rx * 1.15, ry * 1.25, rot, 0, TAU); c.fill();
+      if (droog > 0.02) {
+        const f = 0.5 + 0.5 * droog;
+        c.globalAlpha = a * droog;
+        c.fillStyle = '#b9a77c'; c.beginPath(); c.ellipse(X, Y, rx * f, ry * f, rot, 0, TAU); c.fill();
+        c.fillStyle = this.sn ? '#e9ecec' : '#dccb9c'; c.beginPath(); c.ellipse(X - ry * 0.12, Y - ry * 0.15, rx * f * 0.86, ry * f * 0.7, rot, 0, TAU); c.fill();
+        if (z >= DREMPEL.klein) { c.strokeStyle = 'rgba(250,252,250,0.6)'; c.lineWidth = Math.max(0.5, T * 0.0025); c.beginPath(); c.ellipse(X, Y, rx * f * 1.04, ry * f * 1.1, rot, 0, TAU); c.stroke(); }
+      }
+      if (z < DREMPEL.zeehond - 0.5) continue;
+      c.globalAlpha = a * smooth(DREMPEL.zeehond - 0.5, DREMPEL.zeehond + 0.3, z);
+      const N = 3 + Math.floor(hash(b.zaad, 1) * 5), tx = -b.ny, ty = b.nx;
+      for (let k = 0; k < N && nz < PLAFOND.bankzeehonden; k++) {
+        const u = (hash(b.zaad, k, 2) - 0.5) * 1.3 * b.rx, v = (hash(b.zaad, k, 3) - 0.5) * 0.8 * b.ry;
+        const sx = (b.x + tx * u + b.nx * v) * sc + ox, sy = (b.y + ty * u + b.ny * v) * sc + oy;
+        nz++;
+        if (droog > 0.55) this.zeehond(c, sx, sy, hash(b.zaad, k, 4) * TAU, b.zaad + k * 17);
+        else {
+          // alleen de kop boven water, die af en toe onderduikt
+          if (frac(nu / 8000 + hash(b.zaad, k, 5)) > 0.75) continue;
+          const kx = sx + (b.nx * 1.4 + tx * 0.2 * Math.sin(nu / 3000 + k)) * sc, ky = sy + (b.ny * 1.4 + ty * 0.2 * Math.sin(nu / 3000 + k)) * sc;
+          c.strokeStyle = 'rgba(240,248,252,0.5)'; c.lineWidth = Math.max(0.5, T * 0.0016); c.beginPath(); c.moveTo(kx + T * 0.008, ky); c.arc(kx, ky, T * 0.008, 0, TAU); c.stroke();
+          c.fillStyle = ZEEHOND[k % ZEEHOND.length]; c.beginPath(); stip(c, kx, ky - T * 0.002, T * 0.0045); c.fill();
+        }
+      }
+    }
+    this.n.zandbanken = n; this.n.bankzeehonden = nz;
+  }
+
+  // ---------- mensen en honden: eerst verzamelen, dan per kleur in één keer ----------
+
+  zetMens(X, Y, hx, hy, houding, kleding, huid, fase) {
+    if (this.nMens >= PLAFOND.mensen || !this.opScherm(X, Y, 10)) return;
+    const o = this.nMens++ * MENS, b = this.mens;
+    b[o] = X; b[o + 1] = Y; b[o + 2] = hx; b[o + 3] = hy; b[o + 4] = houding; b[o + 5] = kleding; b[o + 6] = huid; b[o + 7] = fase;
+  }
+
+  zetHond(X, Y, hx, hy, vacht, nat) {
+    if (this.nHond >= PLAFOND.honden || !this.opScherm(X, Y, 10)) return;
+    const o = this.nHond++ * HOND, b = this.hond;
+    b[o] = X; b[o + 1] = Y; b[o + 2] = hx; b[o + 3] = hy; b[o + 4] = vacht; b[o + 5] = nat;
+  }
+
+  tekenMensen(c) {
+    const b = this.mens, n = this.nMens, T = this.T, S = SCHUIN;
+    this.n.mensen = n;
+    if (n) {
+      const lw = T * 0.0062, lh = T * 0.016, hr = T * 0.0036;
+      c.fillStyle = 'rgba(0,0,0,0.2)'; c.beginPath();
+      for (let i = 0; i < n; i++) {
+        const o = i * MENS, hd = b[o + 4];
+        if (hd === STAAND || hd === KIND) { const f = hd === KIND ? 0.7 : 1; c.rect(b[o], b[o + 1] - lw * 0.25, lh * S * f + lw * 0.4, lw * 0.5); }
+      }
+      c.fill();
+      for (let k = 0; k < KLEDING.length; k++) {
+        let open = false;
+        for (let i = 0; i < n; i++) {
+          const o = i * MENS;
+          if (b[o + 5] !== k) continue;
+          if (!open) { c.beginPath(); open = true; }
+          const X = b[o], Y = b[o + 1], hd = b[o + 4];
+          if (hd === STAAND || hd === KIND) { const f = hd === KIND ? 0.68 : 1, bob = Math.abs(Math.sin(b[o + 7])) * T * 0.0012; c.rect(X - lw * f * 0.5, Y - lh * f - bob, lw * f, lh * f * 0.62); }
+          else if (hd === ZITTEND) c.rect(X - lw * 0.55, Y - lh * 0.58, lw * 1.1, lh * 0.5);
+          else if (hd === LIGGEND) rechthoek(c, X, Y, b[o + 2], b[o + 3], lh * 0.42, lw * 0.55);
+        }
+        if (open) { c.fillStyle = KLEDING[k]; c.fill(); }
+      }
+      // benen en armen in huidskleur, dan de hoofden
+      for (let k = 0; k < HUID.length; k++) {
+        let open = false;
+        for (let i = 0; i < n; i++) {
+          const o = i * MENS;
+          if (b[o + 6] !== k) continue;
+          if (!open) { c.beginPath(); open = true; }
+          const X = b[o], Y = b[o + 1], hd = b[o + 4], hx = b[o + 2], hy = b[o + 3];
+          if (hd === STAAND || hd === KIND) {
+            const f = hd === KIND ? 0.68 : 1, bob = Math.abs(Math.sin(b[o + 7])) * T * 0.0012, stap = Math.sin(b[o + 7]) * lw * 0.35 * f;
+            c.rect(X - lw * f * 0.45 + stap, Y - lh * f * 0.4 - bob * 0.5, lw * f * 0.38, lh * f * 0.4);
+            c.rect(X + lw * f * 0.07 - stap, Y - lh * f * 0.4 - bob * 0.5, lw * f * 0.38, lh * f * 0.4);
+            stip(c, X, Y - lh * f - hr * f * 0.75 - bob, hr * f);
+          } else if (hd === ZITTEND) {
+            c.rect(X - lw * 0.5, Y - lh * 0.12, lw * 1.6, lh * 0.12);
+            stip(c, X, Y - lh * 0.58 - hr * 0.8, hr);
+          } else if (hd === LIGGEND) {
+            stip(c, X + hx * lh * 0.55, Y + hy * lh * 0.55, hr * 0.95);
+            rechthoek(c, X - hx * lh * 0.62, Y - hy * lh * 0.62, hx, hy, lh * 0.22, lw * 0.4);
+          } else stip(c, X, Y, hr);
+        }
+        if (open) { c.fillStyle = HUID[k]; c.fill(); }
+      }
+    }
+    // honden: lijf, kop en een staart; in de branding een spatkring
+    const d = this.hond, m = this.nHond;
+    this.n.honden = m;
+    if (!m) return;
+    const l = T * 0.0062, w = T * 0.0028;
+    c.strokeStyle = 'rgba(250,252,252,0.7)'; c.lineWidth = Math.max(0.5, T * 0.0015); c.beginPath();
+    for (let i = 0; i < m; i++) { const o = i * HOND; if (d[o + 5]) { c.moveTo(d[o] + l * 1.6, d[o + 1]); c.ellipse(d[o], d[o + 1], l * 1.6, l * 0.8, 0, 0, TAU); } }
+    c.stroke();
+    for (let k = 0; k < VACHT.length; k++) {
+      let open = false;
+      for (let i = 0; i < m; i++) {
+        const o = i * HOND;
+        if (d[o + 4] !== k) continue;
+        if (!open) { c.beginPath(); open = true; }
+        const X = d[o], Y = d[o + 1] - w * 1.6, hx = d[o + 2], hy = d[o + 3] * 0.6;
+        rechthoek(c, X, Y, hx, hy, l, w);
+        stip(c, X + hx * l * 1.15, Y + hy * l * 1.15 - w * 0.9, w * 0.95);
+      }
+      if (open) { c.fillStyle = VACHT[k]; c.fill(); }
+    }
+    c.strokeStyle = '#3a2a1e'; c.lineWidth = Math.max(0.5, T * 0.0014); c.beginPath();
+    for (let i = 0; i < m; i++) { const o = i * HOND, X = d[o], Y = d[o + 1] - w * 1.6, hx = d[o + 2], hy = d[o + 3] * 0.6; c.moveTo(X - hx * l, Y - hy * l); c.lineTo(X - hx * l * 1.6, Y - hy * l * 1.6 - w * 1.4); for (const s of [-0.6, 0.6]) { c.moveTo(X + hx * l * s, Y + hy * l * s + w * 0.6); c.lineTo(X + hx * l * s, Y + hy * l * s + w * 1.7); } }
+    c.stroke();
+  }
+
+  // ---------- het strand zelf ----------
+
+  tekenStrand(c, a) {
+    const D = this.dingen, nD = D.length / DING, sc = this.sc, ox = this.ox, oy = this.oy, T = this.T, z = this.zoom, nu = this.nu, S = SCHUIN;
+    const bez = this.bez, seiz = this.seizoenStrand, dagNr = this.dagNr, tij = this.tij;
+    const zicht = this.dingZicht ??= new Int32Array(260);
+    let m = 0;
+    if (nD && z >= DREMPEL.paviljoen - 0.5) for (let j = 0; j < nD && m < zicht.length; j++) if (this.puntInBeeld(D[j * DING + 1], D[j * DING + 2], 2)) zicht[m++] = j;
+    const tel = { huisjes: 0, paviljoens: 0, reddingsposten: 0, velden: 0, stoelsets: 0, schermen: 0, handdoeken: 0, kastelen: 0, gaten: 0, sporen: 0 };
+    const zichtbaar = (j) => {
+      const o = j * DING, soort = D[o], zd = D[o + 5], hv = hash(zd, dagNr, 3), klein = z >= DREMPEL.strandmens - 0.5;
+      if (soort === PAVILJOEN_S) return tel.paviljoens < PLAFOND.paviljoens ? (tel.paviljoens++, true) : false;
+      if (soort === POST_S) return tel.reddingsposten < PLAFOND.reddingsposten ? (tel.reddingsposten++, true) : false;
+      if (soort === HUISJE_S) return z >= DREMPEL.huisje - 0.5 && seiz > 0.3 && hash(zd, 9) < 0.35 + seiz && tel.huisjes < PLAFOND.huisjes ? (tel.huisjes++, true) : false;
+      if (soort === VELD_S) return klein && seiz > 0.5 && tel.velden < PLAFOND.velden ? (tel.velden++, true) : false;
+      if (soort === STOEL_S) return klein && seiz > 0.5 && tel.stoelsets < PLAFOND.stoelsets ? (tel.stoelsets++, true) : false;
+      if (soort === SCHERM_S) return klein && hv < bez && tel.schermen < PLAFOND.schermen ? (tel.schermen++, true) : false;
+      if (soort === DOEK_S) return klein && hv < bez && tel.handdoeken < PLAFOND.handdoeken ? (tel.handdoeken++, true) : false;
+      if (soort === KASTEEL_S) return z >= DREMPEL.kasteel - 0.5 && seiz > 0.3 && hv < bez * 1.6 && tel.kastelen < PLAFOND.kastelen ? (tel.kastelen++, true) : false;
+      if (soort === GAT_S) return z >= DREMPEL.kasteel - 0.5 && hv < bez && tel.gaten < PLAFOND.gaten ? (tel.gaten++, true) : false;
+      return false;
+    };
+    let k = 0;
+    for (let j = 0; j < m; j++) if (zichtbaar(zicht[j])) zicht[k++] = zicht[j];
+    m = k;
+    Object.assign(this.n, tel);
+    c.globalAlpha = a;
+    // 1. op de grond: veldlijnen, handdoeken, gaten, kastelen, voetsporen
+    if (z >= DREMPEL.strandmens - 0.5) {
+      c.strokeStyle = 'rgba(255,255,255,0.75)'; c.lineWidth = Math.max(0.5, T * 0.0018); c.beginPath();
+      for (let j = 0; j < m; j++) { const o = zicht[j] * DING; if (D[o] === VELD_S) rechthoek(c, D[o + 1] * sc + ox, D[o + 2] * sc + oy, D[o + 3], D[o + 4], 0.8 * sc, 0.38 * sc); }
+      c.stroke();
+      for (let kl = 0; kl < DOEK.length; kl++) {
+        let open = false;
+        for (let j = 0; j < m; j++) {
+          const o = zicht[j] * DING;
+          if ((D[o] !== DOEK_S && D[o] !== SCHERM_S) || D[o + 7] % DOEK.length !== kl) continue;
+          if (!open) { c.beginPath(); open = true; }
+          rechthoek(c, D[o + 1] * sc + ox, D[o + 2] * sc + oy, D[o + 4], -D[o + 3], 0.24 * sc, 0.11 * sc);
+        }
+        if (open) { c.fillStyle = DOEK[kl][0]; c.fill(); }
+      }
+      if (z >= DREMPEL.klein) {
+        // een streep over de handdoek in de tweede kleur
+        for (let kl = 0; kl < DOEK.length; kl++) {
+          let open = false;
+          for (let j = 0; j < m; j++) {
+            const o = zicht[j] * DING;
+            if ((D[o] !== DOEK_S && D[o] !== SCHERM_S) || D[o + 7] % DOEK.length !== kl) continue;
+            if (!open) { c.beginPath(); open = true; }
+            const nx = D[o + 4], ny = -D[o + 3];
+            rechthoek(c, (D[o + 1] - nx * 0.12) * sc + ox, (D[o + 2] - ny * 0.12) * sc + oy, nx, ny, 0.035 * sc, 0.11 * sc);
+          }
+          if (open) { c.fillStyle = DOEK[kl][1]; c.fill(); }
+        }
+      }
+      // voetsporen van een paar handdoeken naar de waterlijn
+      if (z >= DREMPEL.spoor - 0.5) {
+        let ns = 0;
+        c.fillStyle = 'rgba(120,100,70,0.35)'; c.beginPath();
+        const g = Math.max(0.6, T * 0.002);
+        for (let j = 0; j < m && ns < PLAFOND.sporen; j++) {
+          const o = zicht[j] * DING;
+          if (D[o] !== DOEK_S || hash(D[o + 5], 11) > 0.35) continue;
+          ns++;
+          const nx = D[o + 4], ny = -D[o + 3], tx = D[o + 3], ty = D[o + 4], x0 = D[o + 1], y0 = D[o + 2], eind = Math.max(0, tij) + 0.05;
+          // het strandpunt: de handdoek ligt op ~1,2 landinwaarts; de sporen lopen naar zee tot de waterlijn van nu
+          for (let s = 0, d = 0.95; d > eind && s < 14; s++, d -= 0.14) {
+            const zij = (s & 1 ? 1 : -1) * 0.035 + Math.sin(s * 0.7 + D[o + 5]) * 0.04, w = 1.18 - d;
+            c.rect((x0 + nx * w + tx * zij) * sc + ox, (y0 + ny * w + ty * zij) * sc + oy, g, g * 0.7);
+          }
+        }
+        c.fill();
+        this.n.sporen = ns;
+      }
+    }
+    if (z >= DREMPEL.kasteel - 0.5) {
+      // gaten en zandkastelen; bij hoog water zakt een kasteel in
+      c.fillStyle = 'rgba(96,80,56,0.55)'; c.beginPath();
+      for (let j = 0; j < m; j++) { const o = zicht[j] * DING; if (D[o] === GAT_S) c.ellipse(D[o + 1] * sc + ox, D[o + 2] * sc + oy, 0.12 * sc, 0.08 * sc, 0, 0, TAU); }
+      c.fill();
+      c.fillStyle = this.sn ? '#e6e9ea' : '#c9b386'; c.beginPath();
+      for (let j = 0; j < m; j++) {
+        const o = zicht[j] * DING, X = D[o + 1] * sc + ox, Y = D[o + 2] * sc + oy;
+        if (D[o] === GAT_S) { stip(c, X + 0.2 * sc, Y - 0.02 * sc, 0.08 * sc); continue; }
+        if (D[o] !== KASTEEL_S) continue;
+        const ingezakt = smooth(0.25, 0.5, tij);
+        stip(c, X, Y, 0.13 * sc * (1 - 0.3 * ingezakt));
+        if (ingezakt < 0.6) {
+          const th = 0.16 * sc * (1 - ingezakt), tw = 0.06 * sc;
+          c.rect(X - 0.11 * sc, Y - 0.05 * sc - th, tw, th); c.rect(X + 0.05 * sc, Y - 0.05 * sc - th, tw, th); c.rect(X - 0.03 * sc, Y + 0.06 * sc - th, tw, th);
+        }
+      }
+      c.fill();
+      c.strokeStyle = 'rgba(70,110,130,0.55)'; c.lineWidth = Math.max(0.5, T * 0.0015); c.beginPath();
+      for (let j = 0; j < m; j++) { const o = zicht[j] * DING; if (D[o] === KASTEEL_S) { const X = D[o + 1] * sc + ox, Y = D[o + 2] * sc + oy; c.moveTo(X + 0.2 * sc, Y); c.ellipse(X, Y, 0.2 * sc, 0.15 * sc, 0, 0, TAU); } }
+      c.stroke();
+      // emmertjes en schepjes
+      if (z >= DREMPEL.emmer - 0.5) {
+        for (let kl = 0; kl < EMMER.length; kl++) {
+          let open = false;
+          for (let j = 0; j < m; j++) {
+            const o = zicht[j] * DING;
+            if ((D[o] !== KASTEEL_S && D[o] !== GAT_S) || D[o + 7] % EMMER.length !== kl) continue;
+            if (!open) { c.beginPath(); open = true; }
+            const X = D[o + 1] * sc + ox, Y = D[o + 2] * sc + oy;
+            c.rect(X - 0.24 * sc, Y + 0.02 * sc, 0.06 * sc, 0.07 * sc);
+            c.rect(X + 0.26 * sc, Y + 0.1 * sc, 0.09 * sc, 0.025 * sc);
+          }
+          if (open) { c.fillStyle = EMMER[kl]; c.fill(); }
+        }
+      }
+    }
+    // 2. schaduwen van alles wat hoog is
+    c.fillStyle = 'rgba(0,0,0,0.2)'; c.beginPath();
+    for (let j = 0; j < m; j++) {
+      const o = zicht[j] * DING, X = D[o + 1] * sc + ox, Y = D[o + 2] * sc + oy, s = D[o];
+      if (s === HUISJE_S) c.rect(X - 0.2 * sc, Y - 0.1 * sc, (0.5 + 0.4 * S) * sc, 0.26 * sc);
+      else if (s === PAVILJOEN_S) c.rect(X - 0.6 * sc, Y - 0.05 * sc, (1.4 + 0.7 * S) * sc, 0.5 * sc);
+      else if (s === POST_S) { c.rect(X - 0.15 * sc, Y - 0.05 * sc, (0.45 + 0.8 * S) * sc, 0.3 * sc); c.rect(X + 0.2 * sc, Y, 1.1 * S * sc, 0.06 * sc); }
+      else if (s === STOEL_S && z >= DREMPEL.strandmens - 0.5) c.rect(X - 0.18 * sc, Y, 0.45 * sc, 0.12 * sc);
+    }
+    c.fill();
+    // 3. strandhuisjes: gevel naar de kijker, dak in twee tinten (de oosthelft in de schaduw), deur
+    if (tel.huisjes) {
+      const w = 0.48 * sc, hm = 0.32 * sc, dd = 0.26 * sc;
+      for (let kl = 0; kl < HUISJE.length; kl++) {
+        let open = false;
+        for (let j = 0; j < m; j++) { const o = zicht[j] * DING; if (D[o] !== HUISJE_S || D[o + 7] !== kl) continue; if (!open) { c.beginPath(); open = true; } c.rect(D[o + 1] * sc + ox - w / 2, D[o + 2] * sc + oy - hm, w, hm); }
+        if (open) { c.fillStyle = HUISJE[kl][2]; c.fill(); }
+      }
+      c.fillStyle = this.sn ? '#f4f6f7' : '#f1ede4'; c.beginPath();
+      for (let j = 0; j < m; j++) { const o = zicht[j] * DING; if (D[o] === HUISJE_S) c.rect(D[o + 1] * sc + ox - w / 2 - 0.03 * sc, D[o + 2] * sc + oy - hm - dd, w + 0.06 * sc, dd); }
+      c.fill();
+      c.fillStyle = this.sn ? '#d9dee1' : '#cdc6b8'; c.beginPath();
+      for (let j = 0; j < m; j++) { const o = zicht[j] * DING; if (D[o] === HUISJE_S) c.rect(D[o + 1] * sc + ox, D[o + 2] * sc + oy - hm - dd, w / 2 + 0.03 * sc, dd); }
+      c.fill();
+      if (z >= DREMPEL.strandmens - 0.5) {
+        c.fillStyle = '#3a3a3a'; c.beginPath();
+        for (let j = 0; j < m; j++) { const o = zicht[j] * DING; if (D[o] === HUISJE_S && hash(D[o + 5], dagNr, 4) < (0.25 + bez) * this.dagL) c.rect(D[o + 1] * sc + ox - w * 0.17, D[o + 2] * sc + oy - hm * 0.78, w * 0.34, hm * 0.78); }
+        c.fill();
+      }
+    }
+    // 4. strandstoelen: twee ligstoelen met een rugleuning; leeg bij slecht weer
+    if (tel.stoelsets) {
+      for (let kl = 0; kl < SCHERM.length; kl++) {
+        let open = false;
+        for (let j = 0; j < m; j++) {
+          const o = zicht[j] * DING;
+          if (D[o] !== STOEL_S || D[o + 7] % SCHERM.length !== kl) continue;
+          if (!open) { c.beginPath(); open = true; }
+          const X = D[o + 1] * sc + ox, Y = D[o + 2] * sc + oy;
+          for (let q = -1; q <= 1; q += 2) { const u = q * 0.13 * sc; c.rect(X + u - 0.08 * sc, Y - 0.06 * sc, 0.16 * sc, 0.12 * sc); c.rect(X + u - 0.08 * sc, Y - 0.16 * sc, 0.16 * sc, 0.1 * sc); }
+        }
+        if (open) { c.fillStyle = SCHERM[kl]; c.fill(); }
+      }
+    }
+    // 5. windschermen: palen met doek in een U om de handdoek, open naar zee
+    if (tel.schermen) {
+      c.lineWidth = Math.max(0.7, 0.06 * sc);
+      for (let kl = 0; kl < SCHERM.length; kl++) {
+        let open = false;
+        for (let j = 0; j < m; j++) {
+          const o = zicht[j] * DING;
+          if (D[o] !== SCHERM_S || Math.floor(D[o + 7] / 8) % SCHERM.length !== kl) continue;
+          if (!open) { c.beginPath(); open = true; }
+          // u langs het strand, d landinwaarts; de paaltjes staan 0,12 hoog
+          const X = D[o + 1] * sc + ox, Y = D[o + 2] * sc + oy - 0.12 * sc, tx = D[o + 3] * sc, ty = D[o + 4] * sc, nx = ty, ny = -tx;
+          c.moveTo(X - tx * 0.24 + nx * 0.15, Y - ty * 0.24 + ny * 0.15);
+          c.lineTo(X - tx * 0.26 - nx * 0.32, Y - ty * 0.26 - ny * 0.32);
+          c.lineTo(X + tx * 0.26 - nx * 0.32, Y + ty * 0.26 - ny * 0.32);
+          c.lineTo(X + tx * 0.24 + nx * 0.15, Y + ty * 0.24 + ny * 0.15);
+        }
+        if (open) { c.strokeStyle = SCHERM[kl]; c.stroke(); }
+      }
+    }
+    // 6. paviljoen, reddingspost, net van het volleybalveld (elk apart, er zijn er maar een paar)
+    for (let j = 0; j < m; j++) {
+      const o = zicht[j] * DING, s = D[o];
+      if (s === PAVILJOEN_S) this.paviljoen(c, o);
+      else if (s === POST_S) this.post(c, o);
+      else if (s === VELD_S) this.veld(c, o);
+    }
+    // 7. mensen bij de dingen
+    if (z >= DREMPEL.strandmens - 0.5) {
+      for (let j = 0; j < m; j++) {
+        const o = zicht[j] * DING, s = D[o], zd = D[o + 5], X = D[o + 1] * sc + ox, Y = D[o + 2] * sc + oy, nx = D[o + 4], ny = -D[o + 3];
+        if (s === DOEK_S || s === SCHERM_S) {
+          const lig = hash(zd, 12) < 0.7;
+          this.zetMens(X + D[o + 3] * 0.02 * sc, Y, -nx, -ny, lig ? LIGGEND : ZITTEND, Math.floor(hash(zd, 13) * KLEDING.length), Math.floor(hash(zd, 14) * HUID.length), 0);
+          if (hash(zd, 15) < 0.35) this.zetMens(X + D[o + 3] * 0.32 * sc, Y + D[o + 4] * 0.32 * sc, -nx, -ny, ZITTEND, Math.floor(hash(zd, 16) * KLEDING.length), Math.floor(hash(zd, 17) * HUID.length), 0);
+        } else if (s === STOEL_S) {
+          for (let q = 0; q < 2; q++) if (hash(zd, dagNr, 20 + q) < bez) this.zetMens(X + (q ? 0.13 : -0.13) * sc, Y - 0.02 * sc, 0, 1, ZITTEND, Math.floor(hash(zd, 22 + q) * KLEDING.length), Math.floor(hash(zd, 24 + q) * HUID.length), 0);
+        } else if (s === KASTEEL_S || s === GAT_S) {
+          if (hash(zd, dagNr, 26) > bez * 1.3 || (s === KASTEEL_S && tij > 0.35)) continue;
+          const graaf = nu / 260 + zd;
+          this.zetMens(X - 0.2 * sc, Y - 0.06 * sc, 0, 1, hash(zd, 27) < 0.5 ? ZITTEND : KIND, Math.floor(hash(zd, 28) * KLEDING.length), Math.floor(hash(zd, 29) * HUID.length), graaf);
+          if (hash(zd, 30) < 0.4) this.zetMens(X + 0.22 * sc, Y + 0.04 * sc, 0, 1, KIND, Math.floor(hash(zd, 31) * KLEDING.length), Math.floor(hash(zd, 32) * HUID.length), graaf * 1.3);
+        } else if (s === HUISJE_S && hash(zd, dagNr, 33) < bez * 0.4) {
+          this.zetMens(X + 0.3 * sc, Y + 0.12 * sc, 0, 1, ZITTEND, Math.floor(hash(zd, 34) * KLEDING.length), Math.floor(hash(zd, 35) * HUID.length), 0);
+        }
+      }
+    }
+  }
+
+  // Paviljoen op palen met een terras naar zee: parasols en tafeltjes, 's avonds lichtjes. Het gebouw staat recht
+  // naar de kijker; het terras ligt aan de kant waar de zee is: ervoor (zee in het zuiden), opzij (zee in het oosten
+  // of westen) of erachter boven het dak uit (zee in het noorden), zodat gebouw en terras elkaar niet bedekken.
+  paviljoen(c, o) {
+    const D = this.dingen, sc = this.sc, T = this.T, z = this.zoom, X = D[o + 1] * sc + this.ox, Y = D[o + 2] * sc + this.oy, nx = D[o + 4], ny = -D[o + 3], zd = D[o + 5];
+    const w = 1.3 * sc, hp = 0.16 * sc, hm = 0.36 * sc, dd = 0.4 * sc;
+    // terras: midden (tX, tY) van het dek, halve maten (hw, hd), voorrand yF; opzij staan de tafels onder elkaar
+    const opzij = Math.abs(nx) >= 0.6 && ny < 0.6, achter = !opzij && ny <= -0.35;
+    const hw = opzij ? 0.3 * sc : w / 2, hd = opzij ? 0.36 * sc : 0.18 * sc;
+    const yF = opzij ? Y - hp + 0.04 * sc : achter ? Y - hp - hm - dd + 0.06 * sc : Y + 0.52 * sc;
+    const tX = opzij ? X + Math.sign(nx) * (w / 2 + hw + 0.04 * sc) : X + nx * 0.4 * sc, tY = yF - hd;
+    const nT = opzij ? 3 : 4, tafel = (k, uit) => { if (opzij) { uit[0] = tX; uit[1] = tY + (k - 1) * 0.24 * sc; } else { uit[0] = tX + (-0.45 + k * 0.3) * sc; uit[1] = tY; } };
+    const q = this.q4 ??= [0, 0];
+    c.strokeStyle = '#5a4634'; c.lineWidth = Math.max(0.6, 0.05 * sc); c.beginPath();
+    for (const u of [-0.6, -0.2, 0.2, 0.6]) { c.moveTo(X + u * sc, Y); c.lineTo(X + u * sc, Y - hp); }
+    if (!achter) for (const f of [-0.9, -0.3, 0.3, 0.9]) { const px = tX + f * hw; c.moveTo(px, yF - 0.02 * sc); c.lineTo(px, yF + hp * 0.8); }
+    c.stroke();
+    c.fillStyle = this.sn ? '#e8ebed' : '#a8865e'; c.beginPath(); c.rect(tX - hw, tY - hd, hw * 2, hd * 2); c.fill();
+    if (z >= DREMPEL.klein) { c.strokeStyle = '#efe9dc'; c.lineWidth = Math.max(0.5, 0.025 * sc); c.beginPath(); c.rect(tX - hw, tY - hd, hw * 2, hd * 2); c.stroke(); }
+    c.fillStyle = '#e9e2d2'; c.beginPath(); c.rect(X - w / 2, Y - hp - hm, w, hm); c.fill();
+    c.fillStyle = '#2f4a5c'; c.beginPath(); for (let k = 0; k < 5; k++) c.rect(X - w / 2 + (0.08 + k * 0.25) * sc, Y - hp - hm * 0.78, 0.16 * sc, hm * 0.5); c.fill();
+    c.fillStyle = this.sn ? '#f2f4f5' : ['#2f6f7a', '#8a3a2e', '#3c5a7a', '#6a6a5a'][D[o + 7] % 4]; c.beginPath(); c.rect(X - w / 2 - 0.06 * sc, Y - hp - hm - dd, w + 0.12 * sc, dd); c.fill();
+    c.fillStyle = 'rgba(0,0,0,0.18)'; c.beginPath(); c.rect(X, Y - hp - hm - dd, w / 2 + 0.06 * sc, dd); c.fill();
+    const open = this.seizoenStrand > 0.3 && this.dagL > 0.3;
+    if (open && z >= DREMPEL.strandmens - 0.5) {
+      const nP = Math.min(nT, 1 + Math.floor(this.bez * nT));
+      for (let k = 0; k < nP; k++) {
+        tafel(k, q);
+        const px = q[0], py = q[1];
+        this.zetMens(px - 0.07 * sc, py + 0.02 * sc, 0, 1, ZITTEND, Math.floor(hash(zd, k, 40) * KLEDING.length), Math.floor(hash(zd, k, 41) * HUID.length), 0);
+        this.zetMens(px + 0.08 * sc, py + 0.03 * sc, 0, 1, ZITTEND, Math.floor(hash(zd, k, 42) * KLEDING.length), Math.floor(hash(zd, k, 43) * HUID.length), 0);
+      }
+      c.fillStyle = PARASOL[D[o + 7] % PARASOL.length][0]; c.beginPath();
+      for (let k = 0; k < nP; k++) { tafel(k, q); stip(c, q[0], q[1] - 0.28 * sc, 0.13 * sc); }
+      c.fill();
+      c.fillStyle = PARASOL[D[o + 7] % PARASOL.length][1]; c.beginPath();
+      for (let k = 0; k < nP; k++) { tafel(k, q); stip(c, q[0] - 0.03 * sc, q[1] - 0.3 * sc, 0.04 * sc); }
+      c.fill();
+    }
+    if (this.nacht > 0.05) {
+      for (let k = 0; k < 5; k++) this.zetLicht(X - w / 2 + (0.16 + k * 0.25) * sc, Y - hp - hm * 0.55, Math.max(2, T * 0.02), WARM, 0.8);
+      // het terras alleen in het seizoen
+      if (this.seizoenStrand > 0.3) for (let k = 0; k < 6; k++) {
+        const f = (k + 0.5) / 6 - 0.5;
+        this.zetLicht(opzij ? tX : tX + f * hw * 2, opzij ? tY + f * hd * 2 : tY - 0.02 * sc, Math.max(1.5, T * 0.012), WARM, 0.9);
+      }
+    }
+  }
+
+  // Reddingspost: een hokje op palen met een uitkijktoren en een vlag in twee kleuren (rood boven, geel onder,
+  // zonder tekens); in het seizoen twee strandwachten en een reddingsplank ervoor.
+  post(c, o) {
+    const D = this.dingen, sc = this.sc, T = this.T, z = this.zoom, X = D[o + 1] * sc + this.ox, Y = D[o + 2] * sc + this.oy, nx = D[o + 4], ny = -D[o + 3], zd = D[o + 5];
+    const hp = 0.3 * sc, w = 0.42 * sc, hm = 0.26 * sc, th = 1.05 * sc;
+    c.strokeStyle = '#4e4a44'; c.lineWidth = Math.max(0.6, 0.045 * sc); c.beginPath();
+    for (const u of [-0.17, 0.17]) { c.moveTo(X + u * sc, Y); c.lineTo(X + u * sc, Y - hp); }
+    c.moveTo(X + 0.3 * sc, Y + 0.02 * sc); c.lineTo(X + 0.3 * sc, Y - th);
+    c.stroke();
+    c.fillStyle = '#f2efe8'; c.beginPath(); c.rect(X - w / 2, Y - hp - hm, w, hm); c.fill();
+    c.fillStyle = '#c8322b'; c.beginPath(); c.rect(X - w / 2, Y - hp - hm * 0.45, w, hm * 0.18); c.rect(X - w / 2 - 0.03 * sc, Y - hp - hm - 0.12 * sc, w + 0.06 * sc, 0.12 * sc); c.fill();
+    // uitkijkplatform bovenop de paal
+    c.fillStyle = '#d9d3c6'; c.beginPath(); c.rect(X + 0.2 * sc, Y - th - 0.03 * sc, 0.2 * sc, 0.06 * sc); c.fill();
+    const seizoen = this.seizoenStrand > 0.5 && this.dagL > 0.5;
+    if (!seizoen) return;
+    // de vlag waait mee met de wind
+    const fx = X + 0.3 * sc, fy = Y - th + 0.02 * sc, wx = this.windX >= 0 ? 1 : -1, wap = Math.sin(this.nu / 260 + zd) * 0.03 * sc, fl = 0.26 * sc * (0.6 + 0.4 * this.wd.kracht);
+    c.fillStyle = '#d8342b'; c.beginPath(); c.moveTo(fx, fy - 0.16 * sc); c.lineTo(fx + wx * fl, fy - 0.16 * sc + wap); c.lineTo(fx + wx * fl, fy - 0.08 * sc + wap); c.lineTo(fx, fy - 0.08 * sc); c.closePath(); c.fill();
+    c.fillStyle = '#f2c22e'; c.beginPath(); c.moveTo(fx, fy - 0.08 * sc); c.lineTo(fx + wx * fl, fy - 0.08 * sc + wap); c.lineTo(fx + wx * fl, fy + wap); c.lineTo(fx, fy); c.closePath(); c.fill();
+    if (z < DREMPEL.strandmens - 0.5) return;
+    // reddingsplank en twee strandwachten (rood en geel), een op de uitkijk en een die naar het water loopt
+    c.fillStyle = '#e8432f'; c.beginPath(); rechthoek(c, X - 0.42 * sc + nx * 0.25 * sc, Y + ny * 0.25 * sc, nx, ny * 0.6, 0.16 * sc, 0.035 * sc); c.fill();
+    this.zetMens(X + 0.3 * sc, Y - th + 0.01 * sc, 0, 1, STAAND, 0, Math.floor(hash(zd, 1) * HUID.length), 0);
+    const loop = tri(this.nu / 24000 + hash(zd, 2)), lx = X + nx * (0.3 + loop * 0.5) * sc, ly = Y + ny * (0.3 + loop * 0.5) * sc;
+    this.zetMens(lx, ly, 0, 1, STAAND, 2, Math.floor(hash(zd, 3) * HUID.length), this.nu / 180);
+    void T;
+  }
+
+  // Beachvolleybalveld: net tussen twee palen, vier spelers, en een bal die over het net gaat.
+  veld(c, o) {
+    const D = this.dingen, sc = this.sc, T = this.T, nu = this.nu, X = D[o + 1] * sc + this.ox, Y = D[o + 2] * sc + this.oy, tx = D[o + 3], ty = D[o + 4], nx = ty, ny = -tx, zd = D[o + 5];
+    const hn = 0.22 * sc;
+    c.strokeStyle = '#3a3634'; c.lineWidth = Math.max(0.6, 0.035 * sc); c.beginPath();
+    for (const s of [-1, 1]) { const px = X + nx * s * 0.45 * sc, py = Y + ny * s * 0.45 * sc; c.moveTo(px, py); c.lineTo(px, py - hn); }
+    c.stroke();
+    c.strokeStyle = 'rgba(245,245,240,0.85)'; c.lineWidth = Math.max(0.6, 0.03 * sc); c.beginPath();
+    c.moveTo(X + nx * 0.45 * sc, Y + ny * 0.45 * sc - hn); c.lineTo(X - nx * 0.45 * sc, Y - ny * 0.45 * sc - hn);
+    c.moveTo(X + nx * 0.45 * sc, Y + ny * 0.45 * sc - hn * 0.6); c.lineTo(X - nx * 0.45 * sc, Y - ny * 0.45 * sc - hn * 0.6);
+    c.stroke();
+    if (hash(zd, this.dagNr, 3) > this.bez * 1.4) return;
+    const f = frac(nu / 2400 + hash(zd, 1)), kant = Math.floor(nu / 2400 + hash(zd, 1)) & 1 ? 1 : -1;
+    for (let k = 0; k < 4; k++) {
+      const s = k < 2 ? -1 : 1, v = (k & 1 ? 0.35 : -0.35) + 0.1 * Math.sin(nu / 700 + k * 2), u = 0.42 + 0.12 * Math.sin(nu / 900 + k);
+      this.zetMens(X + tx * u * s * sc + nx * v * sc, Y + ty * u * s * sc + ny * v * sc, 0, 1, STAAND, [0, 0, 1, 1][k] + (zd & 1 ? 4 : 0), Math.floor(hash(zd, k, 2) * HUID.length), nu / 150 + k);
+    }
+    // bal: boog van de ene naar de andere kant
+    const bu = (f * 2 - 1) * 0.5 * kant, bx = X + tx * bu * sc, by = Y + ty * bu * sc - (0.15 + Math.sin(f * Math.PI) * 0.5) * sc;
+    c.fillStyle = '#f6f3ea'; c.beginPath(); stip(c, bx, by, Math.max(0.8, T * 0.0028)); c.fill();
+  }
+
+  // Lopers langs de waterlijn: wandelaars met een hond die door de branding rent, joggers, een ijsventer met zijn
+  // kar, en in herfst en winter een strandjutter. In de kou hooguit één wandelaar met hond en één strandjutter.
+  tekenLopers(c, a) {
+    const A = this.wereld.strand, B = this.lopers, sc = this.sc, ox = this.ox, oy = this.oy, T = this.T, nu = this.nu, tij = this.tij;
+    if (!B.length || this.dagL < 0.3) return;
+    const koud = this.warm < 0.25, tijd = nu / 1000;
+    let n = 0, nWandel = 0, nJut = 0;
+    c.globalAlpha = a;
+    for (let j = 0; j < B.length && n < PLAFOND.lopers; j += LOOP) {
+      const i0 = B[j], i1 = B[j + 1], zq = B[j + 3], druk = B[j + 6];
+      if (!this.puntInBeeld(A.x[i0], A.y[i0], 40) && !this.puntInBeeld(A.x[i1], A.y[i1], 40)) continue;
+      let soort;
+      if (koud) {
+        if (nWandel === 0) soort = WANDEL; else if (nJut === 0) soort = JUTTER; else break;
+      } else {
+        if (hash(zq, this.dagNr, 1) > 0.25 + 0.75 * this.bez * DRUK_F[druk] + 0.15) continue;
+        const h = hash(zq, 2);
+        soort = h < 0.45 ? WANDEL : h < 0.72 ? JOGGER : h < 0.86 && druk >= 2 && this.bez > 0.3 ? IJSKAR : this.sz.herfst + this.sz.lente > 0.3 ? JUTTER : WANDEL;
+      }
+      const v = soort === JOGGER ? 1.0 : soort === WANDEL ? 0.32 : soort === IJSKAR ? 0.22 : 0.12;
+      const np = i1 - i0, per = (2 * np * STAP) / v, f = frac(tijd / per + hash(zq, 3)), s = tri(f) * np, dir = triRichting(f);
+      const q = i0 + Math.min(np - 1, Math.floor(s)), fr = s - (q - i0), q2 = q + 1;
+      const px = A.x[q] + (A.x[q2] - A.x[q]) * fr, py = A.y[q] + (A.y[q2] - A.y[q]) * fr, nx = A.nx[q], ny = A.ny[q];
+      const d = soort === IJSKAR ? 0.92 : soort === JUTTER ? 0.78 + 0.08 * Math.sin(tijd * 0.7 + zq) : Math.max(0, tij) + (soort === JOGGER ? 0.22 : 0.32) + 0.1 * hash(zq, 4);
+      const wx = px - nx * d, wy = py - ny * d;
+      if (!this.puntInBeeld(wx, wy, 3)) continue;
+      n++;
+      const X = wx * sc + ox, Y = wy * sc + oy, hx = -ny * dir, hy = nx * dir;
+      if (soort === WANDEL) nWandel++; else if (soort === JUTTER) nJut++;
+      const fase = tijd * (soort === JOGGER ? 14 : soort === JUTTER ? 3 : 7) + zq;
+      const kl = soort === JUTTER ? 4 : soort === IJSKAR ? 3 : Math.floor(hash(zq, 5) * KLEDING.length);
+      this.zetMens(X, Y, hx, hy, STAAND, kl, Math.floor(hash(zq, 6) * HUID.length), fase);
+      if (soort === WANDEL && (koud || hash(zq, 7) < 0.4)) {
+        // de hond rent heen en weer door de branding, voor en achter zijn baas
+        const t2 = tijd * 1.3 + zq, du = Math.sin(t2) * 0.6, dd = Math.min(d, tij) - 0.12 + 0.2 * Math.sin(t2 * 1.7);
+        const hxw = px - nx * dd + hx * du, hyw = py - ny * dd + hy * du;
+        this.zetHond(hxw * sc + ox, hyw * sc + oy, Math.cos(t2) >= 0 ? hx : -hx, Math.cos(t2) >= 0 ? hy : -hy, Math.floor(hash(zq, 8) * VACHT.length), dd < tij ? 1 : 0);
+      } else if (soort === IJSKAR) {
+        const kx = X + hx * 0.3 * sc, ky = Y + hy * 0.3 * sc;
+        c.fillStyle = 'rgba(0,0,0,0.2)'; c.beginPath(); c.rect(kx - 0.12 * sc, ky - 0.04 * sc, 0.34 * sc, 0.1 * sc); c.fill();
+        c.fillStyle = '#f4f1ea'; c.beginPath(); c.rect(kx - 0.14 * sc, ky - 0.22 * sc, 0.28 * sc, 0.2 * sc); c.fill();
+        c.fillStyle = '#e86a8a'; c.beginPath(); c.rect(kx - 0.14 * sc, ky - 0.15 * sc, 0.28 * sc, 0.05 * sc); stip(c, kx, ky - 0.4 * sc, 0.16 * sc); c.fill();
+        c.fillStyle = '#2a2a2a'; c.beginPath(); stip(c, kx - 0.08 * sc, ky - 0.01 * sc, 0.035 * sc); stip(c, kx + 0.08 * sc, ky - 0.01 * sc, 0.035 * sc); c.fill();
+      } else if (soort === JUTTER) {
+        // zak over de schouder en een stok om in het wier te porren
+        c.fillStyle = '#6e5a3e'; c.beginPath(); stip(c, X - hx * 0.08 * sc, Y - 0.2 * sc, 0.06 * sc); c.fill();
+        c.strokeStyle = '#4a3a2a'; c.lineWidth = Math.max(0.5, T * 0.0012); c.beginPath(); c.moveTo(X + hx * 0.05 * sc, Y - 0.16 * sc); c.lineTo(X + hx * 0.2 * sc, Y + 0.02 * sc); c.stroke();
+      }
+    }
+    this.n.lopers = n;
+  }
+
+  // Duinen: paden met houten hekjes en een trap naar het strand, een fietsenrek aan het eind, wuivend helmgras en
+  // konijnen.
+  tekenDuinen(c, a) {
+    const A = this.wereld.strand, sc = this.sc, ox = this.ox, oy = this.oy, T = this.T, z = this.zoom, nu = this.nu;
+    let np = 0, nr = 0;
+    c.globalAlpha = a;
+    if (z >= DREMPEL.duinpad - 0.5) for (const p of this.duinpaden) {
+      if (np >= PLAFOND.duinpaden || !this.inBeeld(p.x0, p.y0, p.x1, p.y1, 1)) continue;
+      np++;
+      const tx = -p.ny, ty = p.nx, pt = (u, d, uit) => { uit[0] = (p.x + tx * u - p.nx * d) * sc + ox; uit[1] = (p.y + ty * u - p.ny * d) * sc + oy; };
+      const q = this.q2 ??= [0, 0];
+      // het pad, licht slingerend
+      c.strokeStyle = this.sn ? '#f1f2f0' : '#e3d3a6'; c.lineWidth = Math.max(1, 0.36 * sc); c.lineCap = 'round'; c.beginPath();
+      for (let k = 0; k <= 8; k++) { const d = 2.2 + k * 0.5, u = 0.18 * Math.sin(k * 0.9 + hash(p.zaad, 1) * 6); pt(u, d, q); if (k) c.lineTo(q[0], q[1]); else c.moveTo(q[0], q[1]); }
+      c.stroke();
+      c.lineCap = 'butt';
+      if (z >= DREMPEL.hek - 0.5) {
+        // trap van planken het duin af, dan hekjes langs het pad
+        c.strokeStyle = '#7a5a3a'; c.lineWidth = Math.max(0.5, 0.03 * sc); c.beginPath();
+        for (let d = 2.25; d <= 2.9; d += 0.11) { const u = 0.18 * Math.sin(hash(p.zaad, 1) * 6); pt(u - 0.2, d, q); c.moveTo(q[0], q[1]); pt(u + 0.2, d, q); c.lineTo(q[0], q[1]); }
+        c.stroke();
+        c.strokeStyle = '#6a5038'; c.lineWidth = Math.max(0.5, 0.025 * sc); c.beginPath();
+        for (const s of [-1, 1]) {
+          for (let k = 2; k <= 7; k++) { const d = 2.2 + k * 0.5, u = 0.18 * Math.sin(k * 0.9 + hash(p.zaad, 1) * 6) + s * 0.32; pt(u, d, q); c.moveTo(q[0], q[1]); c.lineTo(q[0], q[1] - 0.12 * sc); }
+          for (let k = 2; k <= 7; k++) { const d = 2.2 + k * 0.5, u = 0.18 * Math.sin(k * 0.9 + hash(p.zaad, 1) * 6) + s * 0.32; pt(u, d, q); if (k > 2) c.lineTo(q[0], q[1] - 0.09 * sc); else c.moveTo(q[0], q[1] - 0.09 * sc); }
+        }
+        c.stroke();
+      }
+      // fietsenrek met fietsen (meer in de zomer)
+      if (p.rek && z >= DREMPEL.huisje - 0.5) {
+        nr++;
+        pt(0.75, 6.1, q);
+        const X = q[0], Y = q[1], nf = Math.min(6, Math.round((0.3 + this.bez * 0.7) * (2 + p.druk * 1.4) * (this.dagL > 0.3 ? 1 : 0.3)));
+        c.strokeStyle = '#8c9094'; c.lineWidth = Math.max(0.5, 0.03 * sc); c.beginPath(); c.moveTo(X - 0.45 * sc, Y); c.lineTo(X + 0.45 * sc, Y); c.stroke();
+        for (let k = 0; k < nf; k++) {
+          const fx = X - 0.4 * sc + k * 0.16 * sc;
+          c.strokeStyle = FIETS[Math.floor(hash(p.zaad, k, 3) * FIETS.length)]; c.lineWidth = Math.max(0.5, 0.025 * sc); c.beginPath();
+          c.moveTo(fx, Y - 0.12 * sc); c.lineTo(fx, Y + 0.12 * sc);
+          c.stroke();
+          if (z >= DREMPEL.klein) { c.fillStyle = '#26282a'; c.beginPath(); c.rect(fx - 0.02 * sc, Y - 0.15 * sc, 0.04 * sc, 0.06 * sc); c.rect(fx - 0.02 * sc, Y + 0.1 * sc, 0.04 * sc, 0.06 * sc); c.fill(); }
+        }
+      }
+    }
+    this.n.duinpaden = np; this.n.rekken = nr;
+    // helm: plukjes die met de wind meebuigen
+    let nh = 0;
+    if (z >= DREMPEL.helm - 0.5 && this.nZr) {
+      const zp = this.zp, g = this.raster, h = 0.2 * sc, kr = this.wd.kracht, wx = this.windX;
+      const zwaai = (0.15 + 0.35 * kr) * h;
+      for (let laag = 0; laag < 2; laag++) {
+        c.strokeStyle = this.sn ? (laag ? '#c9cdb8' : '#a9ad94') : laag ? '#b6b26a' : '#8d8a4c'; c.lineWidth = Math.max(0.5, T * 0.0016); c.beginPath();
+        for (let j = 0; j < this.zr[this.nZr] && nh < PLAFOND.helm; j++) {
+          const i = zp[j];
+          if (!(A.f[i] & S_DUIN)) continue;
+          for (let k = 0; k < 2 && nh < PLAFOND.helm; k++) {
+            if ((k & 1) !== laag) continue;
+            const d = 2.8 + hash(i, k, 21) * 2.8, u = (hash(i, k, 22) - 0.5) * 1.4, x = A.x[i] - A.nx[i] * d - A.ny[i] * u, y = A.y[i] - A.ny[i] * d + A.nx[i] * u;
+            const cx = clamp(Math.floor(x / RC), 0, RW - 1), cy = clamp(Math.floor(y / RC), 0, RH - 1);
+            if (g[cy * RW + cx] & (INFRA | GEBOUW | KUST)) continue;
+            nh++;
+            const X = x * sc + ox, Y = y * sc + oy, buig = wx * zwaai * 0.6 + Math.sin(nu / 650 + i * 0.7 + k) * zwaai;
+            for (let s = -1; s <= 1; s++) { c.moveTo(X + s * h * 0.15, Y); c.lineTo(X + s * h * 0.4 + buig * (1 + s * 0.2), Y - h * (1 - Math.abs(s) * 0.25)); }
+          }
+        }
+        c.stroke();
+      }
+    }
+    this.n.helm = nh;
+    // konijnen: zitten, kijken rond en maken af en toe een sprongetje
+    let nk = 0;
+    if (z >= DREMPEL.konijn - 0.5 && this.nacht < 0.85) {
+      const K = this.konijnen, r = Math.max(0.7, T * 0.0034);
+      c.fillStyle = this.sn ? '#a08a72' : '#8a6e52'; c.beginPath();
+      for (let j = 0; j < K.length && nk < PLAFOND.konijnen; j += 3) {
+        if (!this.puntInBeeld(K[j], K[j + 1], 1)) continue;
+        nk++;
+        const f = frac(nu / 6000 + hash(K[j + 2], 1)), sprong = f < 0.08 ? Math.sin((f / 0.08) * Math.PI) : 0, verder = (Math.floor(nu / 6000 + hash(K[j + 2], 1)) % 5) * 0.12;
+        const X = (K[j] + verder) * sc + ox, Y = K[j + 1] * sc + oy - sprong * r * 2.5;
+        c.rect(X - r, Y - r * 0.9, r * 2, r * 1.3);
+        c.rect(X + r * 0.6, Y - r * 1.6, r * 0.9, r * 0.9);
+        c.rect(X + r * 0.75, Y - r * 2.6, r * 0.25, r * 1.1);
+        c.rect(X + r * 1.1, Y - r * 2.5, r * 0.25, r * 1.0);
+      }
+      c.fill();
+      if (nk) { c.fillStyle = '#f2efe8'; c.beginPath(); for (let j = 0, q = 0; j < K.length && q < nk; j += 3) { if (!this.puntInBeeld(K[j], K[j + 1], 1)) continue; q++; const f = frac(nu / 6000 + hash(K[j + 2], 1)), sprong = f < 0.08 ? Math.sin((f / 0.08) * Math.PI) : 0, verder = (Math.floor(nu / 6000 + hash(K[j + 2], 1)) % 5) * 0.12; c.rect((K[j] + verder) * sc + ox - r * 1.25, K[j + 1] * sc + oy - sprong * r * 2.5 - r * 0.6, r * 0.45, r * 0.45); } c.fill(); }
+    }
+    this.n.konijnen = nk;
+  }
+
+  // ---------- havens van dichtbij ----------
+
+  // Hengelaars op de pieren en havenhoofden: hengel, lijn en dobber; af en toe beet. In de winter een enkeling,
+  // 's avonds met een lantaarntje.
+  tekenHengelaars(c, a) {
+    const B = this.hengelplekken, sc = this.sc, ox = this.ox, oy = this.oy, T = this.T, nu = this.nu;
+    if (!B.length) return;
+    let n = 0;
+    const kans = (0.15 + 0.55 * clamp(this.sz.zomer + this.sz.lente * 0.7 + this.sz.herfst * 0.6, 0, 1)) * (0.4 + 0.6 * this.zon) * (this.dagL > 0.3 ? 1 : 0.3);
+    const hz = this.hzZicht ??= new Int32Array(PLAFOND.hengelaars);
+    for (let j = 0; j < B.length && n < PLAFOND.hengelaars; j += 6) if (this.puntInBeeld(B[j], B[j + 1], 2) && hash(B[j + 4], this.dagNr, 1) < kans) hz[n++] = j;
+    this.n.hengelaars = n;
+    if (!n) return;
+    c.globalAlpha = a;
+    const hoog = T * 0.008; // dekhoogte van pier en havenhoofd
+    c.strokeStyle = '#2a2a2a'; c.lineWidth = Math.max(0.5, T * 0.0013); c.beginPath();
+    for (let q = 0; q < n; q++) {
+      const j = hz[q], X = B[j] * sc + ox, Y = B[j + 1] * sc + oy - hoog, hx = B[j + 2], hy = B[j + 3], beet = frac(nu / 7000 + hash(B[j + 4], 2)) < 0.08;
+      const tx = X + hx * 0.45 * sc, ty = Y + hy * 0.45 * sc - (beet ? 0.18 : 0.35) * sc;
+      c.moveTo(X + hx * 0.04 * sc, Y - 0.2 * sc); c.lineTo(tx, ty);
+    }
+    c.stroke();
+    c.strokeStyle = 'rgba(240,240,240,0.55)'; c.lineWidth = Math.max(0.4, T * 0.0008); c.beginPath();
+    for (let q = 0; q < n; q++) {
+      const j = hz[q], X = B[j] * sc + ox, Y = B[j + 1] * sc + oy - hoog, hx = B[j + 2], hy = B[j + 3], beet = frac(nu / 7000 + hash(B[j + 4], 2)) < 0.08;
+      const tx = X + hx * 0.45 * sc, ty = Y + hy * 0.45 * sc - (beet ? 0.18 : 0.35) * sc, dx = X + hx * 0.75 * sc, dy = Y + hy * 0.75 * sc + hoog + Math.sin(nu / 500 + j) * 0.01 * sc;
+      c.moveTo(tx, ty); c.lineTo(dx, dy);
+    }
+    c.stroke();
+    c.fillStyle = '#e8432f'; c.beginPath();
+    for (let q = 0; q < n; q++) { const j = hz[q], X = B[j] * sc + ox, Y = B[j + 1] * sc + oy, hx = B[j + 2], hy = B[j + 3], beet = frac(nu / 7000 + hash(B[j + 4], 2)) < 0.08; if (!beet) stip(c, X + hx * 0.75 * sc, Y + hy * 0.75 * sc + Math.sin(nu / 500 + j) * 0.01 * sc, Math.max(0.6, T * 0.0018)); }
+    c.fill();
+    for (let q = 0; q < n; q++) {
+      const j = hz[q], X = B[j] * sc + ox, Y = B[j + 1] * sc + oy - hoog, zq = B[j + 4];
+      this.zetMens(X, Y, 0, 1, hash(zq, 3) < 0.5 ? ZITTEND : STAAND, [4, 5, 1, 3, 6][Math.floor(hash(zq, 4) * 5)], Math.floor(hash(zq, 5) * HUID.length), 0);
+      if (this.nacht > 0.3) this.zetLicht(X - B[j + 2] * 0.1 * sc, Y - 0.05 * sc, Math.max(2, T * 0.018), WARM, 0.7);
+    }
+  }
+
+  // Sloepjes langs de kades, aan een tros, en een hijskraantje op de kademuur.
+  tekenSloepen(c, a) {
+    const sc = this.sc, ox = this.ox, oy = this.oy, T = this.T, z = this.zoom, nu = this.nu, S = SCHUIN;
+    let n = 0;
+    c.globalAlpha = a;
+    const ijs = this.ijs > 0.6;
+    for (const b of this.sloepen) {
+      if (n >= PLAFOND.sloepen || !this.puntInBeeld(b.x, b.y, 1.5)) continue;
+      n++;
+      const dein = ijs ? 0 : Math.sin(nu / 900 + b.zaad) * 0.012 * sc;
+      const X = b.x * sc + ox, Y = b.y * sc + oy + dein, l = 0.42 * sc, w = 0.15 * sc;
+      c.fillStyle = 'rgba(0,0,0,0.25)'; c.beginPath(); romp(c, X + 0.04 * sc * S, Y + 0.05 * sc, b.fx, b.fy, l, w); c.fill();
+      c.fillStyle = ['#f2efe6', '#2f4a6a', '#7a3a2a', '#3d6b4a', '#c9a64a'][Math.floor(hash(b.zaad, 2) * 5)]; c.beginPath(); romp(c, X, Y, b.fx, b.fy, l, w); c.fill();
+      c.fillStyle = hash(b.zaad, 3) < 0.4 ? '#2f5a7a' : '#9a7a52'; c.beginPath(); romp(c, X, Y, b.fx, b.fy, l * 0.78, w * 0.68); c.fill();
+      if (z >= DREMPEL.klein) {
+        c.strokeStyle = '#d8d0b8'; c.lineWidth = Math.max(0.4, T * 0.0012); c.beginPath();
+        c.moveTo(X + b.fx * l * 0.8, Y + b.fy * l * 0.8); c.lineTo((b.x - b.wx * 0.62 + b.fx * 0.5) * sc + ox, (b.y - b.wy * 0.62 + b.fy * 0.5) * sc + oy - 0.04 * sc);
+        c.stroke();
+      }
+    }
+    this.n.sloepen = n;
+    let nk = 0;
+    if (z >= DREMPEL.kraan - 0.5) for (const k of this.kraantjes) {
+      if (nk >= PLAFOND.kraantjes || !this.puntInBeeld(k.x, k.y, 2)) continue;
+      nk++;
+      this.kraantje(c, k.x * sc + ox, k.y * sc + oy, k.wx, k.wy, k.zaad);
+    }
+    this.n.kraantjes = nk;
+  }
+
+  // Klein draaibaar kraantje: paal, giek over het water, haak aan een kabel die zachtjes slingert.
+  kraantje(c, X, Y, wx, wy, zaad) {
+    const sc = this.sc, T = this.T, h = 0.75 * sc, zw = Math.sin(this.nu / 5000 + zaad) * 0.4;
+    const gx = X + (wx * Math.cos(zw) - wy * Math.sin(zw)) * 0.6 * sc, gy = Y + (wy * Math.cos(zw) + wx * Math.sin(zw)) * 0.6 * sc - h;
+    c.strokeStyle = 'rgba(0,0,0,0.25)'; c.lineWidth = Math.max(0.6, 0.05 * sc); c.beginPath(); c.moveTo(X, Y); c.lineTo(X + h * SCHUIN, Y + h * SCHUIN * 0.6); c.stroke();
+    c.strokeStyle = '#d9a63a'; c.lineWidth = Math.max(0.7, 0.06 * sc); c.beginPath(); c.moveTo(X, Y); c.lineTo(X, Y - h); c.lineTo(gx, gy); c.stroke();
+    c.strokeStyle = '#2b2b2b'; c.lineWidth = Math.max(0.4, T * 0.001); c.beginPath(); c.moveTo(gx, gy); c.lineTo(gx + Math.sin(this.nu / 1300 + zaad) * 0.03 * sc, gy + 0.45 * sc); c.stroke();
+    c.fillStyle = '#3a3a3a'; c.beginPath(); c.rect(X - 0.06 * sc, Y - 0.08 * sc, 0.12 * sc, 0.1 * sc); c.fill();
+  }
+
+  // Een kotter: romp, dek, stuurhut, mast met de giek van het vistuig. (X, Y) scherm, (hx, hy) koers.
+  kotter(c, X, Y, hx, hy, zaad) {
+    const sc = this.sc, z = this.zoom, l = 0.8 * sc, w = 0.27 * sc, S = SCHUIN;
+    c.fillStyle = 'rgba(0,0,0,0.28)'; c.beginPath(); romp(c, X + 0.06 * sc, Y + 0.08 * sc, hx, hy, l, w); c.fill();
+    c.fillStyle = KOTTER[Math.floor(hash(zaad, 1) * KOTTER.length)]; c.beginPath(); romp(c, X, Y, hx, hy, l, w); c.fill();
+    c.fillStyle = this.sn ? '#eef1f3' : '#b8ad94'; c.beginPath(); romp(c, X, Y - 0.03 * sc, hx, hy, l * 0.82, w * 0.72); c.fill();
+    const sx = X - hx * l * 0.15, sy = Y - hy * l * 0.15, sh = 0.2 * sc;
+    c.fillStyle = '#f0ece2'; c.beginPath(); c.rect(sx - 0.12 * sc, sy - sh, 0.24 * sc, sh); c.fill();
+    c.fillStyle = '#9a3a2a'; c.beginPath(); c.rect(sx - 0.14 * sc, sy - sh - 0.05 * sc, 0.28 * sc, 0.06 * sc); c.fill();
+    if (z >= DREMPEL.klein) { c.fillStyle = '#2f4152'; c.beginPath(); c.rect(sx - 0.09 * sc, sy - sh * 0.8, 0.18 * sc, sh * 0.3); c.fill(); }
+    // mast en giek
+    const mx = X + hx * l * 0.35, my = Y + hy * l * 0.35, mh = 0.75 * sc;
+    c.strokeStyle = '#3a3634'; c.lineWidth = Math.max(0.5, 0.035 * sc); c.beginPath();
+    c.moveTo(mx, my); c.lineTo(mx, my - mh);
+    c.moveTo(mx, my - mh * 0.7); c.lineTo(mx - hy * 0.55 * sc, my + hx * 0.55 * sc - mh * 0.35);
+    c.moveTo(mx, my - mh * 0.7); c.lineTo(mx + hy * 0.55 * sc, my - hx * 0.55 * sc - mh * 0.35);
+    c.stroke();
+    this.kTopX = mx; this.kTopY = my - mh;
+    void S;
+  }
+
+  tekenVissershavens(c, a) {
+    const sc = this.sc, ox = this.ox, oy = this.oy, T = this.T, z = this.zoom, nu = this.nu, S = SCHUIN;
+    let n = 0, nk = 0, nm = 0;
+    c.globalAlpha = a;
+    const ijs = this.ijs > 0.6;
+    for (const h of this.vissershavens) {
+      if (n >= PLAFOND.vissershavens || !this.inBeeld(h.x0, h.y0, h.x1, h.y1, 1)) continue;
+      n++;
+      const tx = h.tx, ty = h.ty, nx = h.nx, ny = h.ny;
+      const P = (u, v, uit) => { uit[0] = (h.x + tx * u + nx * v) * sc + ox; uit[1] = (h.y + ty * u + ny * v) * sc + oy; };
+      const q = this.q3 ??= [0, 0];
+      const vlak = (u0, u1, v0, v1) => { P(u0, v0, q); c.moveTo(q[0], q[1]); P(u1, v0, q); c.lineTo(q[0], q[1]); P(u1, v1, q); c.lineTo(q[0], q[1]); P(u0, v1, q); c.lineTo(q[0], q[1]); c.closePath(); };
+      // kade en muur
+      const hq = 0.14 * sc;
+      c.fillStyle = '#5f5a52'; c.beginPath(); P(-3.7, 0.15, q); c.moveTo(q[0], q[1]); P(3.7, 0.15, q); c.lineTo(q[0], q[1]); c.lineTo(q[0], q[1] + hq); P(-3.7, 0.15, q); c.lineTo(q[0], q[1] + hq); c.closePath(); c.fill();
+      c.fillStyle = this.sn ? '#e6e9eb' : '#a39d90'; c.beginPath(); vlak(-3.7, 3.7, -1.1, 0.15); c.fill();
+      if (z >= DREMPEL.fijn + 1) {
+        c.fillStyle = '#2b2b2a'; c.beginPath();
+        for (let u = -3.3; u <= 3.4; u += 1.1) { P(u, 0.05, q); stip(c, q[0], q[1] - 0.02 * sc, Math.max(0.6, 0.05 * sc)); }
+        c.fill();
+      }
+      // visafslag: lange loods met een open voorkant, kratten ervoor
+      P(-1.7, -2.1, q);
+      const ax = q[0], ay = q[1], aw = 2.4 * sc, ah = 0.55 * sc, ad = 0.9 * sc;
+      c.fillStyle = 'rgba(0,0,0,0.22)'; c.beginPath(); c.rect(ax - aw / 2, ay - ad * 0.3, aw + ah * S, ad * 0.6 + ah * S * 0.4); c.fill();
+      c.fillStyle = '#d9d4c8'; c.beginPath(); c.rect(ax - aw / 2, ay - ah, aw, ah); c.fill();
+      c.fillStyle = '#3a3c3e'; c.beginPath(); c.rect(ax - aw * 0.35, ay - ah * 0.8, aw * 0.7, ah * 0.8); c.fill();
+      c.fillStyle = this.sn ? '#f1f3f4' : '#5d6f7a'; c.beginPath(); c.rect(ax - aw / 2 - 0.08 * sc, ay - ah - ad, aw + 0.16 * sc, ad); c.fill();
+      c.fillStyle = 'rgba(0,0,0,0.16)'; c.beginPath(); c.rect(ax, ay - ah - ad, aw / 2 + 0.08 * sc, ad); c.fill();
+      if (z >= DREMPEL.klein - 1) {
+        for (let k = 0; k < KRAT.length; k++) {
+          c.fillStyle = KRAT[k]; c.beginPath();
+          for (let s = 0; s < 8; s++) {
+            if (s % KRAT.length !== k) continue;
+            P(-2.9 + s * 0.3, -1.25 + (s & 1) * 0.12, q);
+            const st = 1 + Math.floor(hash(h.zaad, s, 3) * 3);
+            for (let e = 0; e < st; e++) c.rect(q[0] - 0.13 * sc, q[1] - 0.12 * sc * (e + 1), 0.26 * sc, 0.11 * sc);
+          }
+          c.fill();
+        }
+      }
+      // netten op de kade, met twee vissers die ze boeten
+      if (z >= DREMPEL.netten - 0.5) {
+        c.fillStyle = this.sn ? 'rgba(80,90,84,0.6)' : 'rgba(54,70,60,0.85)'; c.beginPath(); vlak(0.5, 3.1, -2.4, -1.3); c.fill();
+        c.strokeStyle = 'rgba(160,170,150,0.5)'; c.lineWidth = Math.max(0.4, T * 0.001); c.beginPath();
+        for (let u = 0.6; u < 2.7; u += 0.3) { P(u, -2.4, q); c.moveTo(q[0], q[1]); P(u + 0.4, -1.3, q); c.lineTo(q[0], q[1]); }
+        c.stroke();
+        c.fillStyle = '#e8732f'; c.beginPath(); for (let u = 0.6; u < 3.1; u += 0.45) { P(u, -1.3, q); stip(c, q[0], q[1], Math.max(0.6, 0.05 * sc)); } c.fill();
+        if (this.dagL > 0.4 && !ijs) for (let k = 0; k < 2; k++) { P(1.1 + k * 1.3, -1.15, q); this.zetMens(q[0], q[1], 0, 1, ZITTEND, [4, 3][k], Math.floor(hash(h.zaad, k, 5) * HUID.length), nu / 400 + k); }
+      }
+      // kotters aan de kade met trossen naar de bolders
+      for (let k = 0; k < h.nk && nk < PLAFOND.kotters; k++) {
+        nk++;
+        const dein = ijs ? 0 : Math.sin(nu / 1100 + k * 1.7 + h.zaad) * 0.03 * sc, kant = hash(h.zaad, k, 6) < 0.5 ? 1 : -1;
+        P(KOTTER_U[k], 0.75, q);
+        const X = q[0], Y = q[1] + dein;
+        this.kotter(c, X, Y, tx * kant, ty * kant, h.zaad + k * 13);
+        if (z >= DREMPEL.klein - 1) {
+          c.strokeStyle = '#d8d0b8'; c.lineWidth = Math.max(0.4, T * 0.0012); c.beginPath();
+          for (const s of [-1, 1]) { const bx = X + tx * kant * s * 0.65 * sc, by = Y + ty * kant * s * 0.65 * sc; P(KOTTER_U[k] + s * 0.9, 0.05, q); c.moveTo(bx, by - 0.04 * sc); c.lineTo(q[0], q[1] - 0.03 * sc); }
+          c.stroke();
+        }
+        if (this.nacht > 0.05) this.zetLicht(this.kTopX, this.kTopY, Math.max(1.5, T * 0.016), WIT, 0.85);
+      }
+      // hijskraantje op de kop van de kade
+      if (z >= DREMPEL.kraan - 0.5) { P(3.4, -0.3, q); this.kraantje(c, q[0], q[1], nx, ny, h.zaad); }
+      // meeuwen: rondjes boven de afslag en de boten, een paar op het dak; 's nachts zitten ze alleen op het dak
+      if (z >= DREMPEL.meeuw - 0.5) {
+        const nM = this.dagL < 0.3 ? 2 : 6 + Math.floor(hash(h.zaad, 7) * 4);
+        c.strokeStyle = '#f4f4f0'; c.lineWidth = Math.max(0.6, T * 0.0018); c.beginPath();
+        let zit = 0;
+        for (let k = 0; k < nM && nm < PLAFOND.meeuwen; k++) {
+          nm++;
+          if (k < 2) { zit++; continue; }
+          const hk = nu / (2600 + k * 300) * (k & 1 ? 1 : -1) + k * 1.9, R = (1.2 + hash(h.zaad, k, 8) * 1.5) * sc;
+          P(-1 + hash(h.zaad, k, 9) * 2.5, -0.5, q);
+          const mx = q[0] + Math.cos(hk) * R, my = q[1] + Math.sin(hk) * R * 0.5 - (0.9 + 0.3 * k) * sc, sl = Math.sin(nu / 160 + k) * 0.05 * sc, sp = 0.13 * sc;
+          c.moveTo(mx - sp, my - sl); c.quadraticCurveTo(mx - sp * 0.4, my - sp * 0.5, mx, my); c.quadraticCurveTo(mx + sp * 0.4, my - sp * 0.5, mx + sp, my - sl);
+        }
+        c.stroke();
+        c.fillStyle = '#f4f4f0'; c.beginPath();
+        for (let k = 0; k < zit; k++) stip(c, ax - aw * 0.3 + k * aw * 0.45, ay - ah - ad * 0.55, Math.max(0.7, 0.06 * sc));
+        c.fill();
+      }
+      if (this.nacht > 0.05) { this.zetLicht(ax, ay - ah * 0.6, Math.max(3, T * 0.04), WARM, 0.75); P(0, -0.4, q); this.zetLicht(q[0], q[1] - 0.6 * sc, Math.max(2, T * 0.03), WARM, 0.8); }
+    }
+    this.n.vissershavens = n; this.n.kotters = nk; this.n.meeuwen = nm;
+  }
+
+  // Veerstoepen: de oprit van beton van de wal naar de achtersteven, een loket, en auto's die eraf rijden als de
+  // veerboot van leven.js ligt, en daarna de wachtrij die erop rijdt. Zelfde klok en dienstregeling als daar.
+  tekenVeerstoepen(c, a) {
+    const sc = this.sc, ox = this.ox, oy = this.oy, T = this.T, z = this.zoom, Tw = this.geo.T, tijd = this.nu / 1000;
+    let n = 0, na = 0;
+    c.globalAlpha = a;
+    for (const v of this.veerstoepen) {
+      if (n >= PLAFOND.veerstoepen || !this.inBeeld(v.x0, v.y0, v.x1, v.y1, 1)) continue;
+      n++;
+      const ex = v.ex, ey = v.ey, px = -ey, py = ex, br = 0.32;
+      const X0 = v.sx * sc + ox, Y0 = v.sy * sc + oy, X1 = (v.sx + ex * v.L) * sc + ox, Y1 = (v.sy + ey * v.L) * sc + oy;
+      c.fillStyle = 'rgba(0,0,0,0.25)'; c.beginPath(); rechthoek(c, (X0 + X1) / 2 + 0.05 * sc, (Y0 + Y1) / 2 + 0.08 * sc, ex, ey, (v.L / 2) * sc, br * sc); c.fill();
+      c.fillStyle = this.sn ? '#e2e5e7' : '#9a9690'; c.beginPath(); rechthoek(c, (X0 + X1) / 2, (Y0 + Y1) / 2, ex, ey, (v.L / 2) * sc, br * sc); c.fill();
+      if (z >= DREMPEL.fijn + 1) {
+        c.strokeStyle = '#e8c63a'; c.lineWidth = Math.max(0.5, 0.03 * sc); c.beginPath();
+        for (const s of [-1, 1]) { c.moveTo(X0 + px * s * br * 0.85 * sc, Y0 + py * s * br * 0.85 * sc); c.lineTo(X1 + px * s * br * 0.85 * sc, Y1 + py * s * br * 0.85 * sc); }
+        c.stroke();
+        // loket naast de oprit op de wal
+        const lx = X1 + px * 0.7 * sc, ly = Y1 + py * 0.7 * sc;
+        c.fillStyle = '#ece6d8'; c.beginPath(); c.rect(lx - 0.2 * sc, ly - 0.3 * sc, 0.4 * sc, 0.3 * sc); c.fill();
+        c.fillStyle = '#3f5d7a'; c.beginPath(); c.rect(lx - 0.24 * sc, ly - 0.38 * sc, 0.48 * sc, 0.09 * sc); c.fill();
+      }
+      if (this.nacht > 0.05) this.zetLicht(X1, Y1 - 0.5 * sc, Math.max(2, T * 0.03), WARM, 0.85);
+      if (z < DREMPEL.auto - 0.5) continue;
+      // dienstregeling van leven.js: varen, zes seconden liggen, terug, liggen
+      const varen = v.len / (0.3 * Tw), liggen = 6, Pd = 2 * (varen + liggen), u = frac(tijd / Pd + hash(v.i, 141)) * Pd;
+      const start = v.zij ? liggen + varen : 0, f = u >= start && u < start + liggen ? (u - start) / liggen : -1;
+      const auto = (w, kl) => {
+        if (na >= PLAFOND.autos) return;
+        na++;
+        const ax = (v.sx + ex * w) * sc + ox, ay = (v.sy + ey * w) * sc + oy;
+        c.fillStyle = AUTO[Math.floor(kl) % AUTO.length]; c.beginPath(); rechthoek(c, ax, ay - 0.05 * sc, ex, ey, 0.2 * sc, 0.1 * sc); c.fill();
+        if (z >= DREMPEL.klein) { c.fillStyle = 'rgba(30,40,50,0.6)'; c.beginPath(); rechthoek(c, ax - ex * 0.02 * sc, ay - 0.07 * sc - ey * 0.02 * sc, ex, ey, 0.09 * sc, 0.08 * sc); c.fill(); }
+      };
+      const rij = v.L + 0.6, wacht = (k) => v.L + 0.6 + k * 0.6;
+      if (f >= 0 && f < 0.45) {
+        // eraf: van de boot over de stoep de wal op
+        for (let k = 0; k < 3; k++) { const w = (f / 0.45) * (rij + 1.2) - k * 0.75 - 0.3; if (w > 0.05 && w < rij + 0.6) auto(w, hash(v.zaad, k, 1) * 8); }
+      } else if (f >= 0.5) {
+        // erop: de wachtrij rijdt naar de boot
+        for (let k = 0; k < v.nq; k++) { const g = clamp((f - 0.5 - k * 0.1) / 0.3, 0, 1), w = wacht(k) + (-0.3 - wacht(k)) * g; if (w > 0.05) auto(w, hash(v.zaad, k, 2) * 8); }
+      } else for (let k = 0; k < v.nq; k++) auto(wacht(k), hash(v.zaad, k, 2) * 8);
+    }
+    this.n.veerstoepen = n; this.n.autos = na;
+  }
+
   // ---------- voor tests en andere lagen ----------
 
   // Wat er dit beeld getekend is.
@@ -2024,7 +3664,20 @@ export class KustLaag {
       jachthavens: this.jachthavens.length, rotsen: this.rotsen.length / 6, rollers: this.rollers.length / 6, kades: this.kades.length,
       woonboten: this.woonboten.length, aken: this.aken.length, stuwen: this.stuwen.length, dammen: this.dammen.length,
       windparken: this.windparken.length, turbines: this.turbines.length / 4, booreilanden: this.booreilanden.length, viskwekerijen: this.viskwekerijen.length,
+      // pakket D
+      strandpunten: this.wereld ? this.wereld.strand.n : 0, vrijePunten: this.pv ? this.pv.reduce((t, v) => t + (v & P_VRIJ), 0) : 0, ...this.telDingen(),
+      lopers: this.lopers.length / LOOP, duinpaden: this.duinpaden.length, rekken: this.duinpaden.filter((p) => p.rek).length, konijnen: this.konijnen.length / 3,
+      dijken: this.dijken.length, schapen: this.schapen.length / 3, zandbanken: this.zandbanken.length, hengelplekken: this.hengelplekken.length / 6,
+      sloepen: this.sloepen.length, kraantjes: this.kraantjes.length, vissershavens: this.vissershavens.length, veerstoepen: this.veerstoepen.length,
     };
+  }
+
+  // Strandinrichting per soort (wereld).
+  telDingen() {
+    const D = this.dingen, t = { huisjes: 0, paviljoens: 0, reddingsposten: 0, velden: 0, stoelsets: 0, schermen: 0, handdoeken: 0, kastelen: 0, gaten: 0 };
+    const naam = ['huisjes', 'stoelsets', 'schermen', 'handdoeken', 'paviljoens', 'reddingsposten', 'velden', 'kastelen', 'gaten'];
+    for (let j = 0; j < D.length; j += DING) t[naam[D[j]]]++;
+    return t;
   }
 
   // Waar alles ligt (wereldcoördinaten), alleen-lezen: om naartoe te zoomen of te testen.
