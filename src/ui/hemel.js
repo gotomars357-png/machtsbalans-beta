@@ -51,6 +51,8 @@ export const PLAFOND = {
   jagers: 8, transport: 4, verkenners: 3, afweer: 16, flak: 8, lichten: 72, poolstroken: 60,
 };
 // Vanaf welke zoom iets verschijnt (de kaart wordt 'diep' op zoom 4). Andere lagen mogen dit lezen.
+// Hoogste breedte van een oude condensstreep in schermpixels (C12).
+export const STREEP_MAX_PX = 2;
 export const DREMPEL = {
   streep: 2, jager: 3, zwerm: 3.2, luchtschip: 3.5, verkenner: 4, zweef: 4.5, paraglider: 5.5, sproeier: 5.5,
   transport: 5, parachute: 5.5, banier: 4.5, vlieger: 6.5, kiter: 7, duif: 7, drone: 7.5, lijnen: 10, piloot: 11, klein: 12,
@@ -403,17 +405,27 @@ export class HemelLaag {
   }
 
   omgeving(view, nu) {
-    const dag = this.state.dag ?? 0;
+    // C11: de speldag springt een paar keer per seconde; weer, wind en seizoen lezen een gladde versie (dagG, in
+    // stapjes van 1/16 dag), en wie er vandaag vliegt, kiest per visuele dag (vd: wisselt om middernacht)
+    const echt = this.state.dag ?? 0, dt = nu - (this.vorigNu ?? -1e9);
+    this.vorigNu = nu;
+    if (!(dt > 0) || dt > 5000 || !(Math.abs(echt - (this.dagG ?? -1e9)) < 20)) this.dagG = echt;
+    else this.dagG += (echt - this.dagG) * (1 - Math.exp(-dt / 500));
+    this.vd = Math.floor(nu / 180000 + 0.5);
+    const dag = Math.round(this.dagG * 16) / 16;
     if (this.szDag !== dag) { this.sz = seizoen(dag); this.wnd = wind(dag); this.szDag = dag; this.pool = weer(dag, 500, 70); }
     // het weer ter plekke verandert per dag en over afstanden van tientallen eenheden: niet elk beeld opnieuw
     const wk = Math.round(view.cx / 8) * 4096 + Math.round(view.cy / 8);
     if (this.wrDag !== dag || this.wrKey !== wk || !this.wr) { this.wr = weer(dag, view.cx, view.cy); this.wrDag = dag; this.wrKey = wk; }
     this.windX = Math.cos(this.wnd.hoek); this.windY = Math.sin(this.wnd.hoek);
     this.nacht = nachtOp(nu);
-    this.dagA = 1 - smooth(0.2, 0.55, this.nacht);
-    // buiten vliegen: niet bij regen, onweer of storm
-    this.droog = this.wr.regen < 0.08 && this.wr.sneeuw < 0.08 && this.wr.onweer < 0.02;
-    this.storm = this.wnd.kracht > 0.82;
+    // buiten vliegen: niet bij regen, onweer of storm. Bij omslaand weer vervaagt alles in plaats van te verdwijnen
+    // (weerA zit in dagA, waarmee elke vlieger, duif en zweefvlieger zijn doorzichtigheid krijgt)
+    const wr = this.wr;
+    this.weerA = smooth(0.08, 0.04, wr.regen) * smooth(0.08, 0.04, wr.sneeuw) * smooth(0.02, 0.008, wr.onweer) * smooth(0.86, 0.78, this.wnd.kracht);
+    this.dagA = (1 - smooth(0.2, 0.55, this.nacht)) * this.weerA;
+    this.droog = this.weerA > 0.02;
+    this.storm = this.wnd.kracht > 0.86;
   }
 
   // Na de eenheden en de vliegtuigen van infra.js, vóór de nacht: alles wat hier vliegt.
@@ -455,7 +467,7 @@ export class HemelLaag {
 
   // ---------- oude condensstrepen ----------
 
-  // Lange witte strepen van straaljagers die allang voorbij zijn: ze worden breder, vager en waaien met de wind mee.
+  // Lange witte strepen van straaljagers die allang voorbij zijn: ze worden vager en waaien met de wind mee.
   tekenStrepen(c) {
     const z = this.zoom, wr = this.wr;
     const a = smooth(DREMPEL.streep, DREMPEL.streep + 0.8, z) * (1 - smooth(6, 7.5, z)) * this.dagA * (1 - smooth(0.55, 0.85, wr.wolken)) * (wr.regen < 0.2 ? 1 : 0.3);
@@ -477,13 +489,16 @@ export class HemelLaag {
       if (sterk < 0.02) continue;
       const br = 0.35 + leeftijd * 0.022;
       n++;
+      // C12: van bovenaf is een oude streep een dunne draad, geen brede lichte baan over de grond: hooguit
+      // STREEP_MAX_PX schermpixels breed (de vervaging naar binnen komt uit de lagen en de alfa, niet uit de breedte)
+      const maxB = STREEP_MAX_PX * pix;
       // schaduw: hoog boven de grond, dus ver naar het zuidoosten en heel zacht
       const so = 14;
       for (let laag = 0; laag < 4; laag++) {
         const schaduw = laag === 0;
         c.globalAlpha = schaduw ? sterk * 0.07 : laag === 1 ? sterk * 0.16 : laag === 2 ? sterk * 0.32 : sterk * 0.5 * (1 - smooth(0.2, 0.6, u));
         c.strokeStyle = schaduw ? '#000' : '#f6f8fb';
-        c.lineWidth = Math.max(pix, schaduw ? br * 1.4 : laag === 1 ? br * 2.4 : laag === 2 ? br * 1.2 : br * 0.35);
+        c.lineWidth = Math.min(maxB, Math.max(pix * 0.5, schaduw ? br * 1.4 : laag === 1 ? br * 2.4 : laag === 2 ? br * 1.2 : br * 0.35));
         const ox = schaduw ? so * SX : 0, oy = schaduw ? so * SY : 0;
         c.beginPath();
         for (let i = 0; i <= 6; i++) {
@@ -511,7 +526,7 @@ export class HemelLaag {
     const avond = smooth(0.17, 0.21, fase) * (1 - smooth(0.31, 0.35, fase));
     const a = avond * smooth(DREMPEL.zwerm, DREMPEL.zwerm + 0.8, this.zoom);
     if (a < 0.02) return;
-    const t = this.t, pix = this.pix, z = this.zoom, dag = this.state.dag ?? 0;
+    const t = this.t, pix = this.pix, z = this.zoom, dag = this.vd;
     let nz = 0, nb = 0;
     for (let p = 0; p < this.zwermPlekken.length && nz < PLAFOND.zwermen; p++) {
       const pl = this.zwermPlekken[p];
@@ -558,9 +573,11 @@ export class HemelLaag {
   // Een geel vliegtuigje dat in banen laag over een akker scheert en een nevel achter zich laat.
   tekenSproeiers(c) {
     const sz = this.sz;
-    if (!this.droog || this.wnd.kracht > 0.65 || sz.lente + sz.zomer < 0.45 || this.dagA < 0.05 || !this.basis) return;
-    const geo = this.geo, Tw = geo.T, t = this.t, dag = this.state.dag ?? 0, z = this.zoom;
-    const a = smooth(DREMPEL.sproeier, DREMPEL.sproeier + 0.6, z) * this.dagA;
+    // C11: bij aantrekkende wind of buiten het groeiseizoen vervagen ze (geen harde grens waarop ze in één beeld uitgaan)
+    const wS = smooth(0.65, 0.58, this.wnd.kracht) * smooth(0.45, 0.55, sz.lente + sz.zomer);
+    if (!this.droog || wS * this.dagA < 0.02 || !this.basis) return;
+    const geo = this.geo, Tw = geo.T, t = this.t, dag = this.vd, z = this.zoom;
+    const a = smooth(DREMPEL.sproeier, DREMPEL.sproeier + 0.6, z) * this.dagA * wS;
     const k0 = Math.max(0, Math.floor(this.wx0 / Tw)), k1 = Math.min(geo.kol - 1, Math.floor(this.wx1 / Tw));
     const r0 = Math.max(0, Math.floor(this.wy0 / Tw)), r1 = Math.min(geo.rij - 1, Math.floor(this.wy1 / Tw));
     let n = 0;
@@ -613,11 +630,13 @@ export class HemelLaag {
 
   tekenStranden(c) {
     const sz = this.sz, kr = this.wnd.kracht;
-    if (!this.droog || this.storm || kr < 0.42 || sz.winter > 0.45 || this.dagA < 0.05) return;
-    const geo = this.geo, Tw = geo.T, t = this.t, dag = this.state.dag ?? 0, z = this.zoom, pix = this.pix, bezet = this.state.bezet;
+    // C11: als de wind gaat liggen of de winter komt, vervagen ze in plaats van in één beeld te verdwijnen
+    const wA = smooth(0.36, 0.44, kr) * smooth(0.5, 0.42, sz.winter);
+    if (!this.droog || this.storm || wA * this.dagA < 0.02) return;
+    const geo = this.geo, Tw = geo.T, t = this.t, dag = this.vd, z = this.zoom, pix = this.pix, bezet = this.state.bezet;
     const wx = this.windX, wy = this.windY;
-    const aV = smooth(DREMPEL.vlieger - 0.5, DREMPEL.vlieger + 0.3, z) * this.dagA;
-    const aK = smooth(DREMPEL.kiter - 0.5, DREMPEL.kiter + 0.3, z) * this.dagA;
+    const aV = smooth(DREMPEL.vlieger - 0.5, DREMPEL.vlieger + 0.3, z) * this.dagA * wA;
+    const aK = smooth(DREMPEL.kiter - 0.5, DREMPEL.kiter + 0.3, z) * this.dagA * wA;
     const k0 = Math.max(0, Math.floor(this.wx0 / Tw) - 1), k1 = Math.min(geo.kol - 1, Math.floor(this.wx1 / Tw) + 1);
     const r0 = Math.max(0, Math.floor(this.wy0 / Tw) - 1), r1 = Math.min(geo.rij - 1, Math.floor(this.wy1 / Tw) + 1);
     let nv = 0, nk = 0;
@@ -654,8 +673,8 @@ export class HemelLaag {
   tekenBanier(c) {
     const sz = this.sz;
     if (sz.zomer < 0.4 || !this.droog || this.storm || this.dagA < 0.3 || !this.stranden.length) return;
-    const geo = this.geo, Tw = geo.T, t = this.t, z = this.zoom, pix = this.pix, dag = this.state.dag ?? 0;
-    const a = smooth(DREMPEL.banier - 0.5, DREMPEL.banier + 0.4, z) * smooth(0.3, 0.6, this.dagA);
+    const geo = this.geo, Tw = geo.T, t = this.t, z = this.zoom, pix = this.pix, dag = this.vd;
+    const a = smooth(DREMPEL.banier - 0.5, DREMPEL.banier + 0.4, z) * smooth(0.3, 0.6, this.dagA) * smooth(0.4, 0.5, sz.zomer);
     for (let i = 0; i < this.stranden.length && this.n.banieren < PLAFOND.banieren; i++) {
       const st = this.stranden[i];
       if (hash(st.t, dag, 601) > 0.1) continue;
@@ -810,7 +829,7 @@ export class HemelLaag {
   // Een transportvliegtuig gaat over, een stick springt eruit, de koepels klappen open en zakken naar de landingsplek.
   tekenParachutes(c) {
     if (!this.droog || this.storm || this.dagA < 0.05 || !this.kazernes.length) return;
-    const t = this.t, z = this.zoom, pix = this.pix, dag = this.state.dag ?? 0, bezet = this.state.bezet;
+    const t = this.t, z = this.zoom, pix = this.pix, dag = this.vd, bezet = this.state.bezet;
     const a = smooth(DREMPEL.parachute - 0.5, DREMPEL.parachute + 0.4, z) * this.dagA;
     const wx = this.windX, wy = this.windY;
     let nz = 0, np = 0, nd = 0;
@@ -905,7 +924,7 @@ export class HemelLaag {
   // Een koppel duiven dat rondjes draait boven een woonwijk, af en toe in een acht.
   tekenDuiven(c) {
     if (!this.droog || this.storm || this.dagA < 0.05 || !this.wijken.length) return;
-    const geo = this.geo, Tw = geo.T, t = this.t, z = this.zoom, pix = this.pix, dag = this.state.dag ?? 0;
+    const geo = this.geo, Tw = geo.T, t = this.t, z = this.zoom, pix = this.pix, dag = this.vd;
     const a = smooth(DREMPEL.duif - 0.5, DREMPEL.duif + 0.4, z) * this.dagA;
     let n = 0;
     for (let i = 0; i < this.wijken.length && n < PLAFOND.duiven; i++) {
@@ -953,7 +972,7 @@ export class HemelLaag {
   tekenBezorging(c) {
     if (this.storm || this.wr.onweer > 0.05) return;
     const s = this.state, geo = this.geo, Tw = geo.T, t = this.t, z = this.zoom, pix = this.pix;
-    const a = smooth(DREMPEL.drone - 0.5, DREMPEL.drone + 0.4, z);
+    const a = smooth(DREMPEL.drone - 0.5, DREMPEL.drone + 0.4, z) * smooth(0.86, 0.8, this.wnd.kracht) * smooth(0.05, 0.02, this.wr.onweer); // vervagen bij storm en onweer
     let n = 0;
     for (let i = 0; i < s.landen.length && n < PLAFOND.bezorgdrones; i++) {
       if (this.oorlog[i] || this.welvaart[i] < 0.6) continue;
@@ -1031,8 +1050,8 @@ export class HemelLaag {
   // Van de bergen af: schermen die langzaam rondjes draaien in de stijgwind en met de wind het dal in zakken.
   tekenParagliders(c) {
     if (!this.droog || this.wnd.kracht > 0.7 || this.dagA < 0.05 || this.wr.wolken > 0.85) return;
-    const t = this.t, z = this.zoom, pix = this.pix, dag = this.state.dag ?? 0, wx = this.windX, wy = this.windY;
-    const a = smooth(DREMPEL.paraglider - 0.3, DREMPEL.paraglider + 0.4, z) * this.dagA * (1 - 0.5 * this.sz.winter);
+    const t = this.t, z = this.zoom, pix = this.pix, dag = this.vd, wx = this.windX, wy = this.windY;
+    const a = smooth(DREMPEL.paraglider - 0.3, DREMPEL.paraglider + 0.4, z) * this.dagA * (1 - 0.5 * this.sz.winter) * smooth(0.7, 0.63, this.wnd.kracht) * smooth(0.85, 0.78, this.wr.wolken);
     let n = 0;
     for (let p = 0; p < this.bergPlekken.length && n < PLAFOND.paragliders; p++) {
       const b = this.bergPlekken[p];
@@ -1097,8 +1116,8 @@ export class HemelLaag {
   tekenZweefvliegers(c) {
     const sz = this.sz, wr = this.wr;
     if (sz.zomer < 0.35 || !this.droog || this.dagA < 0.3 || wr.wolken > 0.75 || this.storm) return;
-    const t = this.t, z = this.zoom, pix = this.pix, dag = this.state.dag ?? 0, wx = this.windX, wy = this.windY;
-    const a = smooth(DREMPEL.zweef - 0.5, DREMPEL.zweef + 0.4, z) * smooth(0.3, 0.6, this.dagA) * smooth(0.35, 0.55, sz.zomer);
+    const t = this.t, z = this.zoom, pix = this.pix, dag = this.vd, wx = this.windX, wy = this.windY;
+    const a = smooth(DREMPEL.zweef - 0.5, DREMPEL.zweef + 0.4, z) * smooth(0.3, 0.6, this.dagA) * smooth(0.35, 0.55, sz.zomer) * smooth(0.75, 0.68, wr.wolken);
     let n = 0, ns = 0;
     for (let p = 0; p < this.thermiek.length && n < PLAFOND.zweefvliegers; p++) {
       const th = this.thermiek[p];
@@ -1169,7 +1188,7 @@ export class HemelLaag {
     if (this.storm || this.wr.onweer > 0.05 || this.wr.regen > 0.4) return;
     const s = this.state, geo = this.geo, Tw = geo.T, t = this.t, z = this.zoom;
     const jd = this.sz.dagInJaar, feest = jd >= 360 || jd <= 1;
-    const a = smooth(DREMPEL.luchtschip - 0.5, DREMPEL.luchtschip + 0.5, z);
+    const a = smooth(DREMPEL.luchtschip - 0.5, DREMPEL.luchtschip + 0.5, z) * smooth(0.86, 0.8, this.wnd.kracht) * smooth(0.05, 0.02, this.wr.onweer) * smooth(0.4, 0.3, this.wr.regen);
     let n = 0;
     for (let i = 0; i < s.landen.length && n < PLAFOND.luchtschepen; i++) {
       if (this.oorlog[i] || !(this.welvaart[i] > 1.12 || feest)) continue;

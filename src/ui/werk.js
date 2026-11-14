@@ -20,7 +20,7 @@
 // voor grens.js, en paden, hutten en liften van natuur.js worden ontweken.
 
 import { seizoen, weer, wind } from './seizoen.js';
-import { maakBasis, TerreinLaag, kenmerkenVoorTegel } from './terrein.js';
+import { maakBasis, TerreinLaag, kenmerkenVoorTegel, KENMERK, perceelHoek } from './terrein.js';
 
 // ---------- gedeelde hulpjes (eigen kopie, zie inzoom-spec §0) ----------
 
@@ -30,6 +30,9 @@ const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 const frac = (v) => v - Math.floor(v);
 const tri = (v) => 1 - Math.abs(1 - 2 * frac(v));
 const TAU = Math.PI * 2;
+// Hoek van a naar b over de kortste kant, deel w (0..1) van de weg.
+const wrapHoek = (a) => (frac(a / TAU + 0.5) - 0.5) * TAU;
+const hoekNaar = (a, b, w) => a + wrapHoek(b - a) * w;
 const S = 0.566; // schaduwlengte per hoogte-eenheid (zon op ~45° in het noordwesten, zelfde als infra.js en kust.js)
 
 // Canvasfabriek: in de browser een echt canvas, in tests een nep. Raakt document pas aan als er gebakken wordt.
@@ -57,7 +60,7 @@ const INFRA = 1, GEBOUW = 2, WERK = 4, GRENS = 8, NATUUR = 16;
 const ALLES = INFRA | GEBOUW | WERK | GRENS | NATUUR;
 
 // percelen en kenmerken uit terrein.js (zelfde nummering)
-const PERCEEL = 6, BOERDERIJ = 11, BAAL = 14, STAP = 6;
+const PERCEEL = 6, BOERDERIJ = 11, BAAL = 14, BERGMEER = 16, STAP = 6;
 const GRAAN = 0, GROEN = 1, PLOEG = 2, KOOLZAAD = 3, WEI = 4, BOOMGAARD = 5, WIJN = 6, KAS = 7, MAIS = 8, BRAAK = 9;
 const HAAGRAND = 0;
 
@@ -65,22 +68,44 @@ const HAAGRAND = 0;
 const R_PLOEG = 1, R_ZAAI = 2, R_SPROEI = 4, R_BALEN = 8, R_KUIL = 16, R_MEST = 32, R_BOL = 64, R_PLUK = 128, R_DRUIF = 256, R_KAS = 512, R_SCHRIK = 1024, R_HEK = 2048, R_STOPPEL = 4096, R_BIJ = 8192;
 
 // voertuigen: soort, aanbouw en lading
-const TREKKER = 0, VRACHT = 1, BESTEL = 2, DUMPER = 3, SMALSPOOR = 4;
-const A_GEEN = 0, A_PLOEG = 1, A_ZAAI = 2, A_PERS = 3, A_SCHUIF = 4, A_KISTEN = 5;
-const L_GEEN = 0, L_MELK = 1, L_GRAAN = 2, L_HOUT = 3, L_GROND = 4;
-const VW = 11; // x, y, hx, hy, soort, kleur, aanbouw, lading, schaal, -, -
+const TREKKER = 0, VRACHT = 1, BESTEL = 2, DUMPER = 3, SMALSPOOR = 4, MAAIER = 5;
+const A_GEEN = 0, A_PLOEG = 1, A_ZAAI = 2, A_PERS = 3, A_SCHUIF = 4, A_KISTEN = 5, A_MAAI = 6, A_WAGEN = 7, A_MAAIBALK = 8;
+const L_GEEN = 0, L_MELK = 1, L_GRAAN = 2, L_HOUT = 3, L_GROND = 4, L_BALEN = 5;
+const VW = 11; // x, y, hx, hy, soort, kleur, aanbouw, lading, schaal, dekking (0..1), hoe vol (0..1)
 const TREKKER_KLEUR = ['#3d7a3a', '#b8322a', '#2f5c9a', '#d98a1f'];
 const WAGEN_KLEUR = ['#e8e6df', '#2f5d8a', '#7a2a24', '#d9d4c4'];
 const DUMPER_KLEUR = '#d9a41f';
-const KLEUREN = [...TREKKER_KLEUR, ...WAGEN_KLEUR, DUMPER_KLEUR];
+const MAAIER_KLEUR = ['#3f8a3a', '#c8402e'];
+const KLEUREN = [...TREKKER_KLEUR, ...WAGEN_KLEUR, DUMPER_KLEUR, ...MAAIER_KLEUR];
+const K_MAAIER = TREKKER_KLEUR.length + WAGEN_KLEUR.length + 1; // eerste kleur van de maaidorsers in KLEUREN
+
+// Samenhang (C11): een speldag duurt op tempo 1 één seconde, de lichtcyclus drie minuten. Werk op het land loopt
+// daarom op een doorlopende dag (dagF: de speldag plus het deel dat er al van verstreken is) en rijdt in eenheden
+// per dag. Machines komen over een vaste route van het erf of van de weg en gaan daarlangs terug; wat op de akker
+// verandert, verandert achter de machine. Tussen dag en nacht en tussen seizoenen gaat alles geleidelijk.
+const RIJ = 5; // rijsnelheid over erf, veldweg en land, eenheden per speldag (een auto van leven.js rijdt op tempo 1 zo'n 19)
+const V_PLOEG = 1.1, V_ZAAI = 1.5, V_MAAI = 1.0, V_PERS = 1.4, V_RAAP = 1.8, V_KUIL = 1.3; // werksnelheid op de akker
+const MAX_DUUR = { ploeg: 28, zaai: 14, maai: 8, pers: 8, raap: 8, kuil: 6 }; // grote percelen gaan sneller
+const BRON_GEEN = 0, BRON_ERF = 1, BRON_WEG = 2;
+// taken op een perceel (de soort machine en wat er achter hem verandert)
+const T_PLOEG = 1, T_ZAAI = 2, T_MAAI = 3, T_PERS = 4, T_RAAP = 5, T_KMAAI = 6, T_KPERS = 7, T_KRAAP = 8, T_BRENG = 9, T_PLUK = 10, T_DRUIF = 11;
+// wat een perceel bij een nieuwe keuze houdt als het precies zo blijft liggen (kiesRoutes)
+const VAST_VELD = ['lx', 'ly', 'px', 'py', 'e0x', 'e0y', 'x0x', 'x0y', 'pkx', 'pky', 'pkhx', 'pkhy', 'pax', 'pay', 'route', 'rn', 'rlen', 'bron', 'taken', 'metPers'];
+const TAAK = 5; // per taak in v.taken: soort, begin van het werk (dag in het jaar), duur, rijtijd heen, rijtijd terug (dagen)
+// Plek van de geparkeerde trekker op het erf en de uitgang naar het noorden (erfcoördinaten u langs co, v dwars).
+const ERF_P = [0.55, -1.25], ERF_N = [0.55, -2.15];
+// het kippenhok in de hoek van het erf, naast de moestuin
+const ERF_HOK = [-2.0, 1.3];
+// Lichtfase uit de klok, precies als tekenNacht in map.js; 0 is midden op de dag, 0,5 middernacht.
+const faseOp = (nu) => ((nu / 1000) % 180) / 180;
 const BOL_KLEUR = ['#d8322a', '#f2c94c', '#f08cb4', '#8a4fb0', '#f4f1ea', '#ef7d2a'];
 const KLEDING = ['#c0392b', '#2e86c1', '#f0b429', '#ecefe9', '#34495e', '#2f9e5b', '#e07a2a'];
 const KIP_KLEUR = ['#f2efe6', '#a8643a', '#2a2622'];
 const HOND_KLEUR = ['#5a3e2a', '#1f1c1a', '#c9a46a'];
 const KAST_KLEUR = ['#e8d27a', '#6f9fc0', '#e6e2d6', '#c8664a'];
 const JAK_KLEUR = ['#c8a03a', '#3f5f7a', '#8a3a2a'];
-const AK = ['', '#5f6468', '#4f6f8a', '#c8402e', '#e08a1a', '#8a6a48']; // aanbouw: ploeg, zaaimachine, pers, schuif, kistenwagen
-const LK = ['', '#cfd3d6', '#d9b84a', '#7a5a3a', '#8a7058']; // lading: melk, graan, hout, grond
+const AK = ['', '#5f6468', '#4f6f8a', '#c8402e', '#e08a1a', '#8a6a48', '#d9b020', '#7a6448', '#6a6e72']; // aanbouw: ploeg, zaaimachine, pers, schuif, kistenwagen, maaibord, balenwagen, maaibalk
+const LK = ['', '#cfd3d6', '#d9b84a', '#7a5a3a', '#8a7058', '#d6b85a']; // lading: melk, graan, hout, grond, balen
 const BAAL_KLEUR = ['#d6b85a', '#dcc06a', '#eef0ea', '#dfe8dc']; // rond stro, pak stro, kuil wit, kuil licht
 
 // lichtsoorten
@@ -93,6 +118,13 @@ function stip(c, x, y, r) { c.moveTo(x + r, y); c.arc(x, y, r, 0, TAU); }
 function rechthoek(c, x, y, hx, hy, l, w) {
   const px = -hy * w, py = hx * w, lx = hx * l, ly = hy * l;
   c.moveTo(x + lx + px, y + ly + py); c.lineTo(x + lx - px, y + ly - py); c.lineTo(x - lx - px, y - ly - py); c.lineTo(x - lx + px, y - ly + py); c.closePath();
+}
+
+// Lengte van een polylijn [x0, y0, x1, y1, ...] (de eerste n punten).
+function padLengte(pts, n = pts.length / 2) {
+  let l = 0;
+  for (let i = 1; i < n; i++) l += Math.hypot(pts[i * 2] - pts[i * 2 - 2], pts[i * 2 + 1] - pts[i * 2 - 1]);
+  return l;
 }
 
 // Maat van gebakken bitmaps in stappen van een kwart octaaf (pixels per wereldeenheid).
@@ -217,6 +249,7 @@ export class WerkLaag {
 
   leeg() {
     this.velden = []; this.erven = []; this.kaal = []; this.zagerijen = []; this.groeven = []; this.jaknikkers = []; this.plekLijst = [];
+    this.zoekKaart = false; // de zoekkaart voor routes over het land hoort bij deze wereld
   }
 
   nul() {
@@ -239,6 +272,7 @@ export class WerkLaag {
     this.cache.clear();
     this.laatste.clear();
     this.bytes = 0;
+    this.vorigPlan = null; // routes en werkplannen van de vorige keuze (alleen binnen deze toestand)
   }
 
   // ---------- opzoeken ----------
@@ -302,10 +336,11 @@ export class WerkLaag {
       for (let j = 0; j < l.plaatsingen.length; j++) somT += l.plaatsingen[j].t;
       for (let j = 0; j < (l.bouw?.length ?? 0); j++) somT += l.bouw[j].tegel * 7;
     }
-    const inf = view.infraLaag;
-    const sig = `${s.grensVersie}|${nP}|${somT}|${s.landen.length}|${inf ? inf.sig : '-'}`;
+    const inf = view.infraLaag, net = view.wegennet?.versie > 0 ? view.wegennet : null;
+    const sig = `${s.grensVersie}|${nP}|${somT}|${s.landen.length}|${inf ? inf.sig : '-'}|${net?.versie ?? '-'}`;
     if (sig === this.sig) return;
     this.sig = sig;
+    this.net = net && typeof net.wegen === 'function' ? net : null;
     this.kies(inf, view.natuurLaag);
   }
 
@@ -322,6 +357,8 @@ export class WerkLaag {
     this.kiesZagerijen();
     this.kiesErven();
     this.kiesVelden();
+    this.kiesRoutes();
+    this.kiesErfritten();
     this.kiesBos();
   }
 
@@ -359,6 +396,18 @@ export class WerkLaag {
     this.kaartWegen = [];
     this.alleWegen = [];
     for (const w of inf?.wegen ?? []) this.alleWegen.push(w.ax, w.ay, w.bx, w.by);
+    // C12: is er een wegennet, dan is dat de enige bron: elk stuk met zijn eigen breedte plus berm, en geen
+    // sterlijnen van elk gebouw naar een knooppunt meer
+    if (this.net) {
+      const PROF = [0.07, 0.12, 0.14, 0.16, 0.1];
+      for (const w of this.net.wegen()) {
+        const half = ((PROF[w.klasse] ?? 0.14) / 2 + 0.05) * Tw;
+        this.merkLijn(w.ax, w.ay, w.bx, w.by, half, INFRA);
+        this.kaartWegen.push(w.ax, w.ay, w.bx, w.by);
+        this.alleWegen.push(w.ax, w.ay, w.bx, w.by);
+      }
+      return;
+    }
     for (const land of s.landen) {
       const knoop = [geo.hoofdstad[land.idx]];
       for (const p of land.plaatsingen) if (p.t >= 0 && P.gebouwIndex[p.g].knooppunt) knoop.push(p.t);
@@ -529,7 +578,8 @@ export class WerkLaag {
         const x = tg.x + f[p + 1], y = tg.y + f[p + 2], hoek = f[p + 5], co = Math.cos(hoek), si = Math.sin(hoek);
         if (!this.vrijVlak(x, y, co, si, 2.4, 1.9, INFRA | GEBOUW | GRENS | WERK | NATUUR)) continue;
         const op = (u, v) => [x + u * co - v * si, y + u * si + v * co];
-        const e = { x, y, co, si, t, z: hash(t, 731), hooi: null, laan: null, molen: hash(t, 732) < 0.4, kippen: hash(t, 733) < 0.8 ? 3 + Math.floor(hash(t, 734) * 5) : 0, hond: hash(t, 735) < 0.6, lamp: hash(t, 736) < 0.75, schuif: false };
+        const e = { x, y, co, si, t, z: hash(t, 731), hooi: null, laan: null, molen: hash(t, 732) < 0.4, kippen: hash(t, 733) < 0.8 ? 3 + Math.floor(hash(t, 734) * 5) : 0, hond: hash(t, 735) < 0.6, lamp: hash(t, 736) < 0.75, schuif: false, velden: [], rit: -1, ritSoort: 0, schuifAan: false };
+        e.px = x + ERF_P[0] * co - ERF_P[1] * si; e.py = y + ERF_P[0] * si + ERF_P[1] * co;
         e.hondKleur = Math.floor(hash(t, 737) * HOND_KLEUR.length);
         // hooiberg net buiten het erf, niet onder een boomkruin
         if (hash(t, 738) < 0.65) {
@@ -541,27 +591,29 @@ export class WerkLaag {
             break;
           }
         }
-        // erfweg: recht naar een weg in de buurt (de dichtste die past), over droog en vrij land, niet onder bomen
+        // erfweg: recht naar een weg in de buurt (de dichtste die past, tot 60 eenheden ver), over droog en vrij land,
+        // niet onder bomen; hij sluit aan op de rand van de weg, zodat wagens van de weg af het erf op rijden
         const kw = this.alleWegen, kand = this.laanKand ?? (this.laanKand = []);
         kand.length = 0;
         for (let i = 0; i < kw.length; i += 4) {
           const ax = kw[i], ay = kw[i + 1], bx = kw[i + 2], by = kw[i + 3];
-          if (x < Math.min(ax, bx) - 30 || x > Math.max(ax, bx) + 30 || y < Math.min(ay, by) - 30 || y > Math.max(ay, by) + 30) continue;
+          if (x < Math.min(ax, bx) - 60 || x > Math.max(ax, bx) + 60 || y < Math.min(ay, by) - 60 || y > Math.max(ay, by) + 60) continue;
           const lx = bx - ax, ly = by - ay, ll = lx * lx + ly * ly || 1;
           // het dichtste punt, en anders punten ernaast: de weg buiten de bebouwing telt, niet het stuk tussen de huizen
           const u0 = clamp(((x - ax) * lx + (y - ay) * ly) / ll, 0.1, 0.9);
           for (let j = 0; j < 5; j++) {
             const u = clamp(u0 + (j === 0 ? 0 : (j & 1 ? 1 : -1) * Math.ceil(j / 2) * 0.12), 0.06, 0.94), qx = ax + lx * u, qy = ay + ly * u, d = Math.hypot(qx - x, qy - y);
-            if (d >= 30 || d <= 4.5) continue;
+            if (d >= 60 || d <= 4.5) continue;
             const tq = this.tegel(qx, qy);
             if (s.bezet[tq] || this.soort[tq] || !this.vrij(qx, qy, 1.2, GEBOUW)) continue;
-            kand.push([d, qx, qy]);
+            const wl = Math.sqrt(ll);
+            kand.push([d, qx, qy, lx / wl, ly / wl]);
             break;
           }
         }
         kand.sort((p1, p2) => p1[0] - p2[0] || p1[1] - p2[1]);
         for (let ki = 0; ki < kand.length && ki < 6 && !e.laan; ki++) {
-          const [d, qx, qy] = kand[ki], dx = (qx - x) / d, dy = (qy - y) / d;
+          const [d, qx, qy, rx, ry] = kand[ki], dx = (qx - x) / d, dy = (qy - y) / d;
           const ax = x + dx * 2.2, ay = y + dy * 2.2, bx = qx - dx * 1.9, by = qy - dy * 1.9, len = Math.hypot(bx - ax, by - ay);
           let ok = len > 1.5 && !s.bezet[this.tegel(bx, by)] && !this.soort[this.tegel(bx, by)];
           const nk = Math.ceil(len);
@@ -572,7 +624,7 @@ export class WerkLaag {
             else if (!this.vrij(px, py, 0.4, INFRA | GEBOUW | GRENS | NATUUR)) ok = false;
           }
           if (!ok) continue;
-          e.laan = { ax, ay, bx, by, len, dx, dy };
+          e.laan = { ax, ay, bx, by, len, dx, dy, qx, qy, rx, ry };
           e.schuif = hash(t, 740) < 0.4;
           this.merkLijn(ax, ay, bx, by, 0.6, WERK);
           this.plek('erfweg', (ax + bx) / 2, (ay + by) / 2);
@@ -610,18 +662,20 @@ export class WerkLaag {
       for (let dr = -1; dr <= 1; dr++) for (let dk = -1; dk <= 1; dk++) { const k = tg.k + dk, r = tg.r + dr; if (k >= 0 && r >= 0 && k < geo.kol && r < geo.rij && b.akker[r * geo.kol + k]) akkerBuur = true; }
       if (!akkerBuur) continue;
       const f = kenmerkenVoorTegel(tg, b);
-      const hoek = hash(tg.eig, 9) * Math.PI, co = Math.cos(hoek), si = Math.sin(hoek);
       for (let p = 0, q = 0; p < f.length; p += STAP, q++) {
         if (f[p] !== PERCEEL) continue;
+        // de hoek van het perceel: langs een weg die van de weg (C12), anders het akkerrooster van het land
+        const hoek = perceelHoek(tg, f, p), co = Math.cos(hoek), si = Math.sin(hoek);
         const x = tg.x + f[p + 1], y = tg.y + f[p + 2], hu = f[p + 3], hv = f[p + 5], code = f[p + 4];
-        const soort = code & 15, dwars = (code & 16) !== 0, rand = code >> 5;
+        const soort = code & 15, dwars = (code & 16) !== 0, rand = (code >> 5) & 7;
         const h = hash(t, q, 501), h2 = hash(t, q, 502);
-        let rol = 0;
+        let rol = 0, balen = false;
         if (soort === GRAAN) {
           rol |= R_STOPPEL;
-          let balen = false;
           for (let k = 0; k < f.length; k += STAP) if (f[k] === BAAL && Math.abs((f[k + 1] + tg.x - x) * co + (f[k + 2] + tg.y - y) * si) < hu && Math.abs(-(f[k + 1] + tg.x - x) * si + (f[k + 2] + tg.y - y) * co) < hv) balen = true;
-          if (!balen && h < 0.6) rol |= R_BALEN;
+          // de balen van terrein.js op dit graan neemt deze laag over (terrein.js laat ze dan weg): de pers maakt ze
+          // achter de maaidorser en een trekker met een wagen haalt ze weer op
+          if (balen || h < 0.35) rol |= R_BALEN;
           if (h2 < 0.2) rol |= R_SCHRIK;
         } else if (soort === WEI) {
           if (h < 0.42) rol |= R_KUIL;
@@ -678,14 +732,597 @@ export class WerkLaag {
         }
         // rijrichting zoals de gewasrijen in terrein.js
         const lx = dwars ? -si : co, ly = dwars ? co : si, L = dwars ? hv : hu, B = dwars ? hu : hv;
-        const nL = Math.max(2, Math.floor((2 * B) / 1.05));
-        const v = { x, y, co, si, hu, hv, lx, ly, px: -ly, py: lx, L, B, nL, soort, rol, h, h2, h3: hash(t, q, 503), id: t * 64 + q, t, ruit };
+        // een even aantal banen: de machine eindigt aan de kant waar hij begon, bij de route naar huis
+        // (op een kort perceel smallere banen, zodat de bocht aan de kopakker binnen de rand blijft)
+        let nL = Math.max(2, Math.floor((2 * B) / 1.05), Math.ceil(B / Math.max(0.15, L - 0.46)));
+        nL += nL & 1;
+        const bw = (2 * B) / nL, r = bw / 2, Lp = Math.max(0.1, L - r - 0.36), pre = Math.min(r + 0.26, Math.max(0, L - Lp - 0.05));
+        const v = { x, y, co, si, hu, hv, lx, ly, px: -ly, py: lx, olx: lx, oly: ly, L, B, nL, bw, r, Lp, pre, padLen: nL * 2 * Lp + (nL - 1) * Math.PI * r + 2 * pre, soort, rol, h, h2, h3: hash(t, q, 503), id: t * 64 + q, t, ruit, balen, taken: null, route: null, rn: 0, rlen: 0, bron: BRON_GEEN, erf: null, akt: new Int8Array(4), nAkt: 0, wDag: -1, droogHier: false };
         this.velden.push(v);
         if (rol & ~(R_KAS | R_HEK)) this.merk(x, y, Math.min(hu, hv), WERK);
         const naam = rol & R_BOL ? 'bollen' : rol & R_BALEN ? 'balen' : rol & R_KUIL ? 'kuilbalen' : rol & R_PLOEG ? 'ploegen' : rol & R_SPROEI ? 'sproeier' : rol & R_PLUK ? 'boomgaard' : rol & R_DRUIF ? 'wijngaard' : rol & R_KAS ? 'kas' : rol & R_MEST ? 'mest' : rol & R_ZAAI ? 'zaaien' : rol & R_HEK ? 'hek' : 'veld';
         this.plek(naam, x, y);
       }
     }
+  }
+
+  // ---------- routes en werkplan (samenhang: machines komen ergens vandaan en gaan ergens heen) ----------
+
+  // Is de rechte lijn van (ax, ay) naar (bx, by) te berijden: droog, geen gebouw, grens of bebouwde tegel?
+  rijdbaar(ax, ay, bx, by, masker = GEBOUW | GRENS, bomen = false) {
+    const l = Math.hypot(bx - ax, by - ay), k = Math.max(1, Math.ceil(l / 0.8));
+    for (let j = 0; j <= k; j++) {
+      const x = ax + ((bx - ax) * j) / k, y = ay + ((by - ay) * j) / k;
+      if (!this.droog(x, y, 0.35) || !this.vrij(x, y, 0.15, masker) || (bomen && !this.tl.boomvrij(x, y, 0.2))) return false;
+    }
+    return true;
+  }
+  // Verbinding van a naar b: recht ([]), of met één hoek langs de richting van het perceel ([hx, hy]), of geen (null).
+  verbind(v, ax, ay, bx, by) {
+    if (this.rijdbaar(ax, ay, bx, by)) return [];
+    const dx = bx - ax, dy = by - ay;
+    for (let k = 0; k < 2; k++) {
+      const ux = k ? -v.oly : v.olx, uy = k ? v.olx : v.oly, t = dx * ux + dy * uy, hx = ax + ux * t, hy = ay + uy * t;
+      if (Math.abs(t) > 0.5 && this.rijdbaar(ax, ay, hx, hy) && this.rijdbaar(hx, hy, bx, by)) return [hx, hy];
+    }
+    return null;
+  }
+  rijdbaarPad(pts, van = 0) {
+    for (let i = van + 2; i + 1 < pts.length; i += 2) if (!this.rijdbaar(pts[i - 2], pts[i - 1], pts[i], pts[i + 1])) return false;
+    return true;
+  }
+  // Van de parkeerplek op het erf naar de rand van het erf aan de kant van (tx, ty): eerst naar het noorden de
+  // uitgang uit, dan om de gebouwen heen langs een hoek van het erf (erfcoördinaten zoals in terrein.js).
+  erfUit(e, tx, ty, pts) {
+    const op = (u, w) => pts.push(e.x + u * e.co - w * e.si, e.y + u * e.si + w * e.co);
+    const du = (tx - e.x) * e.co + (ty - e.y) * e.si, dw = -(tx - e.x) * e.si + (ty - e.y) * e.co;
+    op(ERF_P[0], ERF_P[1]); op(ERF_N[0], ERF_N[1]);
+    if (dw > -2.0) { const k = du >= 0 ? 1 : -1; op(2.8 * k, -2.15); if (dw > 2.2) op(2.8 * k, 2.25); }
+    return pts;
+  }
+  // Draai de banen zo dat de machine begint en eindigt in de hoek naar (hx, hy); zet het begin (e0) en het eind (x0).
+  richt(v, hx, hy) {
+    const dx = hx - v.x, dy = hy - v.y, lx = v.olx, ly = v.oly, px = -ly, py = lx;
+    const ss = dx * lx + dy * ly < 0 ? 1 : -1, qs = dx * px + dy * py < 0 ? 1 : -1;
+    v.lx = lx * ss; v.ly = ly * ss; v.px = px * qs; v.py = py * qs;
+    this.baan(v, 0); v.e0x = this.mx; v.e0y = this.my;
+    this.baan(v, 1); v.x0x = this.mx; v.x0y = this.my;
+  }
+  // Parkeerplek op het perceel voor de taken waarbij de machine blijft staan (haspel, plukwagen, druivenwagen).
+  parkeer(v) {
+    if (v.rol & R_PLUK) {
+      const nR = Math.max(1, Math.floor((2 * v.hv - 0.9) / 1.25)), rij = Math.floor(v.h * nR), w = -v.hv + 0.6 + rij * 1.25 + 0.62;
+      const u = clamp(v.hu - 1.75, -0.6 * v.hu, 0.6 * v.hu), ww = clamp(w, -0.7 * v.hv, 0.7 * v.hv); // ook in een kleine boomgaard op het perceel
+      v.pkx = v.x + v.co * u - v.si * ww; v.pky = v.y + v.si * u + v.co * ww; v.pkhx = v.co; v.pkhy = v.si;
+    } else if (v.rol & R_DRUIF) {
+      const s0 = clamp(v.L - 0.6, -0.6 * v.L, 0.6 * v.L), q0 = clamp(-v.B + 0.9, -0.6 * v.B, 0.6 * v.B);
+      v.pkx = v.x + v.lx * s0 + v.px * q0; v.pky = v.y + v.ly * s0 + v.py * q0; v.pkhx = -v.lx; v.pkhy = -v.ly;
+    } else {
+      // naast de haspel van de sproeier, aan de kopakker
+      const j = Math.floor(v.h * v.nL), q = -v.B + (j + 0.5) * v.bw;
+      const s0 = clamp(v.L - 1.25, -0.6 * v.L, 0.6 * v.L);
+      v.pkx = v.x + v.lx * s0 + v.px * q; v.pky = v.y + v.ly * s0 + v.py * q; v.pkhx = v.lx; v.pkhy = v.ly;
+    }
+  }
+
+  // Het werkplan van een perceel: per taak de soort, de dag waarop het werk begint en hoe lang het duurt (dagen).
+  // De rijtijden heen en terug komen er na de route bij (kiesRoutes).
+  plan(v) {
+    const T = [], len = v.padLen, rol = v.rol;
+    const zet = (soort, st, duur) => T.push(soort, st, duur, 0, 0);
+    if (rol & R_PLOEG) zet(T_PLOEG, 48 + Math.floor(v.h * 50), Math.min(MAX_DUUR.ploeg, len / V_PLOEG));
+    if (rol & R_ZAAI) zet(T_ZAAI, 100 + Math.floor(v.h2 * 36), Math.min(MAX_DUUR.zaai, len / V_ZAAI));
+    if (rol & R_STOPPEL) {
+      const st = 205 + Math.floor(v.h * 36), dM = Math.min(MAX_DUUR.maai, len / V_MAAI);
+      zet(T_MAAI, st, dM);
+      if (rol & R_BALEN) {
+        const dP = Math.min(MAX_DUUR.pers, len / V_PERS), sP = st + dM + 1.5;
+        zet(T_PERS, sP, dP);
+        zet(T_RAAP, sP + dP + 5, Math.min(MAX_DUUR.raap, len / V_RAAP));
+      }
+    }
+    if (rol & R_KUIL) {
+      const st = 140 + Math.floor(v.h * 34), dM = Math.min(MAX_DUUR.kuil, len / V_KUIL), dP = Math.min(MAX_DUUR.pers, len / V_PERS), sP = st + dM + 1.5;
+      zet(T_KMAAI, st, dM);
+      zet(T_KPERS, sP, dP);
+      zet(T_KRAAP, sP + dP + 12, Math.min(MAX_DUUR.raap, len / V_RAAP));
+    }
+    if (rol & R_SPROEI) { zet(T_BRENG, 150, 0.8); zet(T_BRENG, 246, 0.8); } // even stilstaan: de haspel afkoppelen of aanhaken
+    if (rol & R_PLUK) zet(T_PLUK, 222, 50);
+    if (rol & R_DRUIF) zet(T_DRUIF, 255, 37);
+    return Float32Array.from(T);
+  }
+
+  // Waar komen de machines van een perceel vandaan? Van het dichtste erf (de trekker staat daar geparkeerd en rijdt
+  // het erf af, eventueel over de veldweg), anders van de dichtste weg (hij draait van de weg af het land op), en
+  // pas als er niets in de buurt is vaagt hij in aan de kopakker.
+  kiesRoutes() {
+    const wegen = this.alleWegen ?? [], kand = [];
+    const park = (v) => {
+      if (!(v.rol & (R_PLUK | R_DRUIF | R_SPROEI))) return;
+      this.parkeer(v);
+      // aankomstrichting op de parkeerplek (van de kopakker af): daar draait hij bij aankomst en vertrek geleidelijk
+      const ax = v.pkx - v.e0x, ay = v.pky - v.e0y, al = Math.hypot(ax, ay);
+      v.pax = al > 0.05 ? ax / al : v.pkhx; v.pay = al > 0.05 ? ay / al : v.pkhy;
+    };
+    // Een perceel dat bij een nieuwe keuze (een nieuw gebouw ergens) precies zo blijft liggen, houdt zijn route en
+    // werkplan: een machine die al onderweg is, springt of verdwijnt dan niet. Alleen als de route nog vrij is.
+    const oud = this.vorigPlan, ervenT = this.ervenT ?? (this.ervenT = new Map());
+    ervenT.clear();
+    for (const e of this.erven) ervenT.set(e.t, e);
+    for (const v of this.velden) {
+      v.vast = false;
+      const c = oud && oud.get(v.id);
+      if (c && c.x === v.x && c.y === v.y && c.rol === v.rol && c.olx === v.olx && c.oly === v.oly) {
+        const e = c.erfT >= 0 ? ervenT.get(c.erfT) : null;
+        if ((c.erfT < 0 || (e && e.x === c.ex && e.y === c.ey)) && this.nogVrij(c)) {
+          for (let i = 0; i < VAST_VELD.length; i++) v[VAST_VELD[i]] = c[VAST_VELD[i]];
+          v.erf = e; v.vast = true;
+          if (e) e.velden.push(v);
+          continue;
+        }
+      }
+      v.taken = this.plan(v);
+      if (!v.taken.length) continue;
+      let keus = null, keusLen = Infinity, bron = BRON_GEEN, erf = null;
+      kand.length = 0;
+      for (const e of this.erven) { const d = Math.hypot(e.x - v.x, e.y - v.y); if (d < 45) kand.push([d, e]); }
+      kand.sort((a, b) => a[0] - b[0] || a[1].t - b[1].t);
+      for (let i = 0; i < kand.length && i < 3 && !keus; i++) {
+        const e = kand[i][1];
+        this.richt(v, e.px, e.py);
+        const pts = this.erfUit(e, v.e0x, v.e0y, []);
+        let goed = null;
+        if (this.rijdbaarPad(pts, 2)) { const n = pts.length, via = this.verbind(v, pts[n - 2], pts[n - 1], v.e0x, v.e0y); if (via) goed = pts.concat(via, [v.e0x, v.e0y]); }
+        if (e.laan && e.laan.dood) {
+          // over de doodlopende veldweg, als die korter is of de rechte weg geblokkeerd
+          const l = e.laan, via = this.erfUit(e, l.ax, l.ay, []), om = this.verbind(v, l.bx, l.by, v.e0x, v.e0y);
+          if (om) { via.push(l.ax, l.ay, l.bx, l.by, ...om, v.e0x, v.e0y); if (!goed || padLengte(via) < padLengte(goed)) goed = via; }
+        }
+        if (goed) { keus = goed; keusLen = padLengte(goed); bron = BRON_ERF; erf = e; }
+      }
+      // de dichtste wegen: langs elk wegstuk een afrit zoeken waar de machine recht het land op kan (niet tussen de
+      // huizen door); hij rijdt eerst een stuk over de weg en draait dan het land op
+      kand.length = 0;
+      for (let i = 0; i + 3 < wegen.length; i += 4) {
+        const ax = wegen[i], ay = wegen[i + 1], bx = wegen[i + 2], by = wegen[i + 3];
+        if (v.x < Math.min(ax, bx) - 46 || v.x > Math.max(ax, bx) + 46 || v.y < Math.min(ay, by) - 46 || v.y > Math.max(ay, by) + 46) continue;
+        const lx = bx - ax, ly = by - ay, ll = lx * lx + ly * ly || 1, u = clamp(((v.x - ax) * lx + (v.y - ay) * ly) / ll, 0, 1);
+        const d = Math.hypot(ax + lx * u - v.x, ay + ly * u - v.y);
+        if (d < 45) kand.push([d, i, u]);
+      }
+      kand.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+      let wq = null;
+      for (let i = 0; i < kand.length && i < 6 && !wq; i++) {
+        const w0 = kand[i][1], ax = wegen[w0], ay = wegen[w0 + 1], bx = wegen[w0 + 2], by = wegen[w0 + 3], wl = Math.hypot(bx - ax, by - ay);
+        if (wl < 1) continue;
+        const rx = (bx - ax) / wl, ry = (by - ay) / wl;
+        for (let j = 0; j < 15; j++) {
+          const u = kand[i][2] + ((j === 0 ? 0 : (j & 1 ? 1 : -1) * Math.ceil(j / 2)) * 3) / wl;
+          if (u < 0.02 || u > 0.98) continue;
+          const qx = ax + (bx - ax) * u, qy = ay + (by - ay) * u;
+          this.richt(v, qx, qy);
+          const dx = v.e0x - qx, dy = v.e0y - qy, d = Math.hypot(dx, dy);
+          if (d < 2.5 || d > 46) continue;
+          const sx = qx + (dx / d) * 1.7, sy = qy + (dy / d) * 1.7;
+          // de afrit zelf (van de wegrand het land op) mag niet door een huis aan de weg gaan
+          if (!this.rijdbaar(qx + (dx / d) * 0.2, qy + (dy / d) * 0.2, sx, sy)) continue;
+          const om = this.verbind(v, sx, sy, v.e0x, v.e0y);
+          if (!om) continue;
+          if (keus && keusLen < (d - 1.7) * 1.6 + 6) { wq = 'erf'; break; } // het erf is niet veel verder: dan van het erf
+          // een stuk weg ervoor (over de weg aanrijden), aan de kant waar de weg langer doorloopt, binnen dit wegstuk
+          const k = u * wl > (1 - u) * wl ? -1 : 1, ruimte = Math.min(5, k < 0 ? u * wl : (1 - u) * wl);
+          if (ruimte < 2) continue;
+          const aanx = qx + rx * k * ruimte, aany = qy + ry * k * ruimte;
+          keus = [aanx, aany, qx, qy, sx, sy, ...om, v.e0x, v.e0y]; keusLen = d; bron = BRON_WEG; erf = null; wq = [qx, qy];
+          break;
+        }
+      }
+      // geen rechte weg of weg met één hoek: dan over het land zoeken, om huizen, water, bomen en grenzen heen
+      let gezocht = false;
+      if (!keus) { const z = this.zoekRoute(v); if (z) { keus = z; bron = this.zBron; erf = this.zErf; gezocht = true; } }
+      // de banen definitief richten op waar de machine vandaan komt (een gezochte route heeft dat al gedaan)
+      if (gezocht) { /* al gericht */ }
+      else if (bron === BRON_ERF) this.richt(v, erf.px, erf.py);
+      else if (bron === BRON_WEG) this.richt(v, keus[2], keus[3]);
+      else this.richt(v, v.x - v.olx, v.y - v.oly);
+      park(v);
+      if (!keus) {
+        // geen erf of weg te bereiken: dan rijdt hij van het land ernaast de kopakker op (en vaagt daar in en uit)
+        keus = [v.e0x, v.e0y];
+        for (let k = 0; k < 4; k++) {
+          const ux = k & 1 ? -v.px : -v.lx, uy = k & 1 ? -v.py : -v.ly, sg = k & 2 ? -1 : 1, ax = v.e0x + ux * sg * 4, ay = v.e0y + uy * sg * 4;
+          if (sg < 0 && !(k & 1)) continue; // niet dwars over het eigen perceel
+          if (this.rijdbaar(ax, ay, v.e0x, v.e0y)) { keus = [ax, ay, v.e0x, v.e0y]; break; }
+        }
+      }
+      else {
+        keus[keus.length - 2] = v.e0x; keus[keus.length - 1] = v.e0y;
+        // het laatste stuk recht in de rijrichting van de eerste baan: zo rijdt hij in één lijn de kopakker op
+        const n = keus.length, ax = v.e0x - v.lx * 1.2, ay = v.e0y - v.ly * 1.2, px = keus[n - 4], py = keus[n - 3];
+        if (n >= 4 && Math.hypot(px - ax, py - ay) > 0.8 && Math.hypot(px - v.e0x, py - v.e0y) > 1.2 && this.rijdbaar(px, py, ax, ay) && this.rijdbaar(ax, ay, v.e0x, v.e0y)) keus.splice(n - 2, 0, ax, ay);
+      }
+      v.route = Float32Array.from(keus); v.rn = keus.length / 2; v.rlen = padLengte(keus); v.bron = bron; v.erf = erf;
+      if (erf) erf.velden.push(v);
+      // rijtijden heen en terug (dagen): over de route en het stuk over het perceel naar het werk of de parkeerplek
+      const T = v.taken, langs = Math.hypot(v.x0x - v.e0x, v.x0y - v.e0y);
+      // op de weg rijdt hij altijd vlotter dan aan het werk (anders haalt de graanwagen de terugrijdende maaidorser in)
+      let rij = RIJ;
+      for (let o = 0; o < T.length; o += TAAK) if (T[o] <= T_KRAAP && T[o + 2] > 0) rij = Math.max(rij, (1.3 * v.padLen) / T[o + 2]);
+      const RIJ_V = rij;
+      for (let o = 0; o < T.length; o += TAAK) {
+        const baanWerk = T[o] <= T_KRAAP, pk = baanWerk ? 0 : Math.hypot(v.pkx - v.e0x, v.pky - v.e0y), terugPk = baanWerk ? langs : pk;
+        const kort = v.rlen < 0.5; // geen aanloop: dan langzaam invagen op de plek
+        T[o + 3] = kort ? 0.6 + pk / RIJ_V : (v.rlen + pk) / RIJ_V;
+        T[o + 4] = kort ? 0.6 + terugPk / RIJ_V : (v.rlen + terugPk) / RIJ_V;
+      }
+    }
+    this.plannen();
+    const nieuw = new Map();
+    for (const v of this.velden) {
+      if (!v.taken || !v.taken.length || !v.route) continue;
+      const c = { x: v.x, y: v.y, rol: v.rol, olx: v.olx, oly: v.oly, erfT: v.erf ? v.erf.t : -1, ex: v.erf ? v.erf.x : 0, ey: v.erf ? v.erf.y : 0 };
+      for (let i = 0; i < VAST_VELD.length; i++) c[VAST_VELD[i]] = v[VAST_VELD[i]];
+      // welke stukken van de route nu vrij te berijden zijn: die moeten dat bij een volgende keuze nog steeds zijn
+      const vrij = new Uint8Array(v.rn);
+      for (let i = 1; i < v.rn; i++) vrij[i] = this.rijdbaar(v.route[2 * i - 2], v.route[2 * i - 1], v.route[2 * i], v.route[2 * i + 1]) ? 1 : 0;
+      c.vrij = vrij;
+      nieuw.set(v.id, c);
+    }
+    this.vorigPlan = nieuw;
+  }
+
+  // Is de onthouden route van een perceel nog te berijden? Elk stuk dat vrij was, moet nog vrij zijn (een nieuw
+  // gebouw of een verschoven grens erop: dan opnieuw kiezen).
+  nogVrij(c) {
+    const R = c.route;
+    for (let i = 1; i < c.rn; i++) if (c.vrij[i] && !this.rijdbaar(R[2 * i - 2], R[2 * i - 1], R[2 * i], R[2 * i + 1])) return false;
+    return true;
+  }
+
+  // Hoe lang (dagen) de graanwagen achter de maaidorser aan rijdt: genoeg afstand dat hij in de bocht aan de
+  // kopakker niet op de maaidorser rijdt, en op een kort perceel minstens een baan achter (anders komt hij de
+  // maaidorser tegemoet die aan de tweede baan terugkomt). Op een perceel met smalle banen (een klein stukje land) is er geen
+  // graanwagen: daar zou hij naast de maaidorser door hem heen rijden (0). Zo ook op een klein perceel (de kavels langs een
+  // weg zijn vaak maar vier eenheden breed): daar haalt hij de maaidorser in de keerbocht in.
+  naloop(v, duur) { return v.bw < 0.85 || Math.min(v.hu, v.hv) < 2.4 ? 0 : (Math.max(1.8, Math.PI * v.r + 1.0, Math.min(2 * v.L + 0.5, 6)) * duur) / Math.max(1, v.padLen); }
+
+  // Het werkplan zonder botsingen: op een perceel begint een taak pas als de machine van de vorige weer thuis is,
+  // en de trekkers van één erf rijden nooit tegelijk over hun gedeelde erfweg en route (de volgende wacht een
+  // paar dagen). Wie langer dan 25 dagen zou moeten wachten, gaat toch op de geplande dag.
+  plannen() {
+    const ritten = [], bezet = [], rel = [];
+    const eind = (v, o) => { const T = v.taken; return T[o + 1] + T[o + 2] + T[o + 4] + (T[o] === T_MAAI ? this.naloop(v, T[o + 2]) : 0); };
+    const groep = (lijst, metErf) => {
+      ritten.length = 0; bezet.length = 0;
+      for (const v of lijst) {
+        v.vrijNa = -Infinity;
+        for (let o = 0; o < v.taken.length; o += TAAK) {
+          if (!v.vast) ritten.push([v.taken[o + 1], v, o]);
+          else if (metErf && v.taken[o]) bezet.push(v.taken[o + 1] - v.taken[o + 3], v.taken[o + 1], v.taken[o + 1] + v.taken[o + 2], eind(v, o));
+        }
+      }
+      ritten.sort((a, b) => a[0] - b[0] || a[1].id - b[1].id || a[2] - b[2]);
+      for (const [, v, o] of ritten) {
+        const T = v.taken, tH = T[o + 3], st0 = Math.max(T[o + 1], v.vrijNa + tH + 0.3);
+        let st = st0;
+        if (metErf) {
+          // de eerste dag (in stappen van een kwart dag, hooguit 25 dagen later) waarop de rit niemand van het erf
+          // onderweg tegenkomt; is er geen, dan de dag met de kortste overlap (een erf met heel veel percelen)
+          let beste = st0, minder = Infinity;
+          // alleen de stukken die in het venster van 25 dagen kunnen vallen
+          const nl = T[o] === T_MAAI ? this.naloop(v, T[o + 2]) : 0, lo = st0 - tH - 0.3, hi = st0 + 25 + T[o + 2] + T[o + 4] + nl + 0.3;
+          rel.length = 0;
+          for (let i = 0; i < bezet.length; i += 2) if (bezet[i + 1] > lo && bezet[i] < hi) rel.push(bezet[i], bezet[i + 1]);
+          for (let stap = 0; stap <= 100 && minder > 0; stap++) {
+            const s0 = st0 + stap * 0.25, h0 = s0 - tH, t0 = s0 + T[o + 2], t1 = t0 + T[o + 4] + nl;
+            if (t1 > 362) break; // binnen het jaar klaar
+            let over = 0;
+            for (let i = 0; i < rel.length; i += 2) {
+              const a = rel[i] - 0.3, b = rel[i + 1] + 0.3;
+              over += Math.max(0, Math.min(b, s0) - Math.max(a, h0)) + Math.max(0, Math.min(b, t1) - Math.max(a, t0));
+            }
+            if (over < minder) { minder = over; beste = s0; }
+          }
+          if (minder > 0) this.nWacht = (this.nWacht ?? 0) + 1;
+          st = beste;
+          T[o + 1] = st;
+          bezet.push(st - tH, st, st + T[o + 2], eind(v, o));
+        } else T[o + 1] = st;
+        v.vrijNa = eind(v, o);
+      }
+    };
+    for (const e of this.erven) if (e.velden.length) groep(e.velden, true);
+    const los = this.losVelden ?? (this.losVelden = []);
+    for (const v of this.velden) if (v.taken && v.taken.length && !v.erf) { los.length = 0; los.push(v); groep(los, false); }
+    // wat niet meer binnen het jaar af komt, vervalt (soort 0: nooit actief). Valt het ophalen van de balen weg,
+    // dan ook het persen: er blijven geen balen liggen tot de jaarwisseling. Zwaden alleen als er een pers komt.
+    for (const v of this.velden) {
+      const T = v.taken;
+      if (!T || !T.length || v.vast) continue;
+      const weg = (o) => { T[o] = 0; T[o + 1] = 1e4; };
+      for (let o = 0; o < T.length; o += TAAK) if (T[o] && eind(v, o) > 363) weg(o);
+      for (let o = 0; o < T.length; o += TAAK) if (T[o] === T_PERS || T[o] === T_KPERS) {
+        let raap = false;
+        for (let q = 0; q < T.length; q += TAAK) if (T[q] === (T[o] === T_PERS ? T_RAAP : T_KRAAP)) raap = true;
+        if (!raap) weg(o);
+      }
+      v.metPers = false;
+      for (let o = 0; o < T.length; o += TAAK) if (T[o] === T_PERS || T[o] === T_KPERS) v.metPers = true;
+    }
+  }
+
+  // Een route over het land van een erf of een weg naar de kopakker van v, als er geen rechte weg is: breedte-eerst
+  // zoeken over het botsraster (vakjes van 2 eenheden, tot 64 eenheden ver), om gebouwen, grenzen, water, bomen,
+  // stenen en de gebouwen van de erven heen; daarna rechtgetrokken waar dat vrij kan. Geeft de punten van de route
+  // (van de bron naar de kopakker) en zet zBron en zErf, of null.
+  zoekRoute(v) {
+    const N = RW * RH;
+    if (!this.zoekKaart) this.maakZoekKaart();
+    const doelErf = this.zoekErf, doelWeg = this.zoekWeg;
+    // richt eerst op het dichtste doel (dat bepaalt de hoek waar hij het perceel op rijdt)
+    let bx = v.x - v.olx, by = v.y - v.oly, bd = Infinity;
+    for (const e of this.erven) { if (!e.uitN) continue; const d = Math.hypot(e.uitN[0] - v.x, e.uitN[1] - v.y); if (d < bd) { bd = d; bx = e.uitN[0]; by = e.uitN[1]; } }
+    const W4 = this.alleWegen;
+    for (let i = 0; i + 3 < W4.length; i += 4) {
+      const ax = W4[i], ay = W4[i + 1], lx = W4[i + 2] - ax, ly = W4[i + 3] - ay, ll = lx * lx + ly * ly || 1, u = clamp(((v.x - ax) * lx + (v.y - ay) * ly) / ll, 0, 1);
+      const d = Math.hypot(ax + lx * u - v.x, ay + ly * u - v.y);
+      if (d < bd) { bd = d; bx = ax + lx * u; by = ay + ly * u; }
+    }
+    if (bd > 64) return null;
+    this.richt(v, bx, by);
+    const pas = this.zoekPas, nr = ++this.zoekNr, stempel = this.zoekStempel, van = this.zoekVan, rij = this.zoekRij;
+    const sx = clamp(Math.floor(v.e0x / RC), 0, RW - 1), sy = clamp(Math.floor(v.e0y / RC), 0, RH - 1), start = sy * RW + sx;
+    let kop = 0, staart = 0, doel = -1;
+    rij[staart++] = start; stempel[start] = nr; van[start] = -1;
+    while (kop < staart && doel < 0) {
+      const c = rij[kop++], cx = c % RW, cy = (c - cx) / RW;
+      for (let k = 0; k < 8 && doel < 0; k++) {
+        const dx = k < 4 ? (k & 1 ? 0 : k - 1) : (k & 1 ? 1 : -1), dy = k < 4 ? (k & 1 ? k - 2 : 0) : (k & 2 ? 1 : -1);
+        const nx = cx + dx, ny = cy + dy;
+        if (nx < 0 || ny < 0 || nx >= RW || ny >= RH || Math.abs(nx - sx) > 32 || Math.abs(ny - sy) > 32) continue;
+        const n = ny * RW + nx;
+        if (stempel[n] === nr) continue;
+        // een erfuitgang, of een stuk weg buiten de bebouwing (niet tussen de huizen door het land op)
+        if (doelErf[n] >= 0 || (doelWeg[n] >= 0 && !(this.raster[n] & GEBOUW))) { stempel[n] = nr; van[n] = c; doel = n; break; }
+        if (!this.pasOp(n)) continue;
+        if (dx && dy && (!this.pasOp(cy * RW + nx) || !this.pasOp(ny * RW + cx))) continue; // schuin alleen als beide buren vrij zijn
+        stempel[n] = nr; van[n] = c; rij[staart++] = n;
+      }
+    }
+    if (doel < 0) return null;
+    // de vakjes van het doel terug naar de kopakker
+    const cel = this.zoekPad ?? (this.zoekPad = []);
+    cel.length = 0;
+    for (let c = van[doel]; c >= 0 && c !== start; c = van[c]) cel.push((c % RW) * RC + RC / 2, Math.floor(c / RW) * RC + RC / 2);
+    cel.push(v.e0x, v.e0y);
+    const pts = [];
+    if (doelErf[doel] >= 0) {
+      const e = this.erven[doelErf[doel]];
+      pts.push(e.px, e.py, e.uitN[0], e.uitN[1]);
+      this.zBron = BRON_ERF; this.zErf = e;
+    } else {
+      // van de weg af: een stukje over de weg aanrijden (binnen het wegstuk) en dan het land op
+      const i = doelWeg[doel], ax = W4[i], ay = W4[i + 1], lx = W4[i + 2] - ax, ly = W4[i + 3] - ay, wl = Math.hypot(lx, ly) || 1;
+      const ox = (doel % RW) * RC + RC / 2, oy = Math.floor(doel / RW) * RC + RC / 2, u = clamp(((ox - ax) * lx + (oy - ay) * ly) / (wl * wl), 0, 1);
+      const qx = ax + lx * u, qy = ay + ly * u, k = u > 0.5 ? -1 : 1, ruimte = Math.min(5, k < 0 ? u * wl : (1 - u) * wl);
+      if (ruimte < 2) return null;
+      pts.push(qx + (lx / wl) * k * ruimte, qy + (ly / wl) * k * ruimte, qx, qy);
+      this.zBron = BRON_WEG; this.zErf = null;
+    }
+    // rechttrekken: vanaf het laatste punt steeds naar het verste vakje dat in een rechte lijn vrij te berijden is
+    let cx = pts[pts.length - 2], cy = pts[pts.length - 1], i = 0;
+    const m = cel.length / 2;
+    while (i < m) {
+      let j = m - 1;
+      while (j > i && !this.zoekVrij(cx, cy, cel[j * 2], cel[j * 2 + 1])) j--;
+      cx = cel[j * 2]; cy = cel[j * 2 + 1]; pts.push(cx, cy); i = j + 1;
+      if (pts.length > 56) return null; // te bochtig: past niet in het ritpad
+    }
+    return pts;
+  }
+  // Waar de zoektocht naartoe mag: de uitgang van elk erf en de vakjes langs de wegen; de gebouwen van de erven
+  // zelf zijn dicht (eromheen rijden).
+  maakZoekKaart() {
+    const N = RW * RH;
+    this.zoekKaart = true;
+    if (!this.zoekPas) { this.zoekPas = new Int8Array(N); this.zoekStempel = new Int32Array(N); this.zoekVan = new Int32Array(N); this.zoekRij = new Int32Array(N); this.zoekErf = new Int16Array(N); this.zoekWeg = new Int32Array(N); this.zoekNr = 0; }
+    if (!this.zoekTegel || this.zoekTegel.length !== this.geo.tegels.length) this.zoekTegel = new Uint8Array(this.geo.tegels.length);
+    this.zoekPas.fill(0); this.zoekErf.fill(-1); this.zoekWeg.fill(-1); this.zoekTegel.fill(0);
+    const W4 = this.alleWegen;
+    for (let i = 0; i + 3 < W4.length; i += 4) {
+      const ax = W4[i], ay = W4[i + 1], bx = W4[i + 2], by = W4[i + 3], k = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / 0.5));
+      for (let j = 0; j <= k; j++) {
+        const x = ax + ((bx - ax) * j) / k, y = ay + ((by - ay) * j) / k, cx = Math.floor(x / RC), cy = Math.floor(y / RC);
+        if (cx >= 0 && cy >= 0 && cx < RW && cy < RH && this.zoekWeg[cy * RW + cx] < 0) this.zoekWeg[cy * RW + cx] = i;
+      }
+    }
+    for (let ei = 0; ei < this.erven.length; ei++) {
+      const e = this.erven[ei];
+      e.uitN = [e.x + ERF_N[0] * e.co - ERF_N[1] * e.si, e.y + ERF_N[0] * e.si + ERF_N[1] * e.co];
+      // de buitenkant van de uitgang (een halve eenheid verder naar het noorden) is het doel; het erf zelf is dicht
+      const ux = e.uitN[0] + e.si * 0.9, uy = e.uitN[1] - e.co * 0.9;
+      for (let cy = Math.max(0, Math.floor((e.y - 4) / RC)); cy <= Math.min(RH - 1, Math.floor((e.y + 4) / RC)); cy++)
+        for (let cx = Math.max(0, Math.floor((e.x - 4) / RC)); cx <= Math.min(RW - 1, Math.floor((e.x + 4) / RC)); cx++) {
+          const x = cx * RC + 1 - e.x, y = cy * RC + 1 - e.y, u = x * e.co + y * e.si, w = -x * e.si + y * e.co;
+          if (Math.abs(u) < 3.0 && w > -1.9 && w < 2.8) this.zoekPas[cy * RW + cx] = 2;
+        }
+      const c = clamp(Math.floor(uy / RC), 0, RH - 1) * RW + clamp(Math.floor(ux / RC), 0, RW - 1);
+      if (this.zoekPas[c] !== 2) this.zoekErf[c] = ei;
+    }
+  }
+  // Is vakje c te berijden (droog, geen gebouw of grens, geen boom, steen, plas of boerderij)? Onthouden per vakje.
+  // Bomen en stenen worden per tegel in één keer op de zoekkaart gezet (met de buurtegels: ze steken over de rand).
+  pasOp(c) {
+    const p = this.zoekPas[c];
+    if (p) return p === 1;
+    const x = (c % RW) * RC + RC / 2, y = Math.floor(c / RW) * RC + RC / 2, geo = this.geo, Tw = geo.T;
+    const tk = clamp(Math.floor(x / Tw), 0, geo.kol - 1), tr = clamp(Math.floor(y / Tw), 0, geo.rij - 1);
+    for (let r = Math.max(0, tr - 1); r <= Math.min(geo.rij - 1, tr + 1); r++) for (let k = Math.max(0, tk - 1); k <= Math.min(geo.kol - 1, tk + 1); k++) this.zoekBomen(r * geo.kol + k);
+    const ok = !this.zoekPas[c] && !(this.raster[c] & (GEBOUW | GRENS)) && this.droog(x, y, 0.6);
+    this.zoekPas[c] = ok ? 1 : 2;
+    return ok;
+  }
+  // Zet de bomen, stenen, plassen en boerderijen van tegel t als dichte vakjes op de zoekkaart (zoals boomvrij in
+  // terrein.js met 0,3 marge, maar één keer per tegel).
+  zoekBomen(t) {
+    if (this.zoekTegel[t]) return;
+    this.zoekTegel[t] = 1;
+    const b = this.tl?.basis;
+    if (!b) return;
+    const K = KENMERK, tg = this.geo.tegels[t], f = kenmerkenVoorTegel(tg, b), pas = this.zoekPas;
+    for (let p = 0; p < f.length; p += STAP) {
+      const ty = f[p];
+      const straal = ty === K.BOOM || ty === K.LOSBOOM || ty === K.ROTS || ty === K.STEEN ? f[p + 3] : ty === BERGMEER ? f[p + 3] + 0.4 : ty === K.PLAS ? f[p + 3] + 0.2 : ty === BOERDERIJ ? 2.8 : -1;
+      if (straal < 0) continue;
+      const x = tg.x + f[p + 1], y = tg.y + f[p + 2], rr = straal + 0.3;
+      const c0 = Math.max(0, Math.floor((x - rr - 1) / RC)), c1 = Math.min(RW - 1, Math.floor((x + rr + 1) / RC));
+      const r0 = Math.max(0, Math.floor((y - rr - 1) / RC)), r1 = Math.min(RH - 1, Math.floor((y + rr + 1) / RC));
+      for (let cy = r0; cy <= r1; cy++) for (let cx = c0; cx <= c1; cx++) {
+        const dx = cx * RC + RC / 2 - x, dy = cy * RC + RC / 2 - y, c = cy * RW + cx;
+        if (dx * dx + dy * dy < rr * rr && this.zoekErf[c] < 0) pas[c] = 2;
+      }
+    }
+  }
+  // Is de rechte lijn over de zoekkaart vrij (elke 0,8 eenheid een vakje dat te berijden is)?
+  zoekVrij(ax, ay, bx, by) {
+    const l = Math.hypot(bx - ax, by - ay), k = Math.max(1, Math.ceil(l / 0.8));
+    for (let j = 0; j <= k; j++) {
+      const x = ax + ((bx - ax) * j) / k, y = ay + ((by - ay) * j) / k, cx = Math.floor(x / RC), cy = Math.floor(y / RC);
+      if (cx < 0 || cy < 0 || cx >= RW || cy >= RH || !this.pasOp(cy * RW + cx)) return false;
+    }
+    return true;
+  }
+
+  // Ritten van en naar de erven: de wagen komt over de weg aanrijden, slaat de erfweg in, staat even op het erf en
+  // rijdt de weg weer op. De sneeuwschuiver rijdt van de parkeerplek over het erf en de erfweg en terug.
+  kiesErfritten() {
+    for (const e of this.erven) {
+      e.kleur = Math.floor(e.z * 4);
+      const l = e.laan;
+      if (!l) continue;
+      const sp = this.erfUit(e, l.ax, l.ay, []);
+      sp.push(l.ax, l.ay, l.bx, l.by);
+      e.spad = Float32Array.from(sp); e.spadN = sp.length / 2; e.spadLen = padLengte(sp);
+      if (l.dood || l.qx === undefined) continue;
+      const r0x = l.qx - l.rx * 6, r0y = l.qy - l.ry * 6, r1x = l.qx + l.rx * 6, r1y = l.qy + l.ry * 6;
+      const heen = [r0x, r0y, l.qx, l.qy, l.bx, l.by, l.ax, l.ay], uit = [l.ax, l.ay, l.bx, l.by, l.qx, l.qy, r1x, r1y];
+      e.rin = Float32Array.from(heen); e.rinLen = padLengte(heen); e.ruit = Float32Array.from(uit); e.ruitLen = padLengte(uit);
+      // de rit (klok in tellen, 3 eenheden per tel): aanrijden, 30 tellen op het erf, wegrijden, en een tijd niets
+      e.tIn = e.rinLen / 3; e.tStop = 30; e.tUit = e.ruitLen / 3;
+      e.P = Math.max(70 + e.z * 70, e.tIn + e.tStop + e.tUit + 25);
+    }
+  }
+
+  // Punt op afstand d langs een polylijn (pts, n punten) in this.qx, this.qy.
+  padXY(pts, n, d) {
+    for (let i = 1; i < n; i++) {
+      const ax = pts[i * 2 - 2], ay = pts[i * 2 - 1], bx = pts[i * 2], by = pts[i * 2 + 1], l = Math.hypot(bx - ax, by - ay);
+      if (d <= l || i === n - 1) { const f = l > 0 ? clamp(d / l, 0, 1) : 0; this.qx = ax + (bx - ax) * f; this.qy = ay + (by - ay) * f; return; }
+      d -= l;
+    }
+    this.qx = pts[0]; this.qy = pts[1];
+  }
+  // Stand op afstand d langs een polylijn van lengte L, in mx, my, mhx, mhy. Bij elke hoek draait de richting
+  // geleidelijk van het ene stuk naar het volgende (over 0,6 eenheid ervoor en erna, of minder bij korte stukken),
+  // ook bij een haarspeldbocht; aan het begin en het eind draait hij helemaal naar (h0x, h0y) en (h1x, h1y), zodat
+  // hij precies aansluit op de stand ervoor en erna (0, 0: geen eis).
+  langsPad(pts, n, L, d, h0x, h0y, h1x, h1y) {
+    const D = 0.6;
+    d = clamp(d, 0, L);
+    let i = 1, rest = d, l = 0;
+    for (; i < n; i++) { l = Math.hypot(pts[i * 2] - pts[i * 2 - 2], pts[i * 2 + 1] - pts[i * 2 - 1]); if (rest <= l || i >= n - 1) break; rest -= l; }
+    if (n < 2) { this.mx = pts[0]; this.my = pts[1]; this.mhx = h1x || h0x || 1; this.mhy = h1y || h0y; return; }
+    i = Math.min(i, n - 1);
+    const ax = pts[i * 2 - 2], ay = pts[i * 2 - 1], bx = pts[i * 2], by = pts[i * 2 + 1], f = l > 0 ? clamp(rest / l, 0, 1) : 0;
+    const x = ax + (bx - ax) * f, y = ay + (by - ay) * f;
+    let hoek = this.segHoek(pts, n, i);
+    if (i < n - 1 && l - rest < D) {
+      const l2 = Math.hypot(pts[i * 2 + 2] - bx, pts[i * 2 + 3] - by), Dk = Math.min(D, l / 2, l2 / 2);
+      if (Dk > 1e-4 && l - rest < Dk) hoek = hoekNaar(hoek, this.segHoek(pts, n, i + 1), smooth(-Dk, Dk, rest - l));
+    } else if (i > 1 && rest < D) {
+      const l0 = Math.hypot(ax - pts[i * 2 - 4], ay - pts[i * 2 - 3]), Dk = Math.min(D, l / 2, l0 / 2);
+      if (Dk > 1e-4 && rest < Dk) hoek = hoekNaar(this.segHoek(pts, n, i - 1), hoek, smooth(-Dk, Dk, rest));
+    }
+    // (een vaste draai ten opzichte van het eerste of laatste stuk, die geleidelijk bijkomt: zo klapt hij ook bij een
+    // tegengestelde richting niet om)
+    const B = Math.min(1.4, L * 0.45);
+    if ((h1x || h1y) && d > L - B) hoek += wrapHoek(Math.atan2(h1y, h1x) - this.segHoek(pts, n, n - 1)) * smooth(L - B, L, d);
+    if ((h0x || h0y) && d < B) hoek += wrapHoek(Math.atan2(h0y, h0x) - this.segHoek(pts, n, 1)) * (1 - smooth(0, B, d));
+    this.mx = x; this.my = y; this.mhx = Math.cos(hoek); this.mhy = Math.sin(hoek);
+  }
+  // Richting (hoek) van stuk i van een polylijn; een stuk zonder lengte neemt de richting van een buurstuk.
+  segHoek(pts, n, i) {
+    for (let k = 0; k < n; k++) {
+      const j = k & 1 ? i + ((k + 1) >> 1) : i - (k >> 1);
+      if (j < 1 || j > n - 1) continue;
+      const dx = pts[j * 2] - pts[j * 2 - 2], dy = pts[j * 2 + 1] - pts[j * 2 - 1];
+      if (dx * dx + dy * dy > 1e-8) return Math.atan2(dy, dx);
+    }
+    return 0;
+  }
+
+  // Waar is de machine van taak k op perceel v op dag dj (doorlopend)? 0: nergens. Anders staat de stand in mx, my,
+  // mhx, mhy, de dekking in ma en het deel van het werk (0..1) in mw; 1 heen, 2 aan het werk, 3 terug.
+  rit(v, k, dj) {
+    const T = v.taken, o = k * TAAK, soort = T[o], st = T[o + 1], duur = T[o + 2], tH = T[o + 3], tT = T[o + 4];
+    const t = dj - st;
+    if (t < -tH || t >= duur + tT) return 0;
+    const baanWerk = soort <= T_KRAAP, pad = this.ritPad ?? (this.ritPad = new Float32Array(64));
+    this.ma = 1; this.mw = 0; this.mturn = 0; this.mdb = Infinity;
+    if (t >= 0 && t < duur) {
+      this.mw = t / duur;
+      if (baanWerk) this.baan(v, this.mw);
+      else {
+        // geparkeerd: bij aankomst draait hij van de aankomstrichting naar zijn stand, bij vertrek naar de terugweg
+        const tw = Math.min(0.4, duur * 0.3), a0 = Math.atan2(v.pay, v.pax), a1 = Math.atan2(v.pkhy, v.pkhx), a2 = Math.atan2(-v.pay, -v.pax);
+        const h = t < duur - tw ? hoekNaar(a0, a1, smooth(0, tw, t)) : hoekNaar(a1, a2, smooth(duur - tw, duur, t));
+        this.mx = v.pkx; this.my = v.pky; this.mhx = Math.cos(h); this.mhy = Math.sin(h); this.li = -1;
+      }
+      return 2;
+    }
+    const R = v.route, rn = v.rn;
+    let n = 0;
+    if (t < 0) {
+      // heen: van de bron over de route naar het begin van het werk (of door naar de parkeerplek)
+      for (let i = 0; i < rn; i++) { pad[n * 2] = R[i * 2]; pad[n * 2 + 1] = R[i * 2 + 1]; n++; }
+      if (!baanWerk) { pad[n * 2] = v.pkx; pad[n * 2 + 1] = v.pky; n++; }
+      const L = padLengte(pad, n), f = (t + tH) / tH, d = f * L;
+      if (baanWerk) this.langsPad(pad, n, L, d, 0, 0, v.lx, v.ly); else this.langsPad(pad, n, L, d, 0, 0, v.pax, v.pay);
+      // invagen over de eerste anderhalve eenheid: bij de weg, op het land ernaast, of voor de schuur op het erf
+      // (daar vaagt de geparkeerde trekker tegelijk uit)
+      this.mdb = d;
+      this.ma = v.rlen >= 0.5 ? smooth(0, 1.5, d) : smooth(0, 1, f);
+      this.li = -1;
+      return 1;
+    }
+    // terug: langs de kopakker naar het begin, en de route terug naar de bron
+    pad[0] = baanWerk ? v.x0x : v.pkx; pad[1] = baanWerk ? v.x0y : v.pky; n = 1;
+    for (let i = rn - 1; i >= 0; i--) { pad[n * 2] = R[i * 2]; pad[n * 2 + 1] = R[i * 2 + 1]; n++; }
+    const L = padLengte(pad, n), f = (t - duur) / tT, d = f * L;
+    if (baanWerk) this.langsPad(pad, n, L, d, -v.lx, -v.ly, 0, 0); else this.langsPad(pad, n, L, d, -v.pax, -v.pay, 0, 0);
+    this.mdb = L - d;
+    this.ma = v.rlen >= 0.5 ? smooth(0, 1.5, L - d) : 1 - smooth(0, 1, f);
+    this.li = -1;
+    return 3;
+  }
+
+  // Dekking van de trekker die thuis op het erf staat: 1 als er geen op pad is; elke trekker van het erf die op pad
+  // is vaagt voor de schuur in terwijl de geparkeerde uitvaagt (en omgekeerd bij thuiskomst), zodat er nooit een
+  // trekker op het erf verschijnt of verdwijnt.
+  erfThuis(e, dj) {
+    let thuis = 1;
+    for (const v of e.velden) {
+      const T = v.taken;
+      for (let o = 0, k = 0; o < T.length; o += TAAK, k++) {
+        // bij het maaien rijdt de trekker met de graanwagen van het erf (de maaidorser heeft een eigen plek in de schuur)
+        const dl = T[o] === T_MAAI ? this.naloop(v, T[o + 2]) : 0, t = dj - dl - T[o + 1];
+        if (T[o] === T_MAAI && !dl) continue;
+        if (t < -T[o + 3] || t >= T[o + 2] + T[o + 4]) continue;
+        if (this.rit(v, k, dj - dl)) thuis *= 1 - smooth(0, 1.5, this.mdb);
+      }
+    }
+    return thuis;
   }
 
   // Kaalslag of herplant op een open plek aan de bosrand, met een stapel stammen aan de rand van de plek.
@@ -765,11 +1402,35 @@ export class WerkLaag {
     return e;
   }
 
+  // C12: alleen op gebakken grond (terrein knipt het canvas tot de gebakken brokken; niets gebakken: niets tekenen)
   teken(c, view, sc, nu, dt = 0, tempo = 0) {
+    const klem = view?.terreinLaag?.klemOpGebakken?.(c) ?? 1;
+    if (!klem) { if (tempo > 0) this.klok += dt; this.nul(); return; }
+    try { return this.tekenOpGrond(c, view, sc, nu, dt, tempo); } finally { if (klem === 2) c.restore(); }
+  }
+  tekenOpGrond(c, view, sc, nu, dt = 0, tempo = 0) {
     if (tempo > 0) this.klok += dt;
+    this.beeldNr = (this.beeldNr ?? 0) + 1;
     this.nul();
     const s = view.state;
     if (!s || !view.geo || !view.w || !view.eigenaar) return;
+    // doorlopende dag: de speldag plus het deel dat sinds de laatste dagwissel verstreken is (een dag is een tel op
+    // tempo 1). Machines op het land bewegen hiermee, zodat ze stilstaan bij pauze en niet springen bij een nieuwe dag.
+    // sinds: de tijd sinds de dagwissel (zoals de teller in main.js, met het restje van dit beeld). dagFrac is wat we
+    // tonen: bij een gewone dagwissel loopt die gewoon door (eventueel even onder 0) en haalt sinds dan geleidelijk in,
+    // zodat er ook geen sprong is als de eerste dag na het laden korter duurde dan de laag dacht. Bij een grotere
+    // sprong in de dagen (laden, terugspoelen) begint alles opnieuw op 0.
+    const stap = tempo > 0 ? dt * tempo : 0;
+    if (s.dag !== this.dagNr) {
+      const door = s.dag === this.dagNr + 1;
+      this.sinds = door ? clamp((this.sinds ?? 0) + stap - 1, 0, 0.3) : 0;
+      this.dagFrac = door ? clamp((this.dagFrac ?? 0) + stap - 1, -1, 0.995) : 0;
+      this.dagNr = s.dag;
+    } else if (stap > 0) {
+      this.sinds = Math.min(0.995, (this.sinds ?? 0) + stap);
+      this.dagFrac = Math.min(0.995, this.dagFrac + stap + (this.sinds - this.dagFrac) * (1 - Math.exp(-dt * 2)));
+    }
+    this.dj = (((s.dag + (this.dagFrac ?? 0)) % 365) + 365) % 365;
     if (this.state !== s || this.geo !== view.geo || this.eigenaar !== view.eigenaar || (view.terreinLaag?.basis && view.terreinLaag.basis !== this.basis)) this.laad(view);
     const z = view.zoom;
     this.zoom = z;
@@ -783,6 +1444,7 @@ export class WerkLaag {
     this.sn = this.sz.sneeuw > 0.25 ? 1 : 0;
     this.nacht = view.nacht ?? 0;
     this.licht0 = this.nacht < 0.55; // werktijd: overdag
+    this.dagMens = 1 - smooth(0.42, 0.6, this.nacht); // mensen op het land gaan bij het donker naar huis
     this.droogWeer = this.wr.regen < 0.05 && this.wr.wolken < 0.6;
     this.nat = this.wr.regen > 0.45;
     this.nu = nu;
@@ -807,7 +1469,7 @@ export class WerkLaag {
     if (z >= DREMPEL.baal - 0.5) this.tekenBalen(c, a * smooth(DREMPEL.baal - 0.5, DREMPEL.baal + 0.3, z));
     if (z >= DREMPEL.machine - 0.5) this.tekenVoertuigen(c, a * smooth(DREMPEL.machine - 0.5, DREMPEL.machine + 0.3, z), z);
     if (z >= DREMPEL.jaknik - 0.5) this.tekenJaknikkers(c, a * smooth(DREMPEL.jaknik - 0.5, DREMPEL.jaknik + 0.3, z), z);
-    if (z >= DREMPEL.mens - 0.5) this.tekenMensen(c, a * smooth(DREMPEL.mens - 0.5, DREMPEL.mens + 0.3, z));
+    if (z >= DREMPEL.mens - 0.5) this.tekenMensen(c, a * smooth(DREMPEL.mens - 0.5, DREMPEL.mens + 0.3, z) * this.dagMens);
     c.globalAlpha = a;
     this.tekenHoog(c, z, a);
     c.restore();
@@ -816,10 +1478,10 @@ export class WerkLaag {
 
   // ---------- voertuigen, balen, mensen en meeuwen verzamelen ----------
 
-  zetVoertuig(x, y, hx, hy, soort, kleur, aanbouw = A_GEEN, lading = L_GEEN, schaal = 1) {
-    if (this.nVw >= PLAFOND.machines || !this.inBeeld(x, y, 2)) return;
+  zetVoertuig(x, y, hx, hy, soort, kleur, aanbouw = A_GEEN, lading = L_GEEN, schaal = 1, dekking = 1, vol = 1) {
+    if (dekking < 0.03 || this.nVw >= PLAFOND.machines || !this.inBeeld(x, y, 2)) return;
     const o = this.nVw++ * VW, b = this.vw;
-    b[o] = x; b[o + 1] = y; b[o + 2] = hx; b[o + 3] = hy; b[o + 4] = soort; b[o + 5] = kleur; b[o + 6] = aanbouw; b[o + 7] = lading; b[o + 8] = schaal;
+    b[o] = x; b[o + 1] = y; b[o + 2] = hx; b[o + 3] = hy; b[o + 4] = soort; b[o + 5] = kleur; b[o + 6] = aanbouw; b[o + 7] = lading; b[o + 8] = schaal; b[o + 9] = dekking; b[o + 10] = vol;
   }
   zetBaal(x, y, soort, hoek) {
     if (this.nBaal >= PLAFOND.balen || !this.inBeeld(x, y, 0.5)) return;
@@ -834,24 +1496,41 @@ export class WerkLaag {
     const o = this.nMeeuw++ * 4; this.meeuw[o] = x; this.meeuw[o + 1] = y; this.meeuw[o + 2] = hoogte; this.meeuw[o + 3] = slag;
   }
 
-  // Een machine die baan voor baan over het perceel gaat; fase 0..1 over het hele perceel.
+  // Een machine die baan voor baan over het perceel gaat; fase 0..1 over het hele pad. Het pad begint met een
+  // aanloop op de kopakker, keert aan het eind van elke baan in een halve cirkel naar de volgende (geen sprong
+  // opzij) en eindigt met een uitloop naar de hoek waar hij begon (het aantal banen is even).
+  // Zet mx, my (plek), mhx, mhy (richting), li (baan), ms (plek langs de baan), mdir en mturn (0, of 0..1 in de bocht).
   baan(v, fase) {
-    const f = clamp(fase, 0, 0.9999) * v.nL, li = Math.floor(f), fl = f - li, dir = li & 1 ? -1 : 1;
-    const s = dir > 0 ? -v.L + fl * 2 * v.L : v.L - fl * 2 * v.L, q = -v.B + (li + 0.5) * ((2 * v.B) / v.nL);
+    const Lp = v.Lp, r = v.r, pre = v.pre, seg = 2 * Lp + Math.PI * r;
+    let d = clamp(fase, 0, 1) * v.padLen, li = 0, s, q, hs, hq, turn = 0;
+    if (d < pre) { s = -Lp - pre + d; q = -v.B + 0.5 * v.bw; hs = 1; hq = 0; }
+    else {
+      d -= pre;
+      li = Math.min(v.nL - 1, Math.floor(d / seg));
+      const w = d - li * seg, dir = li & 1 ? -1 : 1;
+      if (w < 2 * Lp || li === v.nL - 1) { s = dir * (-Lp + w); q = -v.B + (li + 0.5) * v.bw; hs = dir; hq = 0; }
+      else {
+        const f = Math.min(1, (w - 2 * Lp) / (Math.PI * r)), a = Math.PI * f;
+        s = dir * (Lp + r * Math.sin(a)); q = -v.B + (li + 1) * v.bw - r * Math.cos(a);
+        hs = dir * Math.cos(a); hq = Math.sin(a); turn = Math.max(1e-4, f);
+      }
+    }
+    const dir = li & 1 ? -1 : 1;
     this.mx = v.x + v.lx * s + v.px * q; this.my = v.y + v.ly * s + v.py * q;
-    this.mhx = v.lx * dir; this.mhy = v.ly * dir; this.li = li; this.ms = s; this.mdir = dir;
+    this.mhx = v.lx * hs + v.px * hq; this.mhy = v.ly * hs + v.py * hq; this.li = li; this.ms = s; this.mdir = dir; this.mturn = turn;
   }
   vak(c, v, s0, s1, q0, q1) {
     const x = v.x, y = v.y, lx = v.lx, ly = v.ly, px = v.px, py = v.py;
     c.moveTo(x + lx * s0 + px * q0, y + ly * s0 + py * q0); c.lineTo(x + lx * s1 + px * q0, y + ly * s1 + py * q0);
     c.lineTo(x + lx * s1 + px * q1, y + ly * s1 + py * q1); c.lineTo(x + lx * s0 + px * q1, y + ly * s0 + py * q1); c.closePath();
   }
-  // Het bewerkte deel: afgewerkte banen plus het stuk van de huidige baan achter de machine.
+  // Het bewerkte deel: afgewerkte banen plus het stuk van de huidige baan achter de machine (in de bocht is de baan af).
   gewerkt(c, v) {
-    const w = (2 * v.B) / v.nL;
-    if (this.li > 0) this.vak(c, v, -v.L, v.L, -v.B, -v.B + this.li * w);
-    const st = this.mdir > 0 ? -v.L : v.L;
-    this.vak(c, v, Math.min(st, this.ms), Math.max(st, this.ms), -v.B + this.li * w, -v.B + (this.li + 1) * w);
+    const w = (2 * v.B) / v.nL, klaar = this.li + (this.mturn > 0 ? 1 : 0);
+    if (klaar > 0) this.vak(c, v, -v.L, v.L, -v.B, -v.B + klaar * w);
+    if (this.mturn > 0 || this.li >= v.nL) return;
+    const st = this.mdir > 0 ? -v.L : v.L, ms = clamp(this.ms, -v.L, v.L);
+    this.vak(c, v, Math.min(st, ms), Math.max(st, ms), -v.B + this.li * w, -v.B + (this.li + 1) * w);
   }
   // Lijnen langs de rijen over het hele perceel (of tot de machine: tot = aantal afgewerkte banen).
   rijen(c, v, tussen, tot = v.nL) {
@@ -862,40 +1541,52 @@ export class WerkLaag {
     }
   }
 
-  // Waar staat elk perceel deze dag? Zet de vlaggen in v.f (bits) en de fase van de machine in v.fase.
+  // Waar staat elk perceel nu? Zet de vlaggen in v.f (bits), de fase van het werk in v.fase en de taken waarvan de
+  // machine onderweg of aan het werk is in v.akt (v.nAkt). Alles volgt het werkplan op de doorlopende dag dj: wat
+  // achter de machine verandert (voren, stoppel, zwaden, balen) groeit mee met waar hij is.
   stand(v) {
-    const d = this.dag, werk = this.licht0 && !this.nat;
+    const d = this.dag, dj = this.dj, T = v.taken;
     let f = 0;
-    v.fase = -1;
-    const cyc = (periode) => frac(this.klok / periode + v.h3);
-    if (v.rol & R_PLOEG) {
-      const st = 48 + Math.floor(v.h * 50);
-      if (d >= st && d < st + 3) { if (werk) { f |= 1; v.fase = cyc(v.nL * v.L * 4.4); } else f |= 2; } else if (d >= st + 3 && d < 140) f |= 2;
-    }
-    if (v.rol & R_ZAAI) {
-      const st = 100 + Math.floor(v.h2 * 36);
-      if (d >= st && d < st + 2) { if (werk) { f |= 4; v.fase = cyc(v.nL * v.L * 4.4); } else f |= 8; } else if (d >= st + 2 && d < st + 24) f |= 8;
-    }
-    if (v.rol & R_STOPPEL) {
-      const st = 205 + Math.floor(v.h * 36);
-      v.oogst = st;
-      if (d >= st && d < 292) f |= 16;
-      if (v.rol & R_BALEN) {
-        if (d >= st && d < st + 2) f |= 32; // zwaden
-        else if (d >= st + 2 && d < st + 4) { if (werk) { f |= 64; v.fase = cyc(v.nL * v.L * 3.6); } else f |= 128; } else if (d >= st + 4 && d < 284) f |= 128; // balen liggen
+    v.fase = -1; v.nAkt = 0; v.zwad = v.nL;
+    let gemaaid = false;
+    if (T) for (let o = 0, k = 0; o < T.length; o += TAAK, k++) {
+      const soort = T[o], st = T[o + 1], duur = T[o + 2], t = dj - st;
+      // onderweg of aan het werk (de graanwagen rijdt nog even na de maaidorser)
+      if (t >= -T[o + 3] && t < duur + T[o + 4] + (soort === T_MAAI ? this.naloop(v, duur) + 0.05 : 0) && v.nAkt < 4) v.akt[v.nAkt++] = k;
+      const bezig = t >= 0 && t < duur, klaar = t >= duur;
+      switch (soort) {
+        case T_PLOEG: if (bezig) { f |= 1; v.fase = t / duur; } else if (klaar && d < 140) f |= 2; break;
+        case T_ZAAI: if (bezig) { f |= 4; v.fase = t / duur; } else if (klaar && t < duur + 24) f |= 8; break;
+        case T_MAAI:
+          if (bezig) {
+            f |= 262144; v.fase = t / duur;
+            if (v.metPers) { this.baan(v, v.fase); f |= 32; v.zwad = this.li + (this.mturn > 0 ? 1 : 0); }
+          } else if (klaar) { gemaaid = true; if (d < 292) f |= 16; }
+          break;
+        case T_KMAAI:
+          if (bezig) { if (v.metPers) { this.baan(v, t / duur); f |= 32; v.zwad = this.li + (this.mturn > 0 ? 1 : 0); } } else if (klaar) gemaaid = true;
+          break;
+        case T_PERS: case T_KPERS:
+          // de zwaden liggen van het maaien tot de pers ze oppakt (ook als de pers een paar dagen moet wachten)
+          if (t < 0) { if (gemaaid) f |= 32; }
+          else if (bezig) { f |= 64; v.fase = t / duur; } else if (klaar) f |= 128;
+          break;
+        case T_RAAP: case T_KRAAP:
+          if (bezig) { f &= ~128; f |= 524288; v.fase = t / duur; } else if (klaar) f &= ~128;
+          break;
+        case T_PLUK: if (bezig) { f |= 4096; v.plukT = t; v.plukD = duur; } break;
+        case T_DRUIF: if (bezig) { f |= 16384; v.plukT = t; v.plukD = duur; } break;
       }
     }
-    if (v.rol & R_KUIL) {
-      const st = 140 + Math.floor(v.h * 34);
-      if (d >= st && d < st + 2) f |= 32;
-      else if (d >= st + 2 && d < st + 4) { if (werk) { f |= 64; v.fase = cyc(v.nL * v.L * 3.6); } else f |= 128; } else if (d >= st + 4 && d < st + 44) f |= 128;
+    if (v.rol & R_SPROEI) {
+      // de haspel staat er van de eerste brengrit (aankomst) tot de tweede
+      let o1 = -1, o2 = -1;
+      for (let o = 0; o < T.length; o += TAAK) if (T[o] === T_BRENG) { if (o1 < 0) o1 = o; o2 = o; }
+      if (o1 >= 0 && dj >= T[o1 + 1] && dj < T[o2 + 1]) f |= 256;
     }
-    if ((v.rol & R_SPROEI) && d >= 150 && d < 246 && this.droogWeer && hash(Math.floor(d / 2), v.id, 9) < 0.65) f |= 256;
     if ((v.rol & R_MEST) && (d >= 300 || d < 76)) f |= 512;
     if (v.rol & R_BOL) { if (d >= 88 && d < 136) f |= 1024; else if (d >= 136 && d < 152) f |= 2048; }
-    if ((v.rol & R_PLUK) && d >= 222 && d < 272 && this.licht0) f |= 4096;
     if ((v.rol & R_BIJ) && d >= (v.soort === KOOLZAAD ? 100 : 86) && d < 150) f |= 8192;
-    if ((v.rol & R_DRUIF) && d >= 255 && d < 292 && this.licht0) f |= 16384;
     if ((v.rol & R_SCHRIK) && d >= 75 && d < 266) f |= 32768;
     if ((v.rol & R_HEK) && this.zoom >= DREMPEL.hek - 0.5) f |= 65536;
     if (v.rol & R_KAS) f |= 131072;
@@ -903,13 +1594,61 @@ export class WerkLaag {
     return f;
   }
 
+  // De machine van taak k op perceel v: zet hem in de voertuigbuffer, met koplampen in het donker.
+  machine(v, k, z) {
+    const T = v.taken, o = k * TAAK, soort = T[o], dj = this.dj;
+    let r = this.rit(v, k, dj);
+    const kl = v.erf ? v.erf.kleur : Math.floor(v.h2 * TREKKER_KLEUR.length);
+    if (r) {
+      const x = this.mx, y = this.my, hx = this.mhx, hy = this.mhy, dk = this.ma, w = this.mw;
+      let sv = TREKKER, kleur = kl, ab = A_GEEN, lad = L_GEEN, sch = 1, vol = 1;
+      if (soort === T_PLOEG) ab = A_PLOEG;
+      else if (soort === T_ZAAI) ab = A_ZAAI;
+      else if (soort === T_MAAI) { sv = MAAIER; kleur = K_MAAIER + (v.h3 < 0.5 ? 0 : 1); ab = A_MAAI; }
+      else if (soort === T_KMAAI) ab = A_MAAIBALK;
+      else if (soort === T_PERS || soort === T_KPERS) ab = A_PERS;
+      else if (soort === T_RAAP || soort === T_KRAAP) { ab = A_WAGEN; lad = L_BALEN; vol = r === 1 ? 0 : r === 2 ? w : 1; }
+      else if (soort === T_BRENG) ab = A_WAGEN;
+      else if (soort === T_PLUK) ab = A_KISTEN;
+      else if (soort === T_DRUIF) { sv = SMALSPOOR; kleur = Math.floor(v.h3 * 4); ab = A_KISTEN; sch = 0.8; }
+      this.zetVoertuig(x, y, hx, hy, sv, kleur, ab, lad, sch, dk, vol);
+      if (this.nacht > 0.3) this.zetLicht(x + hx * 0.7, y + hy * 0.7, 1.0, WARM, 0.7 * dk);
+      // meeuwen achter de ploeg: ze komen van ver aanvliegen en gaan bij het donker weg
+      if (soort === T_PLOEG && r === 2 && z >= DREMPEL.meeuw) {
+        const kom = this.dagMens * smooth(0, 0.04, w) * (1 - smooth(0.96, 1, w));
+        if (kom > 0.02) for (let j = 0; j < 5; j++) {
+          const nu = this.nu, ww = nu / 900 * (1 + j * 0.13) + j * 1.7, ach = 0.9 + j * 0.35, ver = (1 - kom) * 8;
+          this.zetMeeuw(x - hx * ach + Math.cos(ww) * 0.5 + Math.cos(j * 2.4) * ver, y - hy * ach + Math.sin(ww) * 0.4 + Math.sin(j * 2.4) * ver, 0.6 + 0.4 * Math.sin(ww * 0.7 + j) + ver * 0.3, nu / 140 + j);
+        }
+      }
+    }
+    // de graanwagen rijdt een stukje achter de maaidorser en neemt het graan mee
+    if (soort === T_MAAI && v.bw >= 0.85) {
+      const dd = this.naloop(v, T[o + 2]);
+      const r2 = this.rit(v, k, dj - dd);
+      if (r2) this.zetVoertuig(this.mx, this.my, this.mhx, this.mhy, TREKKER, kl, A_WAGEN, L_GRAAN, 1, this.ma, r2 === 1 ? 0 : r2 === 2 ? Math.min(1, this.mw * 1.5) : 1);
+    }
+  }
+
+  // Een plukker van perceel v loopt bij het begin van de pluk van de wagen naar zijn plek (tx, ty) en aan het eind
+  // terug; in de wagen is hij niet te zien (false). Plek in this.lx, this.ly; this.lw is 1 als hij op zijn plek is.
+  lopen(v, tx, ty, i) {
+    // lopen gaat met 1,5 eenheid per dag (op tempo 1 ongeveer zo snel als de wandelaars van leven.js), één voor één
+    const t = v.plukT, D = v.plukD, uit = 0.2 + i * 0.25, tl = Math.max(0.2, Math.hypot(tx - v.pkx, ty - v.pky) / 1.5);
+    const w = clamp(Math.min(t - uit, D - uit - t) / tl, 0, 1);
+    if (w <= 0) return false;
+    this.lx = v.pkx + (tx - v.pkx) * w; this.ly = v.pky + (ty - v.pky) * w; this.lw = w;
+    return true;
+  }
+
   tekenVelden(c, z, a) {
     const L = this.velden, zicht = this.zicht ?? (this.zicht = []);
     zicht.length = 0;
     for (let i = 0; i < L.length; i++) {
       const v = L[i];
-      if (!this.inBeeld(v.x, v.y, v.L + v.B + 4)) continue;
-      if (this.stand(v) === 0) continue;
+      // ruim genoeg dat een machine onderweg naar het perceel niet verdwijnt als het perceel zelf buiten beeld is
+      if (!this.inBeeld(v.x, v.y, v.L + v.B + 4 + v.rlen)) continue;
+      if (this.stand(v) === 0 && !v.nAkt) continue;
       if (zicht.length >= PLAFOND.velden) break;
       zicht.push(v);
     }
@@ -929,7 +1668,9 @@ export class WerkLaag {
     if (iets) { c.fillStyle = 'rgba(112,92,64,0.32)'; c.fill(); }
     if (z >= DREMPEL.voren) {
       c.beginPath(); iets = false;
-      for (const v of zicht) if (v.f & 16) { this.rijen(c, v, 0.42); iets = true; }
+      for (const v of zicht) {
+        if (v.f & 16) { this.rijen(c, v, 0.42); iets = true; } else if (v.f & 262144) { this.baan(v, v.fase); this.rijen(c, v, 0.42, this.li + (this.mturn > 0 ? 1 : 0)); iets = true; }
+      }
       if (iets) { c.strokeStyle = 'rgba(240,226,170,0.42)'; c.lineWidth = 0.1; c.stroke(); }
     }
     if (fijn) {
@@ -951,7 +1692,7 @@ export class WerkLaag {
       const w = (2 * v.B) / v.nL;
       let van = 0;
       if (v.f & 64) { this.baan(v, v.fase); van = this.li + 1; const q = -v.B + (this.li + 0.5) * w, eind = this.mdir > 0 ? v.L - 0.3 : -v.L + 0.3; c.moveTo(v.x + v.lx * this.ms + v.px * q, v.y + v.ly * this.ms + v.py * q); c.lineTo(v.x + v.lx * eind + v.px * q, v.y + v.ly * eind + v.py * q); }
-      for (let j = van; j < v.nL; j++) { const q = -v.B + (j + 0.5) * w; c.moveTo(v.x + v.lx * (-v.L + 0.3) + v.px * q, v.y + v.ly * (-v.L + 0.3) + v.py * q); c.lineTo(v.x + v.lx * (v.L - 0.3) + v.px * q, v.y + v.ly * (v.L - 0.3) + v.py * q); }
+      for (let j = van, tot = v.f & 64 ? v.nL : v.zwad; j < tot; j++) { const q = -v.B + (j + 0.5) * w; c.moveTo(v.x + v.lx * (-v.L + 0.3) + v.px * q, v.y + v.ly * (-v.L + 0.3) + v.py * q); c.lineTo(v.x + v.lx * (v.L - 0.3) + v.px * q, v.y + v.ly * (v.L - 0.3) + v.py * q); }
       if (v.rol & R_KUIL) kleurZwad = 'rgba(132,150,72,0.9)';
       iets = true;
     }
@@ -1105,46 +1846,48 @@ export class WerkLaag {
     const kist = this.kist ?? (this.kist = new Float32Array(PLAFOND.kisten * 4));
     for (const v of zicht) {
       const f = v.f;
-      // ploegen en zaaien: tractor met ploeg of zaaimachine, meeuwen achter de ploeg
-      if (f & (1 | 4)) {
-        this.baan(v, v.fase);
-        const kl = Math.floor(v.h2 * TREKKER_KLEUR.length);
-        this.zetVoertuig(this.mx, this.my, this.mhx, this.mhy, TREKKER, kl, f & 1 ? A_PLOEG : A_ZAAI);
-        if ((f & 1) && z >= DREMPEL.meeuw) for (let j = 0; j < 5; j++) {
-          const w = nu / 900 * (1 + j * 0.13) + j * 1.7, ach = 0.9 + j * 0.35;
-          this.zetMeeuw(this.mx - this.mhx * ach + Math.cos(w) * 0.5, this.my - this.mhy * ach + Math.sin(w) * 0.4, 0.6 + 0.4 * Math.sin(w * 0.7 + j), nu / 140 + j);
-        }
-      }
+      // machines van het werkplan: onderweg van of naar het erf of de weg, of aan het werk op het land
+      for (let m = 0; m < v.nAkt; m++) this.machine(v, v.akt[m], z);
       // verse voren een paar dagen na het ploegen: meeuwen die erop zitten te pikken
       if ((f & 2) && z >= DREMPEL.meeuw && dagLicht && this.dag < 120) for (let j = 0; j < 4; j++) {
         const s = (hash(v.id, j, 61) - 0.5) * 1.6 * v.L, q = (hash(v.id, j, 62) - 0.5) * 1.6 * v.B;
         this.zetMeeuw(v.x + v.lx * s + v.px * q, v.y + v.ly * s + v.py * q, 0, -1);
       }
       // balen: de pers raapt de zwaden op en laat balen achter; daarna blijven ze liggen
-      if (f & (64 | 128)) {
-        const kuil = (v.rol & R_KUIL) !== 0, soort = kuil ? (v.h2 < 0.7 ? 2 : 3) : v.h2 < 0.5 ? 1 : 0;
-        let tot = v.nL, tot2 = v.L;
-        if (f & 64) { this.baan(v, v.fase); tot = this.li; tot2 = this.ms * this.mdir; this.zetVoertuig(this.mx, this.my, this.mhx, this.mhy, TREKKER, Math.floor(v.h3 * TREKKER_KLEUR.length), A_PERS); }
+      // de wagen die ze ophaalt neemt ze baan voor baan mee (bit 524288)
+      if (f & (64 | 128 | 524288)) {
+        const kuil = (v.rol & R_KUIL) !== 0, soort = kuil ? (v.h2 < 0.7 ? 2 : 3) : v.h2 < 0.5 ? 1 : 0, raap = (f & 524288) !== 0;
+        let tot = v.nL, tot2 = v.L, van = 0;
+        if (f & (64 | 524288)) {
+          this.baan(v, v.fase);
+          const li = this.li + (this.mturn > 0 ? 1 : 0);
+          if (raap) { van = li; tot = v.nL - 1; tot2 = this.mturn > 0 ? -v.L * 2 : this.ms * this.mdir; } else { tot = li; tot2 = this.mturn > 0 ? -v.L * 2 : this.ms * this.mdir; }
+        }
         if (z >= DREMPEL.baal - 0.5) {
           const w = (2 * v.B) / v.nL, hk = Math.atan2(v.ly, v.lx);
-          for (let j = 0; j <= tot && j < v.nL; j++) {
+          for (let j = van; j <= tot && j < v.nL; j++) {
             const q = -v.B + (j + 0.5) * w, rd = j & 1 ? -1 : 1;
             for (let k = 0; k < 8; k++) {
               const s0 = -v.L + 0.9 + k * 1.75 + (hash(v.id, j * 8 + k, 63) - 0.5) * 0.5;
               if (s0 > v.L - 0.5) break;
-              if (j === tot) { const sd = s0 * rd; if (sd > tot2 - 0.9) continue; }
+              if (raap) { if (j === van) { const sd = s0 * rd; if (sd < tot2 + 0.6) continue; } } else if (j === tot) { const sd = s0 * rd; if (sd > tot2 - 0.9) continue; }
               this.zetBaal(v.x + v.lx * s0 + v.px * q, v.y + v.ly * s0 + v.py * q, soort, hk + (hash(v.id, k, 64) - 0.5) * 0.4);
             }
           }
         }
       }
       // sproeier: haspel aan de kopakker, slang langs de baan, kanon dat heen en weer zwaait
+      // De haspel staat van het brengen tot het ophalen op de kopakker; het kanon rolt langzaam in en wordt daarna
+      // droog weer uitgereden (een doorlopende beweging, zonder sprong). Water alleen op droge dagen.
       if ((f & 256) && nSproei < PLAFOND.sproeiers && z >= DREMPEL.sproei - 0.5) {
         const j = Math.floor(v.h * v.nL), q = -v.B + (j + 0.5) * ((2 * v.B) / v.nL);
-        const s = v.L - 1.0 - frac(this.klok / 900 + v.h3) * (1.5 * v.L - 1.0), hk = Math.atan2(-v.ly, -v.lx) + Math.sin(nu / 2600 + v.h * 6) * 1.1;
+        const p = frac(this.klok / 900 + v.h3), u = p < 0.92 ? 1 - p / 0.92 : (p - 0.92) / 0.08;
+        if (v.wDag !== this.dagNr) { v.wDag = this.dagNr; v.droogHier = this.droogWeer && hash(Math.floor(this.dag / 2), v.id, 9) < 0.65; }
+        const nat = p < 0.92 && v.droogHier ? 1 : 0;
+        const s = v.L - 1.0 - (1 - u) * (1.5 * v.L - 1.0), hk = Math.atan2(-v.ly, -v.lx) + Math.sin(nu / 2600 + v.h * 6) * 1.1 * nat;
         const o = nSproei++ * 6;
         sproei[o] = v.x + v.lx * s + v.px * q; sproei[o + 1] = v.y + v.ly * s + v.py * q; sproei[o + 2] = hk;
-        sproei[o + 3] = v.x + v.lx * (v.L - 0.45) + v.px * q; sproei[o + 4] = v.y + v.ly * (v.L - 0.45) + v.py * q; sproei[o + 5] = Math.min(3.6, v.B * 1.5 + 0.8);
+        sproei[o + 3] = v.x + v.lx * (v.L - 0.45) + v.px * q; sproei[o + 4] = v.y + v.ly * (v.L - 0.45) + v.py * q; sproei[o + 5] = nat ? Math.min(3.6, v.B * 1.5 + 0.8) : 0;
       }
       // vogelverschrikker
       if ((f & 32768) && nSchrik < PLAFOND.vogelverschrikkers && z >= DREMPEL.schrik - 0.5) {
@@ -1155,13 +1898,16 @@ export class WerkLaag {
       if (f & 4096) {
         const nR = Math.max(1, Math.floor((2 * v.hv - 0.9) / 1.25)), rij = Math.floor(v.h * nR), w = -v.hv + 0.6 + rij * 1.25 + 0.62;
         const nB = Math.max(1, Math.floor((2 * v.hu - 0.9) / 1.25));
-        if (z >= DREMPEL.machine - 0.5) this.zetVoertuig(v.x + v.co * (v.hu - 1.75) - v.si * w, v.y + v.si * (v.hu - 1.75) + v.co * w, v.co, v.si, TREKKER, Math.floor(v.h3 * 4), A_KISTEN);
-        // plukkers en kisten pas verzamelen als ze ook getekend worden: anders vullen ze op zoom 4 het plafond
+        // plukkers en kisten pas verzamelen als ze ook getekend worden: anders vullen ze op zoom 4 het plafond.
+        // De plukkers stappen uit de plukwagen en lopen naar hun boom; aan het eind lopen ze terug en stappen in.
         if (z >= DREMPEL.mens - 0.5) for (let i = 0; i < Math.min(4, nB); i++) {
           const u = -v.hu + 0.6 + ((i * 2 + Math.floor(v.h2 * 3)) % nB) * 1.25, buk = Math.sin(nu / 700 + i * 2.1);
-          this.zetMens(v.x + u * v.co - (w - 0.05) * v.si, v.y + u * v.si + (w - 0.05) * v.co, (v.id + i) % KLEDING.length, buk);
+          const tx = v.x + u * v.co - (w - 0.05) * v.si, ty = v.y + u * v.si + (w - 0.05) * v.co;
+          if (this.lopen(v, tx, ty, i)) this.zetMens(this.lx, this.ly, (v.id + i) % KLEDING.length, this.lw < 1 ? 0 : buk);
         }
-        if (z >= DREMPEL.mens - 1) for (let k = 0; k < 6 && nKist < PLAFOND.kisten; k++) {
+        // de kisten worden een voor een uitgeladen en aan het eind weer een voor een ingeladen
+        const nK = clamp(Math.floor(Math.min(v.plukT - 0.3, v.plukD - 0.3 - v.plukT) / 0.12), 0, 6);
+        if (z >= DREMPEL.mens - 1) for (let k = 0; k < nK && nKist < PLAFOND.kisten; k++) {
           const o = nKist++ * 4, u = v.hu - 0.25 - (k % 3) * 0.36, ww = w + (k < 3 ? -0.2 : 0.2);
           kist[o] = v.x + u * v.co - ww * v.si; kist[o + 1] = v.y + u * v.si + ww * v.co; kist[o + 2] = Math.atan2(v.si, v.co); kist[o + 3] = hash(v.id, 7) < 0.5 ? 0 : 1;
         }
@@ -1169,10 +1915,9 @@ export class WerkLaag {
       // wijngaard: plukkers langs de rijen met een smalspoortrekker en druivenbakken
       if (f & 16384) {
         const nR = Math.max(1, Math.floor((2 * v.B) / 0.9));
-        if (z >= DREMPEL.machine - 0.5) this.zetVoertuig(v.x + v.lx * (v.L - 0.6) + v.px * (-v.B + 0.9), v.y + v.ly * (v.L - 0.6) + v.py * (-v.B + 0.9), -v.lx, -v.ly, SMALSPOOR, Math.floor(v.h3 * 4), A_KISTEN, L_GEEN, 0.8);
         if (z >= DREMPEL.mens - 0.5) for (let i = 0; i < 4; i++) {
-          const q = -v.B + 0.9 * (1 + ((i + Math.floor(v.h * nR)) % nR)), s = -v.L + 0.4 + frac(this.klok / 140 + i * 0.27) * (2 * v.L - 0.8);
-          this.zetMens(v.x + v.lx * s + v.px * q, v.y + v.ly * s + v.py * q, (v.id + i * 3) % KLEDING.length, Math.sin(nu / 800 + i));
+          const q = -v.B + 0.9 * (1 + ((i + Math.floor(v.h * nR)) % nR)), s = -v.L + 0.4 + tri(this.klok / 140 + i * 0.27) * (2 * v.L - 0.8);
+          if (this.lopen(v, v.x + v.lx * s + v.px * q, v.y + v.ly * s + v.py * q, i)) this.zetMens(this.lx, this.ly, (v.id + i * 3) % KLEDING.length, this.lw < 1 ? 0 : Math.sin(nu / 800 + i));
         }
       }
       // bijenkasten aan de rand van de boomgaard of het koolzaad
@@ -1191,7 +1936,7 @@ export class WerkLaag {
     // natte waaier onder de sproeier en de haspel met slang (de waterboog zelf komt bij de hoge dingen)
     if (nSproei) {
       c.beginPath();
-      for (let i = 0; i < nSproei; i++) { const o = i * 6, x = sproei[o], y = sproei[o + 1], hk = sproei[o + 2], R = sproei[o + 5]; c.moveTo(x, y); c.arc(x, y, R, hk - 0.5, hk + 0.5); c.closePath(); }
+      for (let i = 0; i < nSproei; i++) { const o = i * 6, x = sproei[o], y = sproei[o + 1], hk = sproei[o + 2], R = sproei[o + 5]; if (R <= 0) continue; c.moveTo(x, y); c.arc(x, y, R, hk - 0.5, hk + 0.5); c.closePath(); }
       c.fillStyle = 'rgba(30,50,40,0.13)'; c.fill();
       c.beginPath();
       for (let i = 0; i < nSproei; i++) { const o = i * 6; c.moveTo(sproei[o], sproei[o + 1]); c.lineTo(sproei[o + 3], sproei[o + 4]); }
@@ -1271,9 +2016,30 @@ export class WerkLaag {
   }
 
   // Voertuigen in een paar gebundelde lagen: schaduw, aanbouw, wielen, carrosserie per kleur, cabine, lading.
+  // Voertuigen die in- of uitvagen (bij de weg) komen in een eigen dekkingsniveau: de buffer wordt per niveau
+  // gegroepeerd en elk niveau gaat met een eigen globalAlpha door dezelfde gebundelde lagen.
   tekenVoertuigen(c, a, z) {
     const n = this.nVw, b = this.vw;
     if (!n) return;
+    // acht niveaus: een voertuig vaagt in kleine stapjes in en uit (alleen niveaus met voertuigen kosten tijd)
+    const NV = 8, t = this.vwTmp ?? (this.vwTmp = new Float32Array(b.length)), g = this.vwGrens ?? (this.vwGrens = new Int32Array(NV + 2));
+    let m = 0;
+    for (let L = NV; L >= 1; L--) {
+      g[NV - L] = m;
+      for (let i = 0; i < n; i++) {
+        const o = i * VW, d = b[o + 9], niv = d >= 0.97 ? NV : Math.max(1, Math.ceil(d * NV));
+        if (niv !== L) continue;
+        for (let k = 0; k < VW; k++) t[m * VW + k] = b[o + k];
+        m++;
+      }
+    }
+    g[NV] = m;
+    for (let k = 0, e = m * VW; k < e; k++) b[k] = t[k]; // zonder subarray: geen nieuw object per beeld
+    for (let L = NV; L >= 1; L--) { const i0 = g[NV - L], i1 = g[NV + 1 - L]; if (i1 > i0) this.tekenVoertuigDeel(c, (a * L) / NV, z, i0, i1); }
+    this.n.machines = n;
+  }
+  tekenVoertuigDeel(c, a, z, i0, i1) {
+    const b = this.vw;
     c.globalAlpha = a;
     // maten per soort: halve lengte, halve breedte van de romp
     const romp = (o, k, dx, dy) => {
@@ -1281,6 +2047,7 @@ export class WerkLaag {
       if (s === TREKKER || s === SMALSPOOR) rechthoek(c, x, y, hx, hy, 0.36 * sch, (s === SMALSPOOR ? 0.15 : 0.2) * sch);
       else if (s === DUMPER) rechthoek(c, x, y, hx, hy, 0.5 * sch, 0.27 * sch);
       else if (s === BESTEL) rechthoek(c, x, y, hx, hy, 0.4 * sch, 0.19 * sch);
+      else if (s === MAAIER) rechthoek(c, x, y, hx, hy, 0.5 * sch, 0.32 * sch);
       else rechthoek(c, x, y, hx, hy, 0.72 * sch, 0.24 * sch);
     };
     const aanbouw = (o, dx, dy) => {
@@ -1290,22 +2057,25 @@ export class WerkLaag {
       else if (s === A_PERS) rechthoek(c, x - hx * 0.82 * sch - hy * 0.12, y - hy * 0.82 * sch + hx * 0.12, hx, hy, 0.36 * sch, 0.24 * sch);
       else if (s === A_SCHUIF) rechthoek(c, x + hx * 0.5 * sch, y + hy * 0.5 * sch, hx, hy, 0.06 * sch, 0.42 * sch);
       else if (s === A_KISTEN) rechthoek(c, x - hx * 0.9 * sch, y - hy * 0.9 * sch, hx, hy, 0.42 * sch, 0.26 * sch);
+      else if (s === A_MAAI) rechthoek(c, x + hx * 0.62 * sch, y + hy * 0.62 * sch, hx, hy, 0.12 * sch, 0.62 * sch);
+      else if (s === A_WAGEN) rechthoek(c, x - hx * 0.95 * sch, y - hy * 0.95 * sch, hx, hy, 0.45 * sch, 0.26 * sch);
+      else if (s === A_MAAIBALK) rechthoek(c, x + hx * 0.1 * sch - hy * 0.55 * sch, y + hy * 0.1 * sch + hx * 0.55 * sch, hx, hy, 0.05 * sch, 0.35 * sch);
     };
     c.beginPath();
-    for (let i = 0; i < n; i++) { const o = i * VW; romp(o, 1, 0.12, 0.16); aanbouw(o, 0.1, 0.13); }
+    for (let i = i0; i < i1; i++) { const o = i * VW; romp(o, 1, 0.12, 0.16); aanbouw(o, 0.1, 0.13); }
     c.fillStyle = 'rgba(0,0,0,0.3)'; c.fill();
     // aanbouw per soort
     for (let s = 1; s < AK.length; s++) {
       c.beginPath(); let iets = false;
-      for (let i = 0; i < n; i++) { const o = i * VW; if (b[o + 6] === s) { aanbouw(o, 0, 0); iets = true; } }
+      for (let i = i0; i < i1; i++) { const o = i * VW; if (b[o + 6] === s) { aanbouw(o, 0, 0); iets = true; } }
       if (iets) { c.fillStyle = AK[s]; c.fill(); }
     }
     // wielen
     if (z >= DREMPEL.wagen + 1) {
       c.beginPath();
-      for (let i = 0; i < n; i++) {
+      for (let i = i0; i < i1; i++) {
         const o = i * VW, x = b[o], y = b[o + 1], hx = b[o + 2], hy = b[o + 3], s = b[o + 4], sch = b[o + 8];
-        const lang = s === VRACHT ? 0.5 : s === DUMPER ? 0.32 : 0.2, br = s === VRACHT || s === DUMPER ? 0.27 : s === SMALSPOOR ? 0.17 : 0.22;
+        const lang = s === VRACHT ? 0.5 : s === DUMPER || s === MAAIER ? 0.32 : 0.2, br = s === VRACHT || s === DUMPER ? 0.27 : s === MAAIER ? 0.3 : s === SMALSPOOR ? 0.17 : 0.22;
         for (const k of [-1, 1]) for (const u of [-lang, lang * 0.9]) {
           const groot = (s === TREKKER || s === SMALSPOOR) && u < 0;
           rechthoek(c, x + hx * u * sch - hy * k * br * sch, y + hy * u * sch + hx * k * br * sch, hx, hy, (groot ? 0.13 : 0.08) * sch, 0.05 * sch);
@@ -1316,7 +2086,7 @@ export class WerkLaag {
     // carrosserie per kleur
     for (let k = 0; k < KLEUREN.length; k++) {
       c.beginPath(); let iets = false;
-      for (let i = 0; i < n; i++) {
+      for (let i = i0; i < i1; i++) {
         const o = i * VW;
         if (b[o + 5] !== k) continue;
         const s = b[o + 4], sch = b[o + 8], x = b[o], y = b[o + 1], hx = b[o + 2], hy = b[o + 3];
@@ -1330,11 +2100,15 @@ export class WerkLaag {
 
     for (let l = 1; l < LK.length; l++) {
       c.beginPath(); let iets = false;
-      for (let i = 0; i < n; i++) {
+      for (let i = i0; i < i1; i++) {
         const o = i * VW;
         if (b[o + 7] !== l) continue;
         const sch = b[o + 8], x = b[o], y = b[o + 1], hx = b[o + 2], hy = b[o + 3];
+        const vol = b[o + 10];
+        if (vol < 0.05) continue;
         if (b[o + 4] === DUMPER) rechthoek(c, x - hx * 0.12 * sch, y - hy * 0.12 * sch, hx, hy, 0.3 * sch, 0.22 * sch);
+        else if (b[o + 6] === A_WAGEN) rechthoek(c, x - hx * (0.95 + 0.4 * (1 - vol)) * sch, y - hy * (0.95 + 0.4 * (1 - vol)) * sch, hx, hy, 0.4 * sch * vol, 0.21 * sch); // balen of graan op de wagen
+        else if (l === L_HOUT) rechthoek(c, x - hx * (0.2 + 0.5 * (1 - vol)) * sch, y - hy * (0.2 + 0.5 * (1 - vol)) * sch, hx, hy, 0.5 * sch * vol, 0.22 * sch);
         else rechthoek(c, x - hx * 0.2 * sch, y - hy * 0.2 * sch, hx, hy, 0.5 * sch, l === L_MELK ? 0.2 * sch : 0.22 * sch);
         iets = true;
       }
@@ -1342,7 +2116,7 @@ export class WerkLaag {
     }
     // licht van boven: dak van de cabine, glans op de tank, kopse kanten van de stammen
     c.beginPath();
-    for (let i = 0; i < n; i++) {
+    for (let i = i0; i < i1; i++) {
       const o = i * VW, s = b[o + 4], sch = b[o + 8], x = b[o], y = b[o + 1], hx = b[o + 2], hy = b[o + 3];
       if (s === TREKKER || s === SMALSPOOR) rechthoek(c, x - hx * 0.06 * sch, y - hy * 0.06 * sch, hx, hy, 0.13 * sch, 0.14 * sch);
       else if (s === VRACHT) rechthoek(c, x + hx * 0.55 * sch - 0.03, y + hy * 0.55 * sch - 0.03, hx, hy, 0.13 * sch, 0.18 * sch);
@@ -1352,9 +2126,9 @@ export class WerkLaag {
     c.fillStyle = 'rgba(255,255,255,0.42)'; c.fill();
     if (z >= DREMPEL.mens - 1) {
       c.beginPath(); let iets = false;
-      for (let i = 0; i < n; i++) {
+      for (let i = i0; i < i1; i++) {
         const o = i * VW;
-        if (b[o + 7] !== L_HOUT) continue;
+        if (b[o + 7] !== L_HOUT || b[o + 10] < 0.3) continue;
         const sch = b[o + 8], x = b[o] - b[o + 2] * 0.68 * sch, y = b[o + 1] - b[o + 3] * 0.68 * sch;
         for (let k = 0; k < 3; k++) stip(c, x - b[o + 3] * (k - 1) * 0.14, y + b[o + 2] * (k - 1) * 0.14, 0.07);
         iets = true;
@@ -1362,14 +2136,13 @@ export class WerkLaag {
       if (iets) { c.fillStyle = '#c9a77a'; c.fill(); }
       // ruitjes
       c.beginPath();
-      for (let i = 0; i < n; i++) {
+      for (let i = i0; i < i1; i++) {
         const o = i * VW, s = b[o + 4], sch = b[o + 8], x = b[o], y = b[o + 1], hx = b[o + 2], hy = b[o + 3];
         const u = s === VRACHT ? 0.7 : s === BESTEL ? 0.33 : s === DUMPER ? 0.4 : 0.08;
         rechthoek(c, x + hx * u * sch, y + hy * u * sch, hx, hy, 0.03 * sch, (s === TREKKER || s === SMALSPOOR ? 0.12 : 0.17) * sch);
       }
       c.fillStyle = 'rgba(150,190,215,0.85)'; c.fill();
     }
-    this.n.machines = n;
   }
 
   tekenMensen(c, a) {
@@ -1401,7 +2174,7 @@ export class WerkLaag {
       const e = this.bak(`g:${Math.round(g.z * 1e6)}:${this.P}:${this.sn}`, `g:${Math.round(g.z * 1e6)}`, bw, bw, bakGroeve, g);
       if (e) c.drawImage(e.cv, g.x - e.bw / 2, g.y - e.bh / 2, e.bw, e.bh);
       // dumpers over de helling: beladen omhoog, leeg omlaag; de graafmachine op de bodem
-      if (z >= DREMPEL.machine - 0.5 && this.licht0) {
+      if (z >= DREMPEL.machine - 0.5) { // de groeve werkt dag en nacht door, onder de lampen
         for (let i = 0; i < 2 && nD < PLAFOND.dumpers; i++) {
           const f = tri(this.klok / 46 + i * 0.5 + g.z), p = f, ah = g.hoek + p * 1.3, r = groefRand(g, ah) * (1.02 - p * 0.72) + (1 - p) * 0.0;
           const x = g.x + Math.cos(ah) * r + p * 0.25, y = g.y + Math.sin(ah) * r * 0.86 + p * 0.25;
@@ -1580,16 +2353,17 @@ export class WerkLaag {
             c.fillStyle = '#d2b07e'; c.fill();
           }
           for (const k of zicht) {
-            if (k.herplant || !k.truck || !this.licht0) continue;
+            if (k.herplant || !k.truck) continue;
+            // de vrachtwagen wordt geladen (de lading groeit stam voor stam) en staat 's nachts stil bij de stapel
             const hx = -Math.sin(k.hoek), hy = Math.cos(k.hoek), ux = Math.cos(k.hoek), uy = Math.sin(k.hoek);
-            const vol = frac(this.klok / 200 + k.z) > 0.5 ? L_HOUT : L_GEEN;
-            this.zetVoertuig(k.sx + ux * 0.95, k.sy + uy * 0.95, hx, hy, VRACHT, 4 + Math.floor(k.z * 3), A_GEEN, vol);
+            const vol = clamp(Math.floor(tri(this.klok / 400 + k.z) * 6) / 5, 0, 1);
+            this.zetVoertuig(k.sx + ux * 0.95, k.sy + uy * 0.95, hx, hy, VRACHT, 4 + Math.floor(k.z * 3), A_GEEN, L_HOUT, 1, 1, vol);
           }
         }
         c.globalAlpha = a;
       }
       // bosarbeiders bij de stronken, met zaagsel dat opspat
-      if (z >= DREMPEL.mens - 0.5 && this.licht0) for (const k of zicht) {
+      if (z >= DREMPEL.mens - 0.5 && this.dagMens > 0.02) for (const k of zicht) {
         if (k.herplant) continue;
         for (let i = 0; i < 2; i++) {
           const w = hash(k.t, i, 86) * TAU + Math.sin(this.klok / 30 + i) * 0.4, r = k.r * 0.55;
@@ -1604,7 +2378,7 @@ export class WerkLaag {
       const e = this.bak(`z:${Math.round(zg.z * 1e6)}:${this.P}:${this.sn}`, `z:${Math.round(zg.z * 1e6)}`, 7, 7, bakZagerij, zg);
       if (e) c.drawImage(e.cv, zg.x - e.bw / 2, zg.y - e.bh / 2, e.bw, e.bh);
       if (this.nacht > 0.3) this.zetLicht(zg.x, zg.y, 2.2, WARM, 0.8);
-      if (z >= DREMPEL.mens - 0.5 && this.licht0) {
+      if (z >= DREMPEL.mens - 0.5 && this.dagMens > 0.02) {
         const co = Math.cos(zg.hoek), si = Math.sin(zg.hoek), f = tri(this.klok / 50 + zg.z);
         this.zetMens(zg.x + co * (-1.5 + f * 2.5) - si * 0.3, zg.y + si * (-1.5 + f * 2.5) + co * 0.3, 2, 0);
       }
@@ -1644,39 +2418,51 @@ export class WerkLaag {
       }
       c.globalAlpha = a;
     }
-    // wagens op de erfweg (melk, graan, bestelling) en de sneeuwschuiver
-    if (z >= DREMPEL.wagen - 0.5) {
+    // Wagens over de weg naar het erf en terug, de sneeuwschuiver en de trekker die op het erf geparkeerd staat.
+    // Alles rijdt over een vast pad: een wagen vaagt in en uit op de weg, nooit midden op de erfweg of het erf.
+    if (z >= DREMPEL.machine - 0.5) {
       let nW = 0, nS = 0;
       for (const e of zicht) {
         const l = e.laan;
-        if (!l) continue;
-        if (this.sz.sneeuw > 0.3 && e.schuif && nS < PLAFOND.schuivers) {
-          const f = tri(this.klok / (l.len * 3 + 6) + e.z), heen = frac(this.klok / (l.len * 3 + 6) + e.z) < 0.5;
-          const x = l.ax + (l.bx - l.ax) * f, y = l.ay + (l.by - l.ay) * f, hx = heen ? l.dx : -l.dx, hy = heen ? l.dy : -l.dy;
-          this.zetVoertuig(x, y, hx, hy, TREKKER, Math.floor(e.z * 4), A_SCHUIF);
-          this.schuif = this.schuif ?? new Float32Array(PLAFOND.schuivers * 4);
-          const o = nS++ * 4; this.schuif[o] = x; this.schuif[o + 1] = y; this.schuif[o + 2] = hx; this.schuif[o + 3] = hy;
-          if (nu % 900 < 450) this.zetLicht(x - hx * 0.1, y - hy * 0.1 - 0.3, 0.6, AMBER, 1);
-          if (this.nacht > 0.3) this.zetLicht(x + hx * 0.9, y + hy * 0.9, 1.1, WARM, 0.8);
-          continue;
+        // sneeuwschuiver: gaat alleen aan of uit als hij op zijn parkeerplek staat
+        let schuift = false;
+        if (l && e.schuif && e.spad) {
+          const P = (e.spadLen * 2) / 1.5 + 8, p = this.klok / P + e.z, f = tri(p);
+          const wil = this.sz.sneeuw > 0.3;
+          // omzetten mag als hij thuis staat, of als het erf het vorige beeld niet in beeld was (dan zag niemand het)
+          if (wil !== e.schuifAan && (f * e.spadLen < 0.2 || e.beeld !== this.beeldNr - 1)) e.schuifAan = wil;
+          e.beeld = this.beeldNr;
+          if (e.schuifAan && nS < PLAFOND.schuivers) {
+            this.langsPad(e.spad, e.spadN, e.spadLen, f * e.spadLen, 0, 0, 0, 0);
+            const x = this.mx, y = this.my, terug = frac(p) >= 0.5, hx = terug ? -this.mhx : this.mhx, hy = terug ? -this.mhy : this.mhy;
+            this.zetVoertuig(x, y, hx, hy, TREKKER, e.kleur, A_SCHUIF);
+            this.schuif = this.schuif ?? new Float32Array(PLAFOND.schuivers * 4);
+            const o = nS++ * 4; this.schuif[o] = x; this.schuif[o + 1] = y; this.schuif[o + 2] = hx; this.schuif[o + 3] = hy;
+            if (nu % 900 < 450) this.zetLicht(x - hx * 0.1, y - hy * 0.1 - 0.3, 0.6, AMBER, 1);
+            if (this.nacht > 0.3) this.zetLicht(x + hx * 0.9, y + hy * 0.9, 1.1, WARM, 0.8);
+            schuift = true;
+          }
         }
-        if (!this.licht0 || nW >= PLAFOND.wagens) continue;
-        const P = 70 + e.z * 70, f = frac(this.klok / P + e.z);
-        if (f > 0.52) continue;
-        let s, uit;
-        if (f < 0.12) { s = 1 - f / 0.12; uit = false; } else if (f < 0.4) { s = 0; uit = false; } else { s = (f - 0.4) / 0.12; uit = true; }
-        if (l.dood) {
-          // doodlopende veldweg: er komt geen wagen van buiten; een trekker rijdt van het erf het land in en terug
-          const sd = 1 - s, hx = uit ? -l.dx : l.dx, hy = uit ? -l.dy : l.dy;
-          this.zetVoertuig(l.ax + (l.bx - l.ax) * sd, l.ay + (l.by - l.ay) * sd, hx, hy, TREKKER, Math.floor(e.z * 4));
-          nW++;
-          continue;
-        }
-        const x = l.ax + (l.bx - l.ax) * s, y = l.ay + (l.by - l.ay) * s;
-        const oogst = this.sz.oogst > 0.2 && hash(e.t, 741) < 0.6, melk = !oogst && hash(e.t, 742) < 0.65;
-        if (oogst) this.zetVoertuig(x, y, uit ? l.dx : -l.dx, uit ? l.dy : -l.dy, VRACHT, 6, A_GEEN, L_GRAAN);
-        else if (melk) this.zetVoertuig(x, y, uit ? l.dx : -l.dx, uit ? l.dy : -l.dy, VRACHT, 4, A_GEEN, L_MELK);
-        else this.zetVoertuig(x, y, uit ? l.dx : -l.dx, uit ? l.dy : -l.dy, BESTEL, 4 + Math.floor(e.z * 4));
+        // de trekker van het erf staat thuis zolang hij niet op het land is of sneeuw schuift
+        if (!schuift && (e.velden.length || e.schuif)) this.zetVoertuig(e.px, e.py, e.si, -e.co, TREKKER, e.kleur, A_GEEN, L_GEEN, 1, this.erfThuis(e, this.dj));
+        // een wagen van buiten (melk, graan, bestelling): de weg af, de erfweg op, even stilstaan, en terug de weg op
+        if (!e.rin || nW >= PLAFOND.wagens) continue;
+        const ronde = this.klok / e.P + e.z, t = frac(ronde) * e.P, id = Math.floor(ronde);
+        if (t >= e.tIn + e.tStop + e.tUit) continue;
+        if (e.rit !== id) { e.rit = id; const h = hash(e.t, id, 741); e.ritSoort = this.sz.oogst > 0.2 && h < 0.6 ? 2 : hash(e.t, id, 742) < 0.65 ? 1 : 0; }
+        let dk = 1;
+        if (t < e.tIn) { const d = t * 3; this.langsPad(e.rin, 4, e.rinLen, d, 0, 0, 0, 0); dk = smooth(0, 1.5, d); }
+        else if (t < e.tIn + e.tStop) {
+          // op het erf: keren voor de terugweg
+          this.langsPad(e.rin, 4, e.rinLen, e.rinLen, 0, 0, 0, 0);
+          const g = smooth(0.35, 0.75, (t - e.tIn) / e.tStop), h0 = Math.atan2(this.mhy, this.mhx) + Math.PI * g;
+          this.mhx = Math.cos(h0); this.mhy = Math.sin(h0);
+        } else { const d = (t - e.tIn - e.tStop) * 3; this.langsPad(e.ruit, 4, e.ruitLen, d, 0, 0, 0, 0); dk = smooth(0, 1.5, e.ruitLen - d); }
+        const x = this.mx, y = this.my, hx = this.mhx, hy = this.mhy;
+        if (e.ritSoort === 2) this.zetVoertuig(x, y, hx, hy, VRACHT, 6, A_GEEN, L_GRAAN, 1, dk);
+        else if (e.ritSoort === 1) this.zetVoertuig(x, y, hx, hy, VRACHT, 4, A_GEEN, L_MELK, 1, dk);
+        else this.zetVoertuig(x, y, hx, hy, BESTEL, 4 + Math.floor(e.z * 4), A_GEEN, L_GEEN, 1, dk);
+        if (this.nacht > 0.3) this.zetLicht(x + hx * 0.9, y + hy * 0.9, 1.0, WARM, 0.7 * dk);
         nW++;
       }
       this.n.wagens = nW; this.n.schuivers = nS; this.nSchuif = nS;

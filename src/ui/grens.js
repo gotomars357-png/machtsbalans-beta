@@ -1,7 +1,8 @@
 // Grenzen en macht op de kaart (pakket D van detailronde C8): waar landen ophouden en wie waar invloed heeft.
-// - Grensovergangen: waar de wegennetten van twee buurlanden elkaar over de grens het dichtst naderen, een korte
-//   verbindingsweg met een grenspost (slagbomen, douanehokjes, overkapping, de vlaggen van beide landen en een rij
-//   wachtende vrachtwagens). Open tussen bondgenoten, streng tussen blokken, dicht en bewaakt in oorlog.
+// - Grensovergangen (C12): op elke grensovergang van het wegennet (net.grensovergangen, waar een stam- of hoofdweg
+//   de grens kruist) een grenspost: slagbomen, douanehokjes, overkapping en de vlaggen van beide landen. Deze laag
+//   legt zelf geen wegen aan en tekent geen voertuigen; de slagboom volgt de ritten (levenLaag.slagboom). Open
+//   tussen bondgenoten, streng tussen blokken, dicht en bewaakt in oorlog; zoeklichten alleen bij spanning of oorlog.
 // - Grenslijnen op het land: paaltjes tussen bondgenoten, een laag hek naast zwevende landen, een hoog hek met
 //   palen en een patrouillestrook tussen blokken, en in oorlog een dubbel hek met prikkeldraad, wachttorens met
 //   zoeklichten, tankversperringen en patrouilles. Daarachter de frontlinie: loopgraven in zigzag,
@@ -16,11 +17,12 @@
 // tegel en volgnummer; de klok stuurt alleen beweging. Geen Math.random, geen Date.
 // Licht uit het noordwesten zoals de andere lagen: schaduwen vallen naar het zuidoosten, hoge dingen staan recht
 // omhoog getekend. Detail komt trapsgewijs op (zie DREMPEL): zoom 4-6 hekken, torens, posten en vlaggen als grove
-// vormen, 8-10 slagbomen, hokjes, vrachtwagens, tanden en patrouilles, 12-14 prikkeldraadrollen, douaniers,
+// vormen, 8-10 slagbomen, hokjes, tanden en patrouilles, 12-14 prikkeldraadrollen, douaniers,
 // pionnen, camera's en de figuren in lange jassen.
 
 import { inOorlog } from '../engine/leger.js';
 import { seizoen, wind } from './seizoen.js';
+import { verkeersTijd } from './wegennet.js';
 
 // ---------- gedeelde hulpjes (eigen kopie, zie inzoom-spec §0) ----------
 
@@ -72,25 +74,20 @@ const D_HEK = 1.0, D_TAND = 2.6, D_BORD = 4.4, D_GRAAF = 6.5, D_TOREN = 2.8, D_P
 // Bits per stuk: of het stuk zelf en de punten ernaast op het goede land liggen (vast per brok).
 // HEK: beide hekken (een eenheid aan weerszijden) staan op het land van hun eigen kant, dus niet in zee of een meer.
 const OK = 1, T_PLUS = 2, T_MIN = 4, B_PLUS = 8, B_MIN = 16, G_PLUS = 32, G_MIN = 64, HEK = 128;
-const MAX_WEG = 176; // langste verbindingsweg (11 vakjes): vroeg in het spel liggen de wegennetten nog ver uiteen
 const GAT = 3.4; // het hek stopt zo ver voor en na een grenspost
 
 // Kleuren. Fictief en zonder merken.
-const ASFALT = '#4a4a47', RAND = '#0d0f12', STREEP = '#d8c87a', ZAND = '#c9b48a';
-const TRUCK = ['#d9d4c4', '#b8442f', '#2f6d9a', '#d9a63a', '#3d7a4f', '#7a7d80', '#8a4a7a', '#e8e6df'];
-const CABINE = ['#c43c32', '#2f5d8a', '#f2f2ee', '#3d6b48', '#d9a63a', '#55595e'];
+const ASFALT = '#4a4a47', STOEPRAND = '#8f8b82';
 const UNIFORM = ['#4f5a3a', '#3e4a32', '#5a5f46']; // olijf, voor soldaten
 const DOUANE = { 0: '#5f86b0', 1: '#4a5f73', 2: '#2c3e57', 3: '#4f5a3a' }; // per klasse
 const PARTIJ = ['#e0703a', '#3a8fd0', '#5aa84a', '#c9b03a', '#8a5ab8']; // verkiezingsaffiches, abstract
 const JAS = ['#2b2d31', '#5c5346', '#3a3f47'];
 
 // Vaste maten van een grenspost, in eenheden langs de weg (l, van a naar b) en dwars erop (d, naar rechts).
-const POST_VRIJ = [[-2.5, 1.95], [2.5, -1.95], [-1.0, -3.2], [1.0, 3.2], [0, 2.2], [0, -2.2]]; // hokjes, vlaggen, pilaren
 const POST_DREMPEL = [[-3.0, 0.95], [3.0, -0.95]];
 const POST_BLOKKEN = [[-3.0, -0.65], [-3.0, 0.65], [3.0, 0], [-3.9, 0], [3.9, -0.65], [3.9, 0.65]]; // betonblokken in oorlog
 const POST_EGELS = [[-4.8, 1.7], [-5.6, -1.6], [4.8, -1.7], [5.6, 1.6], [-6.4, 0.4], [6.4, -0.4]]; // tankegels in oorlog
 const POST_WACHT = [[-3.4, 1.5], [-3.2, -1.6], [3.4, -1.5], [3.2, 1.6]]; // soldaten bij de hokjes in oorlog
-const WIELEN = [-0.75, -0.45, 0.7]; // wielparen van een vrachtwagen, als deel van de halve lengte
 
 // Plekken in de hoofdstad (vakje-coördinaten, −0,5..0,5), passend op de indeling van detail.js: het
 // regeringsgebouw in het noordwesten, groenstroken met bomen op x ±0,20, ±0,32 en ±0,44 langs de oost-weststraat.
@@ -393,8 +390,10 @@ function stip(c, x, y, r) {
 
 export class GrensLaag {
   constructor() {
-    // Eigen klok zoals de levenslaag: loopt alleen als het spel loopt, staat stil op pauze.
+    // Geen eigen klok: u is de verkeerstijd van het kaartbeeld (periodiek in 180 s, voor de slagboom); klok is dezelfde
+    // tijd doorlopend in seconden, voor het decor.
     this.klok = 0;
+    this.u = 0;
     this.state = null;
     this.geo = null;
     this.eigenaar = null;
@@ -405,13 +404,7 @@ export class GrensLaag {
     this.klas = new Uint8Array(0);
     this.klasSig = [];
     this.inOorlogLand = new Uint8Array(0);
-    this.wegSig = [-1, -1, -1, -1];
-    this.landSig = [];
-    this.landWegen = [];
-    this.paarSig = [];
-    this.paarLijst = [];
-    this.buren = [];
-    this.burenVersie = -1;
+    this.wegSig = '';
     this.overgangen = [];
     this.controleposten = [];
     this.bezetVersie = -1;
@@ -439,7 +432,8 @@ export class GrensLaag {
   nul() {
     this.n = {};
     for (const k of Object.keys(PLAFOND)) this.n[k] = 0;
-    this.nVlag = 0; this.nLicht = 0; this.nToren = 0; this.nZr = 0; this.nZo = 0;
+    this.nVlag = 0; this.nLicht = 0; this.nToren = 0; this.nZr = 0; this.nZo = 0; this.nZoek = 0;
+    if (this.boomOpen) this.boomOpen.length = 0;
   }
 
   // Na het laden van een spel: alles opnieuw afleiden.
@@ -453,13 +447,7 @@ export class GrensLaag {
     this.stempel = new Uint16Array(n);
     this.isBezet = new Uint8Array(n);
     this.klasSig = [];
-    this.wegSig = [-1, -1, -1, -1];
-    this.infraSig = null;
-    this.landSig = [];
-    this.landWegen = [];
-    this.paarSig = [];
-    this.paarLijst = [];
-    this.burenVersie = -1;
+    this.wegSig = '';
     this.bezetVersie = -1;
     this.overgangen = [];
     this.controleposten = [];
@@ -546,214 +534,77 @@ export class GrensLaag {
     this.bezetLijst = Int32Array.from(lijst);
   }
 
-  // Wegen per land: precies de lijnen van tekenWegen in map.js, met het stuk buiten beide gebouwen (zoals infra.js).
-  wegenVan(view, land) {
-    const geo = this.geo, Tw = geo.T, uit = [];
-    for (const p of land.plaatsingen) {
-      if (p.t < 0) continue;
-      const nb = view.knooppuntVoor(land, p.t);
-      if (nb < 0) continue;
-      const A = geo.tegels[p.t], B = geo.tegels[nb];
-      const dx = B.x - A.x, dy = B.y - A.y, len = Math.hypot(dx, dy);
-      if (len < Tw * 0.9) continue;
-      const ux = dx / len, uy = dy / len, d = (0.5 * Tw) / Math.max(Math.abs(ux), Math.abs(uy));
-      if (len - 2 * d < 0.15 * Tw) continue;
-      uit.push(A.x, A.y, B.x, B.y, ux, uy, d, len - d);
-    }
-    return Float32Array.from(uit);
-  }
-
+  // Grensovergangen komen uit het wegennet (net.grensovergangen): een post op de stam- of hoofdweg waar die van het
+  // ene land in het andere komt. Deze laag legt zelf geen wegen meer aan. Per overgang: de plek, de richting van de
+  // weg (van land a naar land b), en hoe ver de weg aan beide kanten doorloopt (la, lb; voor het gat in het hek).
   werkWegen(view) {
-    const s = this.state;
-    let nP = 0, somT = 0;
-    for (let i = 0; i < s.landen.length; i++) {
-      const l = s.landen[i];
-      nP += l.plaatsingen.length;
-      for (let j = 0; j < l.plaatsingen.length; j++) somT += l.plaatsingen[j].t;
-    }
-    const sig = this.wegSig;
-    // de infralaag rekent haar stations, vliegvelden en depots pas vanaf zoom 3,6 uit (wij al vanaf zoom 2): kent
-    // zij een nieuw netwerk, dan alle overgangen opnieuw toetsen, anders blijft er een post op een station staan
-    const infraSig = view.infraLaag?.sig ?? null;
-    if (sig[0] === s.grensVersie && sig[1] === nP && sig[2] === somT && sig[3] === s.landen.length && this.infraSig === infraSig) return;
-    sig[0] = s.grensVersie; sig[1] = nP; sig[2] = somT; sig[3] = s.landen.length;
-    if (this.infraSig !== infraSig) { this.infraSig = infraSig; this.paarSig = []; }
-    const n = s.landen.length;
-    // per land alleen opnieuw als dat land iets bouwde (zoals infra.js)
-    const veranderd = new Uint8Array(n);
-    for (const land of s.landen) {
-      let t = 0;
-      for (const p of land.plaatsingen) t = (t * 31 + p.t + 7) | 0;
-      const ls = `${land.plaatsingen.length}|${t}`;
-      if (this.landSig[land.idx] === ls && this.landWegen[land.idx]) continue;
-      this.landSig[land.idx] = ls;
-      this.landWegen[land.idx] = this.wegenVan(view, land);
-      veranderd[land.idx] = 1;
-    }
-    // buurlanden en de lengte van hun gedeelde grens, uit de vakjes
-    if (this.burenVersie !== s.grensVersie) {
-      this.burenVersie = s.grensVersie;
-      const geo = this.geo, tel = new Int32Array(n * n);
-      for (let r = 0; r < geo.rij; r++) {
-        for (let k = 0; k < geo.kol; k++) {
-          const t = r * geo.kol + k, a = s.eigenaar[t];
-          if (a < 0) continue;
-          if (k + 1 < geo.kol) { const b = s.eigenaar[t + 1]; if (b >= 0 && b !== a) tel[Math.min(a, b) * n + Math.max(a, b)]++; }
-          if (r + 1 < geo.rij) { const b = s.eigenaar[t + geo.kol]; if (b >= 0 && b !== a) tel[Math.min(a, b) * n + Math.max(a, b)]++; }
+    const net = view.wegennet;
+    const sig = net?.klaar ? `${net.versie}|${this.state.grensVersie}` : '-';
+    if (sig === this.wegSig) return;
+    this.wegSig = sig;
+    const uit = [];
+    if (net?.klaar) {
+      const o = {}, Tw = this.geo.T, st = this.state;
+      const eigT = (x, y) => { const t = this.tegelVan(x, y); return t < 0 ? -1 : st.eigenaar[t]; };
+      for (let i = 0; i < net.grensovergangen.length; i++) {
+        const go = net.grensovergangen[i], len = net.tLen[go.tak];
+        // geen post in een tunnel of midden op een brug; twee overgangen op dezelfde plek (drielandenpunt) delen een post
+        if (net.tBouw[go.tak]) continue;
+        let dubbel = false;
+        for (const g of uit) if (Math.hypot(g.x - go.x, g.y - go.y) < 8) { dubbel = true; break; }
+        if (dubbel) continue;
+        net.puntIn(net.D, go.tak, go.s, o);
+        let ux = Math.cos(o.hoek), uy = Math.sin(o.hoek), voor = len - go.s, achter = go.s;
+        // de weg wijst van land a (van) naar land b (naar): het net rekent met de eigenaar per vakje
+        for (const d of [1.5, 3, 5, 8]) {
+          const na = eigT(go.x + ux * d, go.y + uy * d), vo = eigT(go.x - ux * d, go.y - uy * d);
+          if (na === vo) continue;
+          if (na === go.van || vo === go.naar) { ux = -ux; uy = -uy; [voor, achter] = [achter, voor]; }
+          break;
         }
+        const la = Math.min(achter, 0.6 * Tw), lb = Math.min(voor, 0.6 * Tw);
+        uit.push({ i, tak: go.tak, s: go.s, x: go.x, y: go.y, ux, uy, a: go.van, b: go.naar, klasse: net.tKlasse[go.tak], la, lb, len: la + lb, ax: go.x - ux * la, ay: go.y - uy * la, bx: go.x + ux * lb, by: go.y + uy * lb, brug: [], zaad: (Math.floor(go.x * 7) * 7919 + Math.floor(go.y * 7)) | 0 });
       }
-      this.buren = [];
-      for (let a = 0; a < n; a++) for (let b = a + 1; b < n; b++) if (tel[a * n + b] >= 2) this.buren.push(a, b, tel[a * n + b]);
-      this.paarSig = [];
     }
-    const lijst = [];
-    for (let q = 0; q < this.buren.length; q += 3) {
-      const a = this.buren[q], b = this.buren[q + 1], sleutel = a * n + b;
-      const ps = `${this.landSig[a]}#${this.landSig[b]}`;
-      if (this.paarSig[sleutel] !== ps || veranderd[a] || veranderd[b] || !this.paarLijst[sleutel]) {
-        this.paarSig[sleutel] = ps;
-        this.paarLijst[sleutel] = this.zoekOvergangen(view, a, b, this.buren[q + 2]);
-      }
-      for (const g of this.paarLijst[sleutel]) lijst.push(g);
-    }
-    this.overgangen = lijst;
+    this.overgangen = uit;
     this.zoekControleposten(view);
   }
 
-  // Waar de wegennetten van a en b elkaar over de grens het dichtst naderen: een verbindingsweg met een post.
-  zoekOvergangen(view, a, b, grens) {
-    const Pa = this.wegPunten(a), Pb = this.wegPunten(b);
-    if (!Pa.length || !Pb.length) return [];
-    // kandidaten: paren punten op beide netten, kortste eerst; bijna dezelfde verbinding telt één keer, zodat er
-    // ook verder weg nog keuze is als de dichtste plek niet kan (een gebouw op de grens, een meer)
-    const K = 40, best = new Float64Array(K * 5).fill(Infinity), M2 = MAX_WEG * MAX_WEG;
-    for (let i = 0; i < Pa.length; i += 2) {
-      const ax = Pa[i], ay = Pa[i + 1];
-      for (let j = 0; j < Pb.length; j += 2) {
-        const bx = Pb[j], by = Pb[j + 1], d2 = (bx - ax) ** 2 + (by - ay) ** 2;
-        if (d2 > M2 || d2 >= best[(K - 1) * 5]) continue;
-        let dubbel = -1;
-        for (let q = 0; q < K && best[q * 5] < Infinity; q++) if (Math.abs(best[q * 5 + 1] - ax) + Math.abs(best[q * 5 + 2] - ay) + Math.abs(best[q * 5 + 3] - bx) + Math.abs(best[q * 5 + 4] - by) < 20) { dubbel = q; break; }
-        if (dubbel >= 0 && best[dubbel * 5] <= d2) continue;
-        // een betere variant van een bestaande kandidaat vervangt die
-        let q = dubbel >= 0 ? dubbel : K - 1;
-        while (q > 0 && best[(q - 1) * 5] > d2) { for (let z = 0; z < 5; z++) best[q * 5 + z] = best[(q - 1) * 5 + z]; q--; }
-        best[q * 5] = d2; best[q * 5 + 1] = ax; best[q * 5 + 2] = ay; best[q * 5 + 3] = bx; best[q * 5 + 4] = by;
-      }
-    }
-    const uit = [];
-    const max = grens >= 24 ? 2 : 1;
-    for (let q = 0; q < K && uit.length < max; q++) {
-      if (best[q * 5] === Infinity) break;
-      const g = this.toetsWeg(view, best[q * 5 + 1], best[q * 5 + 2], best[q * 5 + 3], best[q * 5 + 4], a, b);
-      if (!g) continue;
-      if (uit.length && Math.hypot(uit[0].x - g.x, uit[0].y - g.y) < 80) continue;
-      uit.push(g);
-    }
-    return uit;
+  // Spanning tussen twee landen: oorlog, of verschillende blokken waarvan er een flink opgestookt is.
+  spanning(a, b) {
+    const k = this.grensKlasse(a, b);
+    if (k === OORLOG) return true;
+    if (k !== BLOK) return false;
+    const s = this.state, A = s.landen[a], B = s.landen[b];
+    for (const l of [A, B]) { const bl = (s.blokken ?? []).find((x) => x.id === l?.alignment); if (bl && (bl.spanning ?? 0) > 15) return true; }
+    return false;
   }
 
-  // Punten om de 8 eenheden op de wegen van een land, van midden tot midden zoals tekenWegen ze trekt (het eind
-  // ligt onder een gebouw of in de stad; toetsWeg laat de verbindingsweg daar naar buiten komen).
-  wegPunten(land) {
-    const Wl = this.landWegen[land], uit = [];
-    if (!Wl) return uit;
-    for (let i = 0; i < Wl.length; i += 8) {
-      const len = Math.hypot(Wl[i + 2] - Wl[i], Wl[i + 3] - Wl[i + 1]), n = Math.max(1, Math.round(len / 8));
-      for (let k = 0; k <= n; k++) uit.push(Wl[i] + (Wl[i + 2] - Wl[i]) * (k / n), Wl[i + 1] + (Wl[i + 3] - Wl[i + 1]) * (k / n));
-    }
-    return uit;
-  }
-
-  // Hoe ver een straal vanuit (x, y) in richting (ux, uy) loopt voordat hij het vakje t verlaat.
-  uitVakje(t, x, y, ux, uy) {
-    const T = this.geo.T, k = t % this.geo.kol, r = (t - k) / this.geo.kol;
-    const tx = ux > 1e-9 ? ((k + 1) * T - x) / ux : ux < -1e-9 ? (k * T - x) / ux : Infinity;
-    const ty = uy > 1e-9 ? ((r + 1) * T - y) / uy : uy < -1e-9 ? (r * T - y) / uy : Infinity;
-    return Math.max(0, Math.min(tx, ty));
-  }
-
-  // Vanaf het eind van een weg door aaneengesloten bebouwde vakjes van het eigen land naar buiten (een weg de
-  // stad uit); geeft de afstand tot het eerste vrije punt.
-  uitStad(x, y, ux, uy, land) {
-    let d = 0;
-    for (let i = 0; i < 6; i++) {
-      const t = this.tegelVan(x + ux * d, y + uy * d), b = t >= 0 ? this.state.bezet[t] : null;
-      if (!b || b.land !== land) return d;
-      d += this.uitVakje(t, x + ux * d, y + uy * d, ux, uy) + 0.3;
-    }
-    return d;
-  }
-
-  // Een verbindingsweg mag niet door zee, een meer, een derde land of een gebouw, en kruist de grens één keer.
-  // Begint hij onder een gebouw of in een stad (waar de weg van tekenWegen eindigt), dan gaat hij er aan de
-  // andere kant uit: dat stuk telt niet mee en wordt ook niet getekend.
-  toetsWeg(view, ax, ay, bx, by, a, b) {
-    const dx = bx - ax, dy = by - ay, len = Math.hypot(dx, dy);
-    if (len < 1.5 || len > MAX_WEG) return null;
-    if (this.eigOp(ax, ay) !== a || this.eigOp(bx, by) !== b) return null;
-    const ux = dx / len, uy = dy / len;
-    const s0 = this.uitStad(ax, ay, ux, uy, a), s1 = len - this.uitStad(bx, by, -ux, -uy, b);
-    if (s1 - s0 < 9) return null; // ruimte voor de post en een vrachtwagen aan elke kant
-    const n = Math.ceil((s1 - s0) / 0.3);
-    let wissel = -1, vorige = a;
-    const brug = [];
-    let inRivier = -1;
-    const tl = view.terreinLaag;
-    for (let k = 0; k <= n; k++) {
-      const sk = s0 + ((s1 - s0) * k) / n, x = ax + ux * sk, y = ay + uy * sk;
-      const o = this.eigOp(x, y);
-      if (o !== a && o !== b) return null;
-      if (o === b && vorige === a) { if (wissel >= 0) return null; wissel = k; }
-      if (o === a && vorige === b) return null;
-      vorige = o;
-      if (this.bebouwd(x, y, view)) return null;
-      if (tl?.isMeer?.(x, y)) return null;
-      const nat = !!tl?.isRivier?.(x, y, 0.4);
-      if (nat && inRivier < 0) inRivier = sk - s0;
-      if (!nat && inRivier >= 0) { brug.push(Math.max(0, inRivier - 0.8), Math.min(s1 - s0, sk - s0 + 0.8)); inRivier = -1; }
-    }
-    if (wissel < 1) return null;
-    if (inRivier >= 0) return null; // eindigt in een rivier
-    const la = ((s1 - s0) * (wissel - 0.5)) / n, lb = s1 - s0 - la;
-    if (la < 4.5 || lb < 4.5) return null;
-    const x = ax + ux * (s0 + la), y = ay + uy * (s0 + la);
-    // de post zelf (hokjes en vlaggen tot 3,5 eenheid van de weg) mag niet op een rivier, een gebouw of in zee staan
-    for (const [l, d] of POST_VRIJ) {
-      const px = x + ux * l - uy * d, py = y + uy * l + ux * d;
-      if (this.eigOp(px, py) < 0 || tl?.isRivier?.(px, py, 0.2) || tl?.isMeer?.(px, py) || this.bebouwd(px, py, view)) return null;
-    }
-    for (let q = 0; q < brug.length; q += 2) if (Math.abs(la - brug[q]) < 4 || Math.abs(la - brug[q + 1]) < 4) return null;
-    const x0 = ax + ux * s0, y0 = ay + uy * s0, x1 = ax + ux * s1, y1 = ay + uy * s1;
-    return { x, y, ux, uy, a, b, ax: x0, ay: y0, bx: x1, by: y1, la, lb, len: s1 - s0, brug, zaad: (Math.floor(x * 7) * 7919 + Math.floor(y * 7)) | 0 };
-  }
-
-  // Controleposten in bezet gebied: waar een weg door een bezet vakje loopt, één per vakje.
+  // Controleposten in bezet gebied: waar een weg van het net door een bezet vakje loopt, één per vakje.
   zoekControleposten(view) {
     this.werkBezet();
-    const s = this.state, uit = [], gehad = {};
+    const s = this.state, uit = [], gehad = {}, net = view.wegennet;
     // hokje, vlag en zandzakken moeten op droog land staan, niet op een gebouw of bouwwerk
     const vrij = (x, y, ux, uy, l, d) => {
       const px = x + ux * l - uy * d, py = y + uy * l + ux * d;
       return this.eigOp(px, py) >= 0 && !this.zoet(view, px, py) && !this.bebouwd(px, py, view);
     };
-    if (!this.bezetLijst.length) { this.controleposten = uit; return; }
-    for (let L = 0; L < s.landen.length && uit.length < 60; L++) {
-      const Wl = this.landWegen[L];
-      if (!Wl) continue;
-      for (let i = 0; i < Wl.length && uit.length < 60; i += 8) {
-        for (let q = Wl[i + 6] + 2; q < Wl[i + 7] - 2; q += 4) {
-          const x = Wl[i] + Wl[i + 4] * q, y = Wl[i + 1] + Wl[i + 5] * q, t = this.tegelVan(x, y);
-          if (t < 0 || !this.isBezet[t] || gehad[t] || s.bezet[t]) continue;
-          // de eerste plek op deze weg in het vakje waar de hele post past (anders verder langs de weg zoeken)
-          const ux = Wl[i + 4], uy = Wl[i + 5];
-          let past = true;
-          for (let j = 0; j < CP_PUNTEN.length && past; j += 2) past = vrij(x, y, ux, uy, CP_PUNTEN[j], CP_PUNTEN[j + 1]);
-          if (!past) continue;
-          gehad[t] = 1;
-          uit.push({ x, y, ux, uy, land: s.eigenaar[t], t });
-          break;
-        }
+    if (!this.bezetLijst.length || !net?.klaar) { this.controleposten = uit; return; }
+    const o = {};
+    for (let i = 0; i < net.nT && uit.length < 60; i++) {
+      if (net.tKlasse[i] < 1 || net.tKlasse[i] > 3 || net.tBouw[i]) continue;
+      const len = net.tLen[i];
+      for (let q = 2; q < len - 2 && uit.length < 60; q += 4) {
+        net.puntIn(net.D, i, q, o);
+        const x = o.x, y = o.y, t = this.tegelVan(x, y);
+        if (t < 0 || !this.isBezet[t] || gehad[t] || s.bezet[t]) continue;
+        // de eerste plek op deze weg in het vakje waar de hele post past (anders verder langs de weg zoeken)
+        const ux = Math.cos(o.hoek), uy = Math.sin(o.hoek);
+        let past = true;
+        for (let j = 0; j < CP_PUNTEN.length && past; j += 2) past = vrij(x, y, ux, uy, CP_PUNTEN[j], CP_PUNTEN[j + 1]);
+        if (!past) continue;
+        gehad[t] = 1;
+        uit.push({ x, y, ux, uy, land: s.eigenaar[t], t });
       }
     }
     this.controleposten = uit;
@@ -920,8 +771,9 @@ export class GrensLaag {
 
   // Tussen de gebouwen en het leven: alles wat op en langs de grens staat.
   teken(c, view, sc, nu, dt = 0, tempo = 0) {
-    if (tempo > 0) this.klok += dt;
+    void dt; void tempo;
     this.nul();
+    this.view = view;
     const s = view.state;
     if (!s || !view.geo || !view.w || !view.eigenaar) return;
     if (this.state !== s || this.geo !== view.geo || this.eigenaar !== view.eigenaar) this.laad(view);
@@ -930,7 +782,9 @@ export class GrensLaag {
     // lijnen langs de grens: ver weg om de drie eenheden een punt, dichtbij elke eenheid (de grens is gladgestreken)
     this.stap = z < 6 ? 3 : z < 10 ? 2 : 1;
     this.nacht = view.nacht ?? 0;
-    this.nu = nu;
+    this.nu = view.nu ?? nu;
+    this.u = verkeersTijd(this.nu);
+    this.klok = this.nu / 1000; // decor (patrouilles, wachters): doorlopend, zonder sprong aan het eind van de dag
     if (z < DREMPEL.weg) return;
     this.werkKlassen();
     this.werkBezet();
@@ -947,9 +801,8 @@ export class GrensLaag {
       const g = this.overgangen[i];
       if (Math.max(g.ax, g.bx) > this.wx0 - 14 && Math.min(g.ax, g.bx) < this.wx1 + 14 && Math.max(g.ay, g.by) > this.wy0 - 14 && Math.min(g.ay, g.by) < this.wy1 + 14) this.zo[this.nZo++] = i;
     }
-    this.n.wegen = this.nZo;
+    this.n.wegen = 0; // eigen verbindingswegen zijn er niet meer: de post staat op het net
     this.n.overgangen = 0;
-    this.tekenVerbindingswegen(c, smooth(DREMPEL.weg, DREMPEL.weg + 0.6, z));
     if (z >= DREMPEL.post - 0.4) {
       this.verzamel(view);
       const a = smooth(DREMPEL.hek - 0.3, DREMPEL.hek + 0.5, z);
@@ -1040,62 +893,6 @@ export class GrensLaag {
       const o = i * PS, x = (st[o] - st[o + 3] * d) * U + ox, y = (st[o + 1] + st[o + 2] * d) * U + oy;
       if (open) c.lineTo(x, y); else { c.moveTo(x, y); open = true; }
     }
-  }
-
-  // ---------- verbindingswegen en bruggen ----------
-
-  tekenVerbindingswegen(c, a) {
-    if (a <= 0 || !this.nZo) return;
-    const T = this.T, U = this.sc, ox = this.ox, oy = this.oy, diep = this.zoom >= 4;
-    const breed = Math.max(2, T * 0.16), asfalt = Math.max(1, T * (diep ? 0.11 : 0.08));
-    const speler = this.state.speler;
-    // net als tekenWegen: de wegen van de speler voller dan die van anderen (een overgang hoort bij beide landen)
-    for (let k = 0; k < this.nZo; k++) {
-      const g = this.overgangen[this.zo[k]];
-      c.globalAlpha = a * (g.a === speler || g.b === speler ? 0.85 : 0.6);
-      for (let pass = 0; pass < (diep ? 3 : 2); pass++) {
-        // de rand begint pas na de bestaande weg, anders komt er een donkere ring op de aansluiting
-        const kop = pass === 0 ? breed / 2 / U : 0;
-        c.beginPath();
-        c.moveTo((g.ax + g.ux * kop) * U + ox, (g.ay + g.uy * kop) * U + oy);
-        c.lineTo((g.bx - g.ux * kop) * U + ox, (g.by - g.uy * kop) * U + oy);
-        if (pass === 0) { c.strokeStyle = RAND; c.lineWidth = breed; }
-        else if (pass === 1) { c.strokeStyle = diep ? ASFALT : ZAND; c.lineWidth = asfalt; }
-        else { c.strokeStyle = STREEP; c.lineWidth = Math.max(0.6, T * 0.01); c.setLineDash([T * 0.06, T * 0.06]); }
-        c.stroke();
-      }
-      if (diep) c.setLineDash([]);
-    }
-    // stoeprand en berm bij diep inzoomen, en een brug waar de weg een rivier kruist
-    if (this.zoom >= 5.5) {
-      c.globalAlpha = a * smooth(5.5, 6.2, this.zoom);
-      c.strokeStyle = 'rgba(200,196,186,0.55)';
-      c.lineWidth = Math.max(0.5, U * 0.12);
-      c.beginPath();
-      for (let k = 0; k < this.nZo; k++) {
-        const g = this.overgangen[this.zo[k]], rx = -g.uy, ry = g.ux, w = 0.94;
-        for (let k2 = -1; k2 <= 1; k2 += 2) { const z = k2 * w; c.moveTo((g.ax + rx * z) * U + ox, (g.ay + ry * z) * U + oy); c.lineTo((g.bx + rx * z) * U + ox, (g.by + ry * z) * U + oy); }
-      }
-      c.stroke();
-    }
-    if (diep) {
-      for (let k = 0; k < this.nZo && this.n.bruggen < PLAFOND.bruggen; k++) {
-        const g = this.overgangen[this.zo[k]];
-        for (let q = 0; q < g.brug.length; q += 2) {
-          const l = (g.brug[q + 1] - g.brug[q]) / 2, m = (g.brug[q] + g.brug[q + 1]) / 2;
-          const x = (g.ax + g.ux * m) * U + ox, y = (g.ay + g.uy * m) * U + oy;
-          c.globalAlpha = a;
-          c.fillStyle = 'rgba(0,0,0,0.3)'; c.beginPath(); rechthoek(c, x + U * 0.5, y + U * 0.5, g.ux, g.uy, l * U, 1.3 * U); c.fill();
-          c.fillStyle = '#8b877e'; c.beginPath(); rechthoek(c, x, y, g.ux, g.uy, l * U, 1.3 * U); c.fill();
-          c.fillStyle = ASFALT; c.beginPath(); rechthoek(c, x, y, g.ux, g.uy, l * U, 0.9 * U); c.fill();
-          c.strokeStyle = '#d6d2c8'; c.lineWidth = Math.max(0.5, U * 0.14); c.beginPath();
-          for (let k2 = -1; k2 <= 1; k2 += 2) { const z = 1.2 * k2; c.moveTo(x + (-g.ux * l - g.uy * z) * U, y + (-g.uy * l + g.ux * z) * U); c.lineTo(x + (g.ux * l - g.uy * z) * U, y + (g.uy * l + g.ux * z) * U); }
-          c.stroke();
-          this.n.bruggen++;
-        }
-      }
-    }
-    c.globalAlpha = 1;
   }
 
   // ---------- grond langs de grens ----------
@@ -1840,8 +1637,19 @@ export class GrensLaag {
     c.globalAlpha = a;
     // verbreed asfalt bij de post, met stopstrepen en een middenlijn
     if (z >= 5) {
-      c.fillStyle = RAND; c.beginPath(); rechthoek(c, X(0, 0), Y(0, 0), ux, uy, 3.6 * U, 2.0 * U); c.fill();
-      c.fillStyle = ASFALT; c.beginPath(); rechthoek(c, X(0, 0), Y(0, 0), ux, uy, 3.5 * U, 1.85 * U); c.fill();
+      // een uitwijkstrook aan weerszijden, die schuin terugloopt naar de breedte van de weg (het wegdek zelf tekent
+      // infra.js); eerst de stoeprand, dan het asfalt in dezelfde kleur als de weg
+      const vorm = (hl, hw, w0) => {
+        c.beginPath();
+        c.moveTo(X(-hl, w0), Y(-hl, w0)); c.lineTo(X(-hl + 1.1, hw), Y(-hl + 1.1, hw)); c.lineTo(X(hl - 1.1, hw), Y(hl - 1.1, hw)); c.lineTo(X(hl, w0), Y(hl, w0));
+        c.lineTo(X(hl, -w0), Y(hl, -w0)); c.lineTo(X(hl - 1.1, -hw), Y(hl - 1.1, -hw)); c.lineTo(X(-hl + 1.1, -hw), Y(-hl + 1.1, -hw)); c.lineTo(X(-hl, -w0), Y(-hl, -w0));
+        c.closePath(); c.fill();
+      };
+      const hl = Math.min(3.6, g.la - 0.2, g.lb - 0.2);
+      if (hl > 1.6) {
+        c.fillStyle = STOEPRAND; vorm(hl, 1.97, 1.2);
+        c.fillStyle = sn ? '#9ea1a2' : ASFALT; vorm(hl - 0.06, 1.85, 1.1); // in de sneeuw licht, zoals de besneeuwde weg
+      }
       if (z >= 8) {
         c.fillStyle = '#ecebe4'; c.beginPath();
         rechthoek(c, X(-2.3, 0.95), Y(-2.3, 0.95), ux, uy, 0.08 * U, 0.85 * U);
@@ -1911,45 +1719,26 @@ export class GrensLaag {
         c.stroke();
       }
     }
-    // verkeer: open stroom tussen bondgenoten, een rij voor de slagboom elders, niets in oorlog
-    const v = g.zaad;
+    // de slagboom volgt de ritten (levenLaag.slagboom: 0 dicht tot 1 open); zonder ritten blijft hij dicht
+    const lv = this.view?.levenLaag, open = klas === OORLOG || typeof lv?.slagboom !== 'function' ? 0 : clamp(+lv.slagboom(g.i, this.u) || 0, 0, 1);
+    this.boomOpen ??= [];
+    this.boomOpen.push(g.i, open);
     for (let baan = 0; baan < 2; baan++) {
-      // baan 0 rijdt van a naar b, baan 1 terug; aanloop is de weg vóór de post, uitloop die erna
-      const rich = baan ? -1 : 1, aan = baan ? g.lb : g.la, uit = baan ? g.la : g.lb;
-      let open = 0;
-      if (klas === BONDGENOOT) {
-        open = 1;
-        if (z >= DREMPEL.vrachtwagen - 0.5) {
-          const L = aan + uit;
-          for (let i = 0; i < 2; i++) {
-            const f = frac(this.klok * 1.4 / L + hash(v, baan, i));
-            this.zetWagen(c, g, rich, -aan + f * L, (v + i * 7 + baan * 3) | 0, a * (f < 0.06 ? f / 0.06 : f > 0.94 ? (1 - f) / 0.06 : 1), i === 1, a);
-          }
-        }
-      } else if (klas !== OORLOG) {
-        const P = (klas === NEUTRAAL ? 6 : 13) + hash(v, baan, 2) * 4;
-        const t = this.klok / P + hash(v, baan, 3), cyclus = Math.floor(t), fi = t - cyclus;
-        open = smooth(0, 0.07, fi) * (1 - smooth(0.3, 0.37, fi));
-        const adv = smooth(0.06, 0.3, fi);
-        const max = klas === NEUTRAAL ? 2 : 4 + Math.floor(hash(v, baan, 4) * 3);
-        const nq = Math.min(max, Math.floor((aan - 3.4) / 2.9) + 1);
-        if (z >= DREMPEL.vrachtwagen - 0.5 && nq > 0) {
-          for (let i = 0; i <= nq; i++) {
-            const slot = i - adv;
-            let langs = -(3.6 + slot * 2.9);
-            // de voorste rijdt door en verdwijnt aan de overkant
-            if (i === 0) langs = -3.6 + adv * 2.9 + smooth(0.2, 1, fi) * (uit + 0.5);
-            if (-langs > aan - 1.2 || langs > uit - 0.5) continue;
-            const alfa = i === nq ? smooth(0, 0.5, fi) : 1;
-            this.zetWagen(c, g, rich, langs, (cyclus + i + baan * 31 + v) | 0, a * alfa, false, a);
-          }
-        }
-      }
+      const rich = baan ? -1 : 1;
       // slagboom: draaipunt aan de stoeprand, arm over de eigen rijstrook
       if (z >= DREMPEL.hokje - 0.3 && this.n.slagbomen < PLAFOND.slagbomen) {
         this.slagboom(c, X(-1.8 * rich, 1.0 * rich), Y(-1.8 * rich, 1.0 * rich), -rx * rich, -ry * rich, 1.0 * U, open, klas);
         this.n.slagbomen++;
       }
+    }
+    // zoeklicht op een mast naast de post, alleen bij spanning of oorlog tussen de twee landen
+    if (this.spanning(g.a, g.b) && z >= DREMPEL.hokje && this.nZoek < PLAFOND.bundels) {
+      const x = X(-0.4, 3.0), y = Y(-0.4, 3.0), Hm = 2.4 * U;
+      c.strokeStyle = 'rgba(0,0,0,0.22)'; c.lineWidth = Math.max(0.6, 0.1 * U); c.beginPath(); c.moveTo(x, y); c.lineTo(x + Hm * SCHUIN, y + Hm * SCHUIN); c.stroke();
+      c.strokeStyle = '#5d6166'; c.beginPath(); c.moveTo(x, y); c.lineTo(x, y - Hm); c.stroke();
+      c.fillStyle = '#c9ccc8'; c.beginPath(); stip(c, x, y - Hm, Math.max(0.7, 0.16 * U)); c.fill();
+      const b2 = this.nZoek++ * 4, zb = this.zoek ??= new Float32Array(PLAFOND.bundels * 4);
+      zb[b2] = x; zb[b2 + 1] = y - Hm; zb[b2 + 2] = Math.atan2(uy, ux) + (g.a === this.state.speler ? 0 : Math.PI); zb[b2 + 3] = g.zaad;
     }
     // mensen: soldaten bij de hokjes in oorlog, anders douaniers bij de slagboom en pionnen tussen de rijstroken
     if (klas === OORLOG) {
@@ -1963,7 +1752,7 @@ export class GrensLaag {
     } else if (z >= DREMPEL.douanier) {
       const buf = this._wacht ?? (this._wacht = new Float32Array(8 * 4));
       let m = 0;
-      const wieg = Math.sin(this.klok * 0.8 + g.zaad) * 0.15;
+      const wieg = Math.sin((this.u / 9) * TAU + g.zaad) * 0.15;
       for (let k2 = -1; k2 <= 1; k2 += 2) { const l = (1.5 - wieg) * k2, d = -1.45 * k2; buf[m * 4] = X(l, d); buf[m * 4 + 1] = Y(l, d); buf[m * 4 + 2] = -rx; buf[m * 4 + 3] = -ry; m++; }
       if (this.n.soldaten + m <= PLAFOND.soldaten) {
         this.tekenSoldaten(c, buf, m, z, DOUANE[klas] ?? DOUANE[1], '#1f2a36');
@@ -2023,44 +1812,6 @@ export class GrensLaag {
       if (this.nacht > 0.05) this.zetLicht(x, y - H - 0.12 * U, 0.6 * U, open > 0.5 ? GROEN : ROOD, 0.8);
     }
     void klas;
-  }
-
-  // Vrachtwagen (of bestelauto) op de verbindingsweg, langs (langs) eenheden vanaf de post in rijrichting rich.
-  // alfa is de dekking van deze wagen (in- en uitfaden), basis die van de post: zo hoeft niemand de context uit te lezen.
-  zetWagen(c, g, rich, langs, zaad, alfa, klein, basis) {
-    if (this.n.vrachtwagens >= PLAFOND.vrachtwagens || alfa <= 0.01) return;
-    const U = this.sc, z = this.zoom, ux = g.ux * rich, uy = g.uy * rich, rx = -uy, ry = ux;
-    const wx = g.x + ux * langs + rx * 0.48, wy = g.y + uy * langs + ry * 0.48;
-    if (!this.inBeeld(wx, wy, 2)) return;
-    this.n.vrachtwagens++;
-    const x = wx * U + this.ox, y = wy * U + this.oy;
-    const L = (klein ? 0.62 : 1.25) * U, B = (klein ? 0.34 : 0.42) * U;
-    c.globalAlpha = alfa;
-    c.fillStyle = 'rgba(0,0,0,0.25)'; c.beginPath(); rechthoek(c, x + U * 0.3, y + U * 0.3, ux, uy, L, B); c.fill();
-    const h = hash(zaad, 17);
-    if (klein) {
-      c.fillStyle = TRUCK[Math.floor(h * TRUCK.length)]; c.beginPath(); rechthoek(c, x, y, ux, uy, L, B); c.fill();
-      if (z >= 9) { c.fillStyle = '#22303a'; c.beginPath(); rechthoek(c, x + ux * L * 0.35, y + uy * L * 0.35, ux, uy, L * 0.16, B * 0.85); c.fill(); }
-    } else {
-      // oplegger achter, cabine voor; dichtbij een voorruit en een lichte rand bovenop
-      const tx = x - ux * L * 0.22, ty = y - uy * L * 0.22;
-      c.fillStyle = TRUCK[Math.floor(h * TRUCK.length)]; c.beginPath(); rechthoek(c, tx, ty, ux, uy, L * 0.76, B); c.fill();
-      c.fillStyle = CABINE[Math.floor(hash(zaad, 18) * CABINE.length)]; c.beginPath(); rechthoek(c, x + ux * L * 0.74, y + uy * L * 0.74, ux, uy, L * 0.22, B * 0.94); c.fill();
-      if (z >= 9) {
-        c.fillStyle = '#1f2a33'; c.beginPath(); rechthoek(c, x + ux * L * 0.9, y + uy * L * 0.9, ux, uy, L * 0.05, B * 0.8); c.fill();
-        c.fillStyle = 'rgba(255,255,255,0.22)'; c.beginPath(); rechthoek(c, tx - rx * B * 0.55, ty - ry * B * 0.55, ux, uy, L * 0.74, B * 0.25); c.fill();
-      }
-      if (z >= 12) {
-        c.fillStyle = '#1b1b1b'; c.beginPath();
-        for (let w = 0; w < WIELEN.length; w++) for (let d = -1; d <= 1; d += 2) rechthoek(c, x + ux * L * WIELEN[w] + rx * B * d, y + uy * L * WIELEN[w] + ry * B * d, ux, uy, L * 0.07, B * 0.12);
-        c.fill();
-      }
-    }
-    c.globalAlpha = basis;
-    if (this.nacht > 0.05) {
-      this.zetLicht(x + ux * L * 1.15, y + uy * L * 1.15, L * 0.8, WARM, 0.5 * alfa);
-      this.zetLicht(x - ux * L, y - uy * L, L * 0.35, ROOD, 0.6 * alfa);
-    }
   }
 
   // ---------- bezet gebied ----------
@@ -2411,6 +2162,15 @@ export class GrensLaag {
       const gx = x + Math.cos(zw) * len * 0.9, gy = y + this.toren[b + 2] + Math.sin(zw) * len * 0.62;
       c.globalAlpha = nacht * 0.45 * this.toren[b + 5];
       if (sp.gloed[KOEL]) c.drawImage(sp.gloed[KOEL], gx - 1.6 * U, gy - 1.1 * U, 3.2 * U, 2.2 * U);
+      nb++;
+    }
+    // zoeklichten bij de posten (alleen bij spanning of oorlog, zie tekenPost)
+    for (let k = 0; k < (this.nZoek ?? 0) && nb < PLAFOND.bundels && sp.bundel; k++) {
+      const zb = this.zoek, x = zb[k * 4], y = zb[k * 4 + 1];
+      const zw = zb[k * 4 + 2] + Math.sin((this.u / 12) * TAU + zb[k * 4 + 3]) * 0.8;
+      const len = 7 * U, br = 2.6 * U;
+      c.globalAlpha = nacht * 0.5;
+      c.save(); c.translate(x, y); c.rotate(Math.atan2(Math.sin(zw) * 0.7 + 0.25, Math.cos(zw))); c.drawImage(sp.bundel, 0, -br / 2, len, br); c.restore();
       nb++;
     }
     this.n.bundels = nb;

@@ -1,6 +1,6 @@
 // Natuur bij diep inzoomen (C8): wat er in bos, bergen en water beweegt, bovenop het gebakken terrein.
 // - Water: watervallen waar een rivier steil zakt (witte val, schuim dat uitdijt, nevel die meedrijft, bij zon soms
-//   een regenboog), stroomversnellingen met schuimkoppen en keien, bevers met hun dam, burcht en vijver in beken.
+//   geen regenboog: die lag van bovenaf als verf op de grond), stroomversnellingen met schuimkoppen en keien, bevers met hun dam, burcht en vijver in beken.
 // - Wild: wilde zwijnen met biggen, vossen en konijnen aan bosranden en op open plekken, berggeiten op de rotsen,
 //   roofvogels die boven de bergen cirkelen, reigers langs de oever en ooievaars in natte weiden (niet in de winter),
 //   wolven met sporen in de sneeuw (alleen in de winter), vuurvliegjes boven het water op zomeravonden.
@@ -31,10 +31,36 @@ import { seizoen, weer, wind } from './seizoen.js';
 import { BOOMGRENS, ALMGRENS, SNEEUW_VAST, KENMERK, GEWAS, RAND, perceelHoek, bloemenPlek, kenmerkenVoorTegel } from './terrein.js';
 
 const TAU = Math.PI * 2;
+// Pistes liggen alleen op een helling: elk punt minstens zo steil (hoogteverschil per eenheid), van boven naar
+// beneden per stap hooguit een bultje bergop, en onderaan duidelijk lager dan bovenaan. Puur; h(x, y) is de hoogte.
+export const PISTE_HELLING = 0.015, PISTE_BULT = 0.15, PISTE_VAL = 0.2;
+// Een zigzagpad begint pas waar het minstens zo steil is (zelfde maat als hellingOp).
+export const PAD_HELLING = 0.02;
+export const hellingOp = (h, x, y) => Math.hypot(h(x + 0.8, y) - h(x - 0.8, y), h(x, y + 0.8) - h(x, y - 0.8)) / 1.6;
+export function pisteOpHelling(h, pts) {
+  if (pts.length < 12) return false;
+  let vorige = Infinity;
+  for (let q = 0; q < pts.length; q += 2) {
+    const ph = h(pts[q], pts[q + 1]);
+    if (ph > vorige + PISTE_BULT || hellingOp(h, pts[q], pts[q + 1]) < PISTE_HELLING) return false;
+    vorige = ph;
+  }
+  return h(pts[0], pts[1]) - h(pts[pts.length - 2], pts[pts.length - 1]) >= PISTE_VAL;
+}
+// De voet van een piste inkorten: onderaan geen vlak stuk en geen stuk dat weer bergop loopt.
+export function pisteVoet(h, pts) {
+  while (pts.length > 12) {
+    const n = pts.length, x = pts[n - 2], y = pts[n - 1];
+    if (hellingOp(h, x, y) >= PISTE_HELLING && h(x, y) < h(pts[n - 4], pts[n - 3])) break;
+    pts.length -= 2;
+  }
+  return pts;
+}
 function hash(a, b = 0, c = 0) { let h = (a * 374761393 + b * 668265263 + c * 2147483647) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
 const smooth = (a, b, v) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 const frac = (v) => v - Math.floor(v);
+const tri = (v) => 1 - Math.abs(2 * frac(v) - 1); // 0 → 1 → 0, doorlopend
 
 // Geen document bij importeren: de canvasfabriek is pas nodig bij laad() en is te vervangen in tests.
 let maakCanvas = (w, h) => (typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h }));
@@ -63,7 +89,6 @@ const DIER_NAAM = ['zwijnen', 'vossen', 'konijnen', 'geiten', 'reigers', 'ooieva
 const DIER_LENGTE = [0.3, 0.28, 0.14, 0.3, 0.3, 0.32];
 const DIER_V = [0.05, 0.08, 0.07, 0.025, 0, 0.03];
 const JAS = ['#c0392b', '#2e86c1', '#f0b429', '#2f9e5b', '#8a4bb8', '#ecefe9'];
-const REGENBOOG = ['rgba(230,70,60,0.2)', 'rgba(240,200,60,0.2)', 'rgba(80,190,90,0.2)', 'rgba(80,120,230,0.2)'];
 const STREEP_VAL = [0.22, 0.16], STREEP_PAD = [0.32, 0.18], GEEN_STREEP = [];
 // Silhouet van een roofvogel van boven (x vooruit, y opzij), in lengtes; punten 2, 3, 8 en 9 zijn de vleugelpunten.
 const VLEUGEL = new Float32Array([0.26, 0, 0.05, -0.12, -0.06, -0.62, -0.2, -0.5, -0.14, -0.1, -0.42, -0.08, -0.42, 0.08, -0.14, 0.1, -0.2, 0.5, -0.06, 0.62, 0.05, 0.12]);
@@ -377,6 +402,13 @@ export class NatuurLaag {
       }
       if (!ok && pts.length < 10) continue;
       if (hh < BOOMGRENS) continue;
+      // C12: haarspeldbochten alleen op de helling; het vlakke begin aan de bergvoet gaat eraf (anders lag er een 'M'
+      // van paden op vlak gras)
+      const hp = (px, py) => tl.hoogte(px, py);
+      let eerst = 0;
+      while (eerst + 2 < pts.length && hellingOp(hp, pts[eerst], pts[eerst + 1]) < PAD_HELLING) eerst += 2;
+      if (eerst) pts.splice(0, eerst);
+      if (pts.length < 8) continue;
       const uitzicht = hh > ALMGRENS + 0.05;
       // stukken door het bergbos lopen onder de kruinen door: die tekenen we niet (en wandelaars zijn er dan niet te zien)
       const vrij = new Uint8Array(pts.length / 2 - 1);
@@ -457,6 +489,10 @@ export class NatuurLaag {
             pts.push(px, py);
           }
           if (!ok) continue;
+          // alleen op de helling: de vlakke voet gaat eraf, en wat overblijft daalt overal en is steil genoeg
+          const hh = (x, y) => this.h(x, y);
+          pisteVoet(hh, pts);
+          if (!pisteOpHelling(hh, pts)) continue;
           const rand = [];
           for (const [x, y] of paren(metMiddens(pts))) rand.push(x - 0.7, y - 0.7, x + 0.7, y - 0.7, x - 0.7, y + 0.7, x + 0.7, y + 0.7);
           lift.pistes.push({ pts: Float32Array.from(pts), len: lengte(pts), kant, tg: this.tegelsVan(rand) });
@@ -517,11 +553,11 @@ export class NatuurLaag {
         const k = t.k + dk, r = t.r + dr;
         if (k >= 0 && r >= 0 && k < geo.kol && r < geo.rij && geo.tegels[r * geo.kol + k].terrein === 'bos') bosBuur = true;
       }
-      const h = perceelHoek(t), co = Math.cos(h), si = Math.sin(h);
       for (let p = 0; p < f.length; p += K.STAP) {
         const ty = f[p], z = hash(t.i, p, 900);
+        const h = ty === K.PERCEEL ? perceelHoek(t, f, p) : perceelHoek(t), co = Math.cos(h), si = Math.sin(h);
         if (ty === K.PERCEEL) {
-          const soort = f[p + 4] & 15, rand = f[p + 4] >> 5, px = t.x + f[p + 1], py = t.y + f[p + 2], hu = f[p + 3], hv = f[p + 5];
+          const soort = f[p + 4] & 15, rand = (f[p + 4] >> 5) & 7, px = t.x + f[p + 1], py = t.y + f[p + 2], hu = f[p + 3], hv = f[p + 5];
           // plassen op kale grond (geploegd, braak, net ingezaaid of maïs): pas zichtbaar na een bui
           if ((soort === GEWAS.PLOEG || soort === GEWAS.BRAAK || soort === GEWAS.GROEN || soort === GEWAS.MAIS) && !levenAkker(t) && hash(t.i, p, 901) < 0.4 && this.plasjes.length < MAX_DICHTBIJ) {
             const n = 1 + Math.floor(hash(t.i, p, 902) * 3);
@@ -617,7 +653,13 @@ export class NatuurLaag {
 
   // ---------- elke frame ----------
 
+  // C12: alleen op gebakken grond (terrein knipt het canvas tot de gebakken brokken; niets gebakken: niets tekenen)
   teken(c, view, sc, nu, dt = 0, tempo = 0) {
+    const klem = view?.terreinLaag?.klemOpGebakken?.(c) ?? 1;
+    if (!klem) { for (const k in this.n) this.n[k] = 0; return; }
+    try { return this.tekenOpGrond(c, view, sc, nu, dt, tempo); } finally { if (klem === 2) c.restore(); }
+  }
+  tekenOpGrond(c, view, sc, nu, dt = 0, tempo = 0) {
     for (const k in this.n) this.n[k] = 0;
     const s = view.state;
     if (!s || !view.geo || !view.terreinLaag?.basis) return;
@@ -637,6 +679,7 @@ export class NatuurLaag {
     this.z = z; this.pix = 1 / sc; this.t = nu / 1000;
     // dichtbij: het botsraster van werk.js (dat eerder tekent), de natheid na regen en het uur van de dag
     const wl = view.werkLaag;
+    this.dj = wl && Number.isFinite(wl.dj) && wl.dj - this.sz.dagInJaar >= -1 && wl.dj - this.sz.dagInJaar < 1 ? wl.dj : this.sz.dagInJaar;
     this.werk = wl && typeof wl.vrij === 'function' ? wl : null; this.werkSig = wl?.sig ?? 0;
     this.natheid = z >= DREMPEL.plas ? this.natheidOp(dag, view.cx, view.cy) : 0;
     this.ochtend = ochtendOp(nu);
@@ -665,7 +708,7 @@ export class NatuurLaag {
     if (z >= 7.5) {
       c.globalAlpha = smooth(7.5, 8.5, z);
       this.tekenDieren(c);
-      if (this.sz.winter > 0.25) this.tekenWolven(c);
+      if (this.sz.winter > 0.18) { const gw = c.globalAlpha; c.globalAlpha = gw * smooth(0.18, 0.32, this.sz.winter); this.tekenWolven(c); c.globalAlpha = gw; } // wolven vagen met de winter in en uit
     }
     // kleine dieren van dichtbij, elk vanaf zijn eigen zoom
     const dicht = (k) => { c.globalAlpha = a * smooth(DREMPEL[k], DREMPEL[k] + 0.8, z); };
@@ -688,6 +731,9 @@ export class NatuurLaag {
     this.tekenRoofvogels(c);
     c.restore();
   }
+
+  // 1 binnen de dagen [a, b] van het jaar, met een overgang van vier dagen op de doorlopende dag (geen sprong)
+  venster(a, b) { const d = this.dj ?? this.sz.dagInJaar; return smooth(a - 2, a + 2, d) * (1 - smooth(b - 2, b + 2, d)); }
 
   zicht(x, y, m = 0) { return x > this.x0 - m && x < this.x1 + m && y > this.y0 - m && y < this.y1 + m; }
 
@@ -742,7 +788,7 @@ export class NatuurLaag {
     const nat = this.natheid;
     if (nat < 0.15 || this.pal.A > 0.3) return;
     const n = this.verzamel('plasjes', 1);
-    const ijs = this.sz.koud > 0.8, t = this.t, groot = 0.6 + 0.6 * smooth(0.15, 0.7, nat), buf = this.buf;
+    const ijs = this.pal.ijs > 0.6, t = this.t, groot = 0.6 + 0.6 * smooth(0.15, 0.7, nat), buf = this.buf;
     let m = 0;
     for (let q = 0; q < n && m < PLAFOND.plassen; q++) {
       const d = this.plasjes[this.zi[q]];
@@ -778,7 +824,12 @@ export class NatuurLaag {
       c.strokeStyle = 'rgba(232,242,246,0.55)'; c.lineWidth = Math.max(0.02, 0.5 * this.pix); c.stroke();
     }
     // mussen die in een plas badderen: een paar op de rand die rondhuppen, één in het water die spat
-    if (this.z >= DREMPEL.mus && !ijs && this.nacht < 0.3 && this.wr.regen < 0.25) this.tekenMussen(c, m, groot);
+    if (this.z >= DREMPEL.mus && !ijs && this.nacht < 0.4 && this.wr.regen < 0.3) {
+      const ga = c.globalAlpha;
+      c.globalAlpha = ga * (1 - smooth(0.2, 0.4, this.nacht)) * (1 - smooth(0.2, 0.3, this.wr.regen));
+      this.tekenMussen(c, m, groot);
+      c.globalAlpha = ga;
+    }
   }
 
   tekenMussen(c, m, groot) {
@@ -826,17 +877,18 @@ export class NatuurLaag {
   // Een moeder met haar kuikens op de sloot, in de lente: heen en weer langs de kant, de kuikens in een rijtje erachter.
   tekenKuikens(c) {
     const sz = this.sz, d0 = sz.dagInJaar;
-    if (d0 < 95 || d0 > 175 || this.nacht > 0.6 || this.pal.ijs > 0.3) return;
+    const k = this.venster(95, 175) * (1 - smooth(0.5, 0.7, this.nacht)) * (1 - smooth(0.2, 0.4, this.pal.ijs)); if (k < 0.02) return; c.globalAlpha *= k; // zacht in en uit (seizoen, dagdeel, weer) in plaats van een harde grens
     // de sloot is tot 9 lang: ook wie aan het eind zwemt, telt mee
     const n = this.verzamel('kuikens', 4.6), t = this.t, buf = this.buf;
     let m = 0;
     for (let q = 0; q < n; q++) {
       const d = this.kuikens[this.zi[q]], aantal = 3 + Math.floor(d.zaad * 4);
       if (m + aantal + 1 > PLAFOND.kuikens) break;
-      const u = frac(t * 0.6 / (2 * d.L) + d.zaad), terug = u >= 0.5, f = terug ? 2 - u * 2 : u * 2;
-      const dx = (d.bx - d.ax) / d.L, dy = (d.by - d.ay) / d.L, kop = terug ? -1 : 1;
+      const u = t * 0.6 / (2 * d.L) + d.zaad, dx = (d.bx - d.ax) / d.L, dy = (d.by - d.ay) / d.L;
       for (let k = 0; k <= aantal; k++) {
-        const s = clamp(f * d.L - kop * k * 0.15 - (k ? 0.06 : 0), 0, d.L), zij = k ? Math.sin(t * 2 + k * 1.3) * 0.03 : 0;
+        // elk kuiken zwemt dezelfde baan heen en weer, iets later dan wie voor hem zwemt: bij het keren volgen ze
+        // de moeder om in plaats van te verspringen
+        const uk = u - (k ? k * 0.15 + 0.06 : 0) / (2 * d.L), kop = frac(uk) < 0.5 ? 1 : -1, s = tri(uk) * d.L, zij = k ? Math.sin(t * 2 + k * 1.3) * 0.03 : 0;
         buf[m * 4] = d.ax + dx * s - dy * zij; buf[m * 4 + 1] = d.ay + dy * s + dx * zij; buf[m * 4 + 2] = Math.atan2(dy * kop, dx * kop); buf[m * 4 + 3] = k ? 1 : 0;
         m++;
       }
@@ -858,7 +910,7 @@ export class NatuurLaag {
   // Kikkers: zitten op de kant, springen in een boogje het water in (een kring), zwemmen als twee oogjes terug.
   tekenKikkers(c) {
     const d0 = this.sz.dagInJaar;
-    if (d0 < 75 || d0 > 275 || this.nacht > 0.85 || this.pal.ijs > 0.3) return;
+    const k = this.venster(75, 275) * (1 - smooth(0.75, 0.95, this.nacht)) * (1 - smooth(0.2, 0.4, this.pal.ijs)); if (k < 0.02) return; c.globalAlpha *= k; // zacht in en uit (seizoen, dagdeel, weer) in plaats van een harde grens
     const n = this.verzamel('kikkers', 1), t = this.t, buf = this.buf;
     let m = 0, kring = 0;
     const kr = this.kringBuf ?? (this.kringBuf = new Float32Array(PLAFOND.kikkers * 3));
@@ -873,12 +925,12 @@ export class NatuurLaag {
         const f = (ph - (P - 3.6)) / 3.6;
         if (f < 0.3) { kr[kring * 3] = wx; kr[kring * 3 + 1] = wy; kr[kring * 3 + 2] = f / 0.3; kring++; continue; }
         const g = smooth(0.3, 1, f);
-        x = wx + (d.x - wx) * g * 0.75; y = wy + (d.y - wy) * g * 0.75; soort = 1;
+        x = wx + (d.x - wx) * g; y = wy + (d.y - wy) * g; soort = g < 0.97 ? 1 : 0; // terug tot op zijn plek op de kant
       }
       buf[m * 4] = x; buf[m * 4 + 1] = y; buf[m * 4 + 2] = soort ? a + Math.PI : a + Math.sin(t * 0.3 + d.zaad * 9) * 0.3; buf[m * 4 + 3] = soort + hoog * 0.5;
       m++;
     }
-    this.n.kikkers = m + kring;
+    this.n.kikkers = m + kring; this.n.kringen = kring;
     if (kring) {
       c.beginPath();
       for (let q = 0; q < kring; q++) { const r = 0.05 + kr[q * 3 + 2] * 0.25; ellips(c, kr[q * 3], kr[q * 3 + 1], r, r * 0.7, 0); }
@@ -915,7 +967,7 @@ export class NatuurLaag {
   // Libellen: hangen stil boven het water, schieten dan in een flits naar een ander punt (zomer, overdag, droog).
   tekenLibellen(c) {
     const d0 = this.sz.dagInJaar;
-    if (d0 < 130 || d0 > 260 || this.nacht > 0.35 || this.wr.regen > 0.15) return;
+    const k = this.venster(130, 260) * (1 - smooth(0.25, 0.45, this.nacht)) * (1 - smooth(0.1, 0.2, this.wr.regen)); if (k < 0.02) return; c.globalAlpha *= k; // zacht in en uit (seizoen, dagdeel, weer) in plaats van een harde grens
     const n = this.verzamel('libellen', 4.4), t = this.t, buf = this.buf, a3 = this.p3, b3 = this.libelP ?? (this.libelP = new Float32Array(2));
     let m = 0;
     for (let q = 0; q < n && m < PLAFOND.libellen; q++) {
@@ -952,7 +1004,7 @@ export class NatuurLaag {
   // Bijen en hommels boven de bloemenplekken: zwermen rond, blijven even op een bloem hangen (lente en zomer, overdag).
   tekenBijen(c) {
     const sz = this.sz, d0 = sz.dagInJaar;
-    if (d0 < 80 || d0 > 270 || sz.winter > 0.2 || this.nacht > 0.3 || this.wr.regen > 0.2) return;
+    const k = this.venster(80, 270) * (1 - smooth(0.12, 0.28, sz.winter)) * (1 - smooth(0.2, 0.4, this.nacht)) * (1 - smooth(0.15, 0.25, this.wr.regen)); if (k < 0.02) return; c.globalAlpha *= k; // zacht in en uit (seizoen, dagdeel, weer) in plaats van een harde grens
     const n = this.verzamel('bijen', 2), t = this.t, buf = this.buf;
     let m = 0;
     for (let q = 0; q < n && m + 5 <= PLAFOND.bijen; q++) {
@@ -1001,9 +1053,9 @@ export class NatuurLaag {
     c.beginPath(); for (let q = 0; q < m; q++) { const d = L[buf[q * 4]]; rond(c, d.x + 0.02, d.y + 0.02, 0.06); } c.fillStyle = '#4a443c'; c.fill();
     c.globalAlpha = ga;
     // de specht hangt aan de westkant van de stam en klopt in roffels; houtsplinters vallen weg
-    if (z >= DREMPEL.specht && this.nacht < 0.35) {
+    if (z >= DREMPEL.specht && this.nacht < 0.45) {
       let s = 0;
-      c.globalAlpha = ga * smooth(DREMPEL.specht, DREMPEL.specht + 0.8, z); // invloeien, net als de andere dieren
+      c.globalAlpha = ga * smooth(DREMPEL.specht, DREMPEL.specht + 0.8, z) * (1 - smooth(0.25, 0.45, this.nacht)); // invloeien, net als de andere dieren
       c.beginPath();
       for (let q = 0; q < m && s < PLAFOND.spechten; q++, s++) { const d = L[buf[q * 4]], k = this.klop(d); ellips(c, d.x - 0.27 - k, d.y + 0.02, 0.1, 0.045, 0); }
       c.fillStyle = '#1e1e22'; c.fill();
@@ -1020,9 +1072,9 @@ export class NatuurLaag {
       c.globalAlpha = ga;
     }
     // de uil zit bovenop; zijn ogen lichten op en knipperen af en toe, de kop draait langzaam
-    if (z >= DREMPEL.uil && this.nacht > 0.55) {
+    if (z >= DREMPEL.uil && this.nacht > 0.45) {
       let u = 0;
-      const gu = ga * smooth(DREMPEL.uil, DREMPEL.uil + 0.8, z);
+      const gu = ga * smooth(DREMPEL.uil, DREMPEL.uil + 0.8, z) * smooth(0.45, 0.65, this.nacht);
       c.globalAlpha = gu;
       c.beginPath(); for (let q = 0; q < m && u < PLAFOND.uilen; q++, u++) { const d = L[buf[q * 4]]; rond(c, d.x + 0.03, d.y - 0.02, 0.13); } c.fillStyle = '#8a6e52'; c.fill();
       c.beginPath(); for (let q = 0; q < u; q++) { const d = L[buf[q * 4]], dr = Math.sin(t * 0.4 + d.zaad * 9) * 0.025; ellips(c, d.x + 0.03 + dr, d.y + 0.01, 0.085, 0.07, 0); } c.fillStyle = '#d2bc98'; c.fill();
@@ -1075,7 +1127,7 @@ export class NatuurLaag {
 
   // Eekhoorns op omgevallen stammen: rennen naar het eind, gaan rechtop zitten, rennen terug (overdag).
   tekenEekhoorns(c) {
-    if (this.nacht > 0.35) return;
+    const k = 1 - smooth(0.25, 0.45, this.nacht); if (k < 0.02) return; c.globalAlpha *= k; // zacht in en uit (seizoen, dagdeel, weer) in plaats van een harde grens
     const n = this.verzamel('eekhoorns', 2), t = this.t, buf = this.buf;
     let m = 0;
     for (let q = 0; q < n && m < PLAFOND.eekhoorns; q++) {
@@ -1106,7 +1158,7 @@ export class NatuurLaag {
   // Egels: 's avonds en 's nachts (lente tot herfst) een langzaam rondje door het gras, met stekels en een snuitje.
   tekenEgels(c) {
     const d0 = this.sz.dagInJaar;
-    if (d0 < 90 || d0 > 300 || this.nacht < 0.3) return;
+    const k = this.venster(90, 300) * smooth(0.2, 0.4, this.nacht); if (k < 0.02) return; c.globalAlpha *= k; // zacht in en uit (seizoen, dagdeel, weer) in plaats van een harde grens
     const n = this.verzamel('egels', 2), t = this.t, buf = this.buf;
     let m = 0;
     for (let q = 0; q < n && m < PLAFOND.egels; q++) {
@@ -1131,8 +1183,8 @@ export class NatuurLaag {
 
   // Vleermuizen in de schemering: kleine fladderende silhouetten in snelle, grillige lussen.
   tekenVleermuizen(c) {
-    const d0 = this.sz.dagInJaar, schemer = smooth(0.2, 0.35, this.nacht) * (1 - smooth(0.8, 0.95, this.nacht));
-    if (d0 < 100 || d0 > 290 || schemer < 0.05 || this.wr.regen > 0.3) return;
+    const d0 = this.sz.dagInJaar, schemer = smooth(0.2, 0.35, this.nacht) * (1 - smooth(0.8, 0.95, this.nacht)) * this.venster(100, 290) * (1 - smooth(0.25, 0.35, this.wr.regen));
+    if (schemer < 0.02) return;
     const n = this.verzamel('vleer', 3), t = this.t, buf = this.buf;
     let m = 0;
     for (let q = 0; q < n && m < PLAFOND.vleermuizen; q++) {
@@ -1165,7 +1217,9 @@ export class NatuurLaag {
   // Spinnenwebben in de heggen op herfstochtenden, met dauwdruppels die schitteren.
   tekenWebben(c) {
     const d0 = this.sz.dagInJaar, ochtend = this.ochtend;
-    if (d0 < 235 || d0 > 320 || ochtend < 0.05 || this.wr.regen > 0.3) return;
+    const k = this.venster(235, 320) * (1 - smooth(0.25, 0.35, this.wr.regen));
+    if (ochtend * k < 0.02) return;
+    c.globalAlpha *= k;
     const n = this.verzamel('webben', 1), t = this.t, L = this.webben, buf = this.buf;
     let m = 0;
     for (let q = 0; q < n && m < PLAFOND.webben; q++) { buf[m * 4] = this.zi[q]; m++; }
@@ -1396,10 +1450,7 @@ export class NatuurLaag {
           for (let k = 0; k < 10; k++) { const f = frac(t * 1.3 + k * 0.618); rond(c, 0.95 + f * 0.8, (frac(k * 0.371 + Math.floor(t * 1.3 + k * 0.618) * 0.13) - 0.5) * br * 1.1, 0.03); }
           c.fillStyle = 'rgba(255,255,255,0.8)'; c.fill();
         }
-        // regenboog in de nevel: zomer, overdag, ingezoomd, en alleen als de zon schijnt (weinig wolken, geen regen)
-        if (z >= 10 && this.sz.zomer > 0.4 && this.nacht < 0.2 && v.kracht > 0.3 && this.wr.wolken < 0.45 && this.wr.regen < 0.05) {
-          for (let k = 0; k < 4; k++) { c.beginPath(); c.arc(1.6, 0, 1.3 - k * 0.08, -Math.PI * 0.5, Math.PI * 0.5); c.strokeStyle = REGENBOOG[k]; c.lineWidth = 0.08; c.stroke(); }
-        }
+        // (geen regenboog in de nevel meer, C12: van bovenaf lag hij als geverfde bogen op de grond)
       }
       c.restore();
     }
@@ -1764,12 +1815,16 @@ export class NatuurLaag {
           if (this.bebouwd(p.tg)) continue;
           for (let k = 0; k < 6 && skiers + m < PLAFOND.skiers; k++) {
             const f = frac(t * 0.025 + k / 6 + p.kant * 0.11 + l.zaad), d = f * p.len;
+            // boven stapt hij van de lift en beneden gaat hij weer de lift in: daar (en alleen daar) is hij even weg
+            if (f < 0.03 || f > 0.97) continue;
             langs(p.pts, d, this.p3);
             const a = this.p3[2], zig = Math.sin(f * 40 + k) * 0.32, dz = Math.cos(f * 40 + k);
             buf[m * 4] = this.p3[0] - Math.sin(a) * zig; buf[m * 4 + 1] = this.p3[1] + Math.cos(a) * zig; buf[m * 4 + 2] = a + dz * 0.7; buf[m * 4 + 3] = k % JAS.length; m++;
           }
         }
         skiers += m;
+        const gs = c.globalAlpha;
+        c.globalAlpha = gs * (1 - smooth(0.42, 0.6, this.nacht)); // bij het donker gaan ze naar huis (vervagen)
         c.beginPath();
         for (let q = 0; q < m; q++) {
           const x = buf[q * 4], y = buf[q * 4 + 1], a = buf[q * 4 + 2], co = Math.cos(a), si = Math.sin(a);
@@ -1782,6 +1837,7 @@ export class NatuurLaag {
           for (let q = 0; q < m; q++) if (buf[q * 4 + 3] === k) { rond(c, buf[q * 4], buf[q * 4 + 1], 0.06); iets = true; }
           if (iets) { c.fillStyle = JAS[k]; c.fill(); }
         }
+        c.globalAlpha = gs;
       }
     }
     // kabelbaan: twee kabels zonder tussenmasten, twee gondels die elkaar halverwege kruisen

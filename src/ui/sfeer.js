@@ -15,6 +15,7 @@
 // of witte klodders: twee wolkenschaduwen over elkaar zijn even donker als één, net als in het echt.
 
 import { seizoen, weer, wind } from './seizoen.js';
+import { KLASSE } from './wegennet.js';
 
 // ---------- gedeelde hulpjes (eigen kopie, zie inzoom-spec §0) ----------
 
@@ -73,7 +74,6 @@ const ALIAS = { olieveld: 'centrale', staalfabriek: 'industrie', landbouw: 'boer
 const VERVUILING = { centrale: 1, industrie: 0.8, mijn: 0.6, wapenfabriek: 0.6, chipfabriek: 0.25 };
 // Lage flarden in drie lagen op verschillende hoogte: [zoom waarop je erdoorheen vliegt, celmaat in wereldeenheden].
 const FLARDLAGEN = [[9, 26], [15, 18], [22, 13]];
-const BOOG = ['#ff5a4a', '#ff9f3a', '#ffe14a', '#6fe06a', '#4aa8ff', '#7a6aff', '#c46aff'];
 // Lagen van regen en sneeuw: [schaal, snelheid px/s, sprite, alpha]; vaste lijsten, zodat er per beeld niets wordt aangemaakt.
 const REGENLAGEN = [[0.7, 520, 0, 0.22], [1.05, 820, 1, 0.26], [1.6, 1250, 0, 0.3]];
 const SNEEUWLAGEN = [[0.6, 32, 0, 0.35], [0.95, 55, 1, 0.45], [1.45, 85, 1, 0.55]];
@@ -345,7 +345,7 @@ export class SfeerLaag {
     this.waterBron = undefined;
     this.bouwSig = null;
     this.soortInfo = new Map(); // gebouwId -> { nr, woon, licht, vuil, knoop } (begrensd door het aantal gebouwsoorten)
-    this.snoer = new Float32Array(PLAFOND.snoeren * 4); this.nSnoer = 0;
+    this.snoer = new Float32Array(PLAFOND.snoeren * 4); this.snoerLand = new Int16Array(PLAFOND.snoeren); this.nSnoer = 0;
     this.lichtPunt = new Float32Array(MAX_LICHT * 5); this.nLicht = 0;
     this.snoerStreep = [0.01, 6];
     this.wolkBuf = new Float32Array(PLAFOND.wolken * 7);
@@ -511,6 +511,9 @@ export class SfeerLaag {
     }
     const ko = s.kolonies || GEEN;
     for (let i = 0; i < ko.length; i++) sig = (Math.imul(sig, 31) + ko[i].t + 3) | 0;
+    // het wegennet wordt in stukjes gebouwd en na elke bouw opnieuw: de snoeren volgen het mee
+    const net = this.net;
+    if (net?.klaar) { if (this.netD !== net.D) { this.netD = net.D; this.netNr = (this.netNr | 0) + 1; } sig = (Math.imul(sig, 31) + this.netNr * 7 + 5) | 0; }
     if (sig === this.bouwSig) return;
     this.bouwSig = sig;
     const geo = this.geo, St = this.straat, B = this.bebouwd, bron = this.vuilBron, V = this.vuil, P = this.lichtPunt, SN = this.snoer;
@@ -538,35 +541,32 @@ export class SfeerLaag {
     for (const k of ko) { if (k.t >= 0) { B[k.t] = 1; licht(k.t, 0.8, 3, 0); } }
     // Meer kleine lichtjes of snoeren dan er plek is? Dan gelijkmatig uitdunnen op de hash van de tegel. Zonder dit vult
     // het plafond zich land voor land en blijven juist de laatste landen in de lijst helemaal zonder lichtsnoeren.
-    let n2 = 0, nW = 0;
-    for (const land of s.landen) for (const p of land.plaatsingen) if (p.t >= 0) { nW++; if (this.info(p.g).licht === 2) n2++; }
-    const f2 = n2 ? Math.min(1, ((MAX_LICHT - nL) * 0.95) / n2) : 1, fS = nW ? Math.min(1, (PLAFOND.snoeren * 0.95) / nW) : 1;
+    let n2 = 0;
+    for (const land of s.landen) for (const p of land.plaatsingen) if (p.t >= 0 && this.info(p.g).licht === 2) n2++;
+    const f2 = n2 ? Math.min(1, ((MAX_LICHT - nL) * 0.95) / n2) : 1;
     for (const land of s.landen) {
       // vuile lucht: hoe meer zware industrie een land heeft, hoe vuiler de lucht boven elke fabriek
       let tot = 0;
       for (const id in land.gebouwen) tot += (land.gebouwen[id] || 0) * this.info(id).vuil;
       const lf = smooth(1.5, 12, tot);
-      // wegen van elk gebouw naar het dichtstbijzijnde knooppunt, zoals tekenWegen en knooppuntVoor in map.js
-      const h = geo.hoofdstad[land.idx], knopen = h != null && h >= 0 ? [h] : [];
-      for (const p of land.plaatsingen) if (p.t >= 0 && this.info(p.g).knoop) knopen.push(p.t);
       for (const p of land.plaatsingen) {
         if (p.t < 0) continue;
         const inf = this.info(p.g);
         if (inf.vuil) bron[p.t] += inf.vuil * lf;
         if (inf.licht === 2 && (f2 >= 1 || hash(p.t, 227) < f2)) licht(p.t, 0.7, 2, land.idx);
-        if (nS >= PLAFOND.snoeren || (fS < 1 && hash(p.t, 229) >= fS)) continue;
-        const a = geo.tegels[p.t];
-        let best = -1, bd = Infinity;
-        for (let i = 0; i < knopen.length; i++) {
-          const n = knopen[i], b = geo.tegels[n];
-          if (!b || n === p.t) continue;
-          const d = (a.k - b.k) ** 2 + (a.r - b.r) ** 2;
-          if (d < bd) { bd = d; best = n; }
-        }
-        if (best < 0) continue;
-        const b = geo.tegels[best];
-        SN[nS * 4] = a.x; SN[nS * 4 + 1] = a.y; SN[nS * 4 + 2] = b.x; SN[nS * 4 + 3] = b.y; nS++;
       }
+    }
+    // Lichtsnoeren liggen op de takken van het wegennet: straten, en hoofd- en stamwegen binnen de bebouwing. Een
+    // stamweg door het open land blijft donker. Zonder net (nog niet gebouwd) geen snoeren, nooit losse sterlijnen.
+    const SL = this.snoerLand, wegen = this.net?.klaar ? this.net.wegen() : GEEN;
+    let nKand = 0;
+    const kand = (w) => w.klasse === KLASSE.STRAAT || ((w.klasse === KLASSE.HOOFD || w.klasse === KLASSE.STAM) && w.stadA && w.stadB) || (w.klasse === KLASSE.HOOFD && (w.stadA || w.stadB));
+    for (let i = 0; i < wegen.length; i++) if (kand(wegen[i])) nKand++;
+    const fS = nKand ? Math.min(1, (PLAFOND.snoeren * 0.95) / nKand) : 1;
+    for (let i = 0; i < wegen.length && nS < PLAFOND.snoeren; i++) {
+      const w = wegen[i];
+      if (!kand(w) || (fS < 1 && hash(w.tak, i, 229) >= fS)) continue;
+      SN[nS * 4] = w.ax; SN[nS * 4 + 1] = w.ay; SN[nS * 4 + 2] = w.bx; SN[nS * 4 + 3] = w.by; SL[nS] = w.land; nS++;
     }
     this.nLicht = nL; this.nSnoer = nS;
     // de vuile lucht waait twee tegels uit; boven bos is de lucht schoner
@@ -680,8 +680,8 @@ export class SfeerLaag {
     // maan en terug flakkeren. De stand van de speldag waarop de nacht begint, blijft staan tot het weer dag is.
     if (!this.maan || nacht <= 0) this.maan = maanStand(dagF);
     const maan = this.maan;
-    // regenboog na een bui: gisteren nat, nu bijna droog, zon erbij; niet elke dag
-    const boog = hash(s.dag, 91) < 0.65 ? dag * (1 - gouden * 0.5) * smooth(0.12, 0.35, gisteren.regen) * (1 - smooth(0.06, 0.2, g.regen)) * (1 - smooth(0.6, 0.95, g.wolken)) : 0;
+    // geen regenboog meer (C12): van bovenaf lag de boog als verf over bergen en stadsblokken
+    const boog = 0;
     this.stemming = {
       dag: s.dag, dagF, seizoen: sz, wolken: g.wolken, regen: g.regen, sneeuw: g.sneeuw, onweer: g.onweer, mist: g.mist, nat: g.nat,
       windHoek: g.hoek, windKracht: g.kracht, fase, licht, nacht, dagLicht: dag, gouden, laagZon, blauw, ochtend, avond, regenboog: boog, flits: 0,
@@ -744,6 +744,7 @@ export class SfeerLaag {
     if (!s || !view.geo || !view.w) return;
     if (this.state !== s || this.geo !== view.geo || this.eigenaar !== view.eigenaar) this.laad(view);
     else this.werkWater(view);
+    this.net = view.wegennet;
     this.sprites ??= bakSprites();
     this.telNul();
     const st = this.bijwerken(view, nu, frac);
@@ -1415,7 +1416,6 @@ export class SfeerLaag {
     if (z >= 8.5) this.tekenDeeltjes(c, st, nu, smooth(8.5, 10.5, z));
     if (z >= 2.4 && st.regen > 0.03) this.tekenRegen(c, st, nu, smooth(2.4, 4, z));
     if (z >= 2.4 && st.sneeuw > 0.03) this.tekenSneeuw(c, st, nu, smooth(2.4, 4, z), z);
-    if (st.regenboog > 0.02) this.tekenRegenboog(c, st, nu, smooth(1.5, 4, z));
     if (st.onweer > 0.01) this.tekenBliksem(c, st, nu, z);
     // volle-schermlagen kosten de videokaart een heel beeld aan vulwerk: niet tekenen als ze toch onzichtbaar zijn
     const vignet = 0.2 * smooth(5, 9, z);
@@ -1824,13 +1824,14 @@ export class SfeerLaag {
     }
   }
 
-  // Sneeuw: vlokken in drie lagen die langzaam vallen en heen en weer dwarrelen. Diep ingezoomd groter.
+  // Sneeuw: vlokken in drie lagen die langzaam vallen en heen en weer dwarrelen. Vaste schermmaat (C12): neerslag valt
+  // tussen de kijker en de kaart, dus een vlok of streep is op elke zoom even groot.
   tekenSneeuw(c, st, nu, a, z) {
     const t = nu / 1000, sterk = clamp(st.sneeuw * 1.2, 0, 1) * a;
     if (sterk < 0.01) return;
     const scheef = Math.cos(st.windHoek) * st.windKracht * 0.5;
     const hoek = Math.atan2(1, scheef) - Math.PI / 2;
-    const groei = 0.8 + 0.6 * smooth(4, 14, z);
+    const groei = 1;
     c.globalCompositeOperation = 'source-over';
     const lagen = SNEEUWLAGEN;
     for (let l = 0; l < lagen.length; l++) {
@@ -1839,24 +1840,6 @@ export class SfeerLaag {
       const dw = Math.sin(t * (0.6 + l * 0.25) + l * 2.1) * 14;
       this.vel(c, this.sprites.sneeuw[spr], hoek, s * groei, dw + l * 41, (t * v) / s + l * 23, sterk * al);
     }
-  }
-
-  // Regenboog na een bui: een zachte boog in de hoek van het beeld, met de zon in de rug (die staat in het noordwesten).
-  tekenRegenboog(c, st, nu, a) {
-    const al = st.regenboog * a;
-    if (al < 0.02) return;
-    const w = this.w, h = this.h, R = Math.max(w, h) * 0.75, x = w * 0.78, y = h * 1.18;
-    const dik = R * 0.014;
-    c.globalCompositeOperation = 'screen';
-    c.lineWidth = dik * 1.3;
-    for (let i = 0; i < BOOG.length; i++) {
-      c.strokeStyle = BOOG[i];
-      c.globalAlpha = al * 0.16;
-      c.beginPath();
-      c.arc(x, y, R - i * dik, Math.PI * 1.08, Math.PI * 1.72);
-      c.stroke();
-    }
-    c.globalCompositeOperation = 'source-over';
   }
 
   // Onweer: af en toe een bliksemschicht en een korte flits die het beeld oplicht. Diep ingezoomd zit je

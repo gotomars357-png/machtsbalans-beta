@@ -19,6 +19,9 @@
 // kale bomen, rookpluimen die met de wind meewaaien. Het seizoen zit als emmer in de cachesleutel.
 
 import { seizoen, wind } from './seizoen.js';
+import { sneeuwDekVan, ijsVan } from './terrein.js';
+import { OPRIT } from './wegennet.js';
+import { maakTekeningen } from './tekeningen.js';
 
 const STIJL = {
   democratie: { daken: ['#b5563b', '#7c8a99', '#4f6d8f', '#a8623a', '#8b6f5a'], muur: '#ddd5c6', accent: '#4c8ef7' },
@@ -158,7 +161,8 @@ function tint(hex, f) {
 const B = {
   S: 100, cx: 0, cy: 0, lod: 0, niveau: 1, seed: 0, regime: 'democratie', kleur: '#ffffff',
   verwaarloosd: false, uit: false, onrust: false, oorlog: false, strak: false, r2: rnd(1), ramen: null, levend: null,
-  sneeuw: 0, blad: 'z', groeiend: false, nieuw: 0, lamp: 0, soort: '', wv: 1, nieuwB: 0, nieuwE: 0,
+  sneeuw: 0, blad: 'z', groeiend: false, nieuw: 0, lamp: 0, soort: '', wv: 1, nieuwB: 0, nieuwE: 0, armen: 15,
+  kavel: false, vangGrond: false, omg: null, variant: 0, woonerf: 0, direct: false,
 };
 
 // Detailtrappen binnen de lods: tegelmaat in px (T ≈ 14·zoom op het gewone kaartvak), dus D9 ≈ zoom 9.
@@ -224,7 +228,8 @@ const L_DUIF = 40, L_SNOER = 41, L_ROLLUIK = 42, L_DOCK = 43, L_HEFTRUCK = 44, L
 // straat, silhouet achter het raam, parkeerplaats die vol- en leegloopt, rokers, fietsenstalling, robotmaaier,
 // spelende kinderen, tuinlampjes en een kind in het zwembadje.
 const L_HOND = 60, L_KAT = 61, L_BBQ = 62, L_HARK = 63, L_SCHEP = 64, L_KLIKO = 65, L_SILHOUET = 66, L_PARKEER = 67,
-  L_ROKER = 68, L_STALLING = 69, L_MAAIER = 70, L_SPELEN = 71, L_TUINLAMP = 72, L_PLONS = 73;
+  L_ROKER = 68, L_STALLING = 69, L_MAAIER = 70, L_SPELEN = 71, L_TUINLAMP = 72, L_PLONS = 73,
+  L_UITSTAL = 74, L_OPRIT = 75, L_VUILWAGEN = 77;
 // Deze levende delen tekenen alleen 's nachts; overdag tellen ze niet mee in het plafond.
 const NACHTWERK = { [L_DEURLICHT]: true, [L_SCHIJN]: true, [L_LANTAARN]: true, [L_SNOER]: true, [L_ROLLUIK]: true, [L_SILHOUET]: true, [L_TUINLAMP]: true };
 
@@ -254,6 +259,7 @@ function levendB(soort, x, y, a = 0, b = 0, k = 0) {
   levend(soort, x, y, a, b, k);
 }
 function levendBedrijf(soort, x, y, a = 0, b = 0, k = 0) {
+  if (B.kavel && soort === L_DOCK) return; // C12: het dock van de kavel volgt ctx.dock
   if (B.nieuwB >= (WONEN[B.soort] ? MAX_B_WONEN : MAX_B_GEBOUW)) return;
   B.nieuwB++;
   levend(soort, x, y, a, b, k);
@@ -278,6 +284,8 @@ function raamVast(x, y, w, h) {
 const NIETS = {};
 
 function rect(c, x, y, w, h, kleur) {
+  // C12: op een kavel ligt de grond al; de eerste vlak-vullende grond van de tekening valt weg
+  if (B.vangGrond && w === B.S && (h === B.S || h === B.S * 0.62) && x === B.cx - B.S / 2) { B.vangGrond = false; return; }
   c.fillStyle = kleur;
   c.fillRect(x, y, w, h);
 }
@@ -614,6 +622,7 @@ function autoKleur(i) {
 
 // Auto met middelpunt (x, y); liggend = rijrichting oost-west.
 function auto(c, x, y, kleur, liggend, schaal = 1) {
+  if (B.kavel) return; // C12: voertuigen komen van de ritten, niet uit de bitmap
   const S = B.S, l = S * 0.06 * schaal, b = S * 0.032 * schaal;
   const w = liggend ? l : b, h = liggend ? b : l;
   rect(c, x - w / 2 + S * 0.004, y - h / 2 + S * 0.004, w, h, 'rgba(0,0,0,0.3)');
@@ -625,6 +634,7 @@ function auto(c, x, y, kleur, liggend, schaal = 1) {
 }
 
 function vrachtwagen(c, x, y, kleur, liggend, laadbak = '#d9d6cc') {
+  if (B.kavel) return;
   const S = B.S, l = S * 0.12, b = S * 0.04;
   const w = liggend ? l : b, h = liggend ? b : l;
   rect(c, x - w / 2 + S * 0.005, y - h / 2 + S * 0.005, w, h, 'rgba(0,0,0,0.3)');
@@ -987,9 +997,10 @@ function straatMeubels(c, x, y, s, plein = 0) {
     c.strokeStyle = rgba('240,244,250', 0.75);
     c.lineWidth = lijn(s, 0.006);
     c.beginPath();
+    const e = (z) => (armOpen(z) ? 0.5 : KEER - 0.05) * s;
     for (const d of [-0.034, 0.034]) {
-      c.moveTo(x - s / 2, y + d * s); c.lineTo(x - s * vrij, y + d * s); c.moveTo(x + s * vrij, y + d * s); c.lineTo(x + s / 2, y + d * s);
-      c.moveTo(x + d * s, y - s / 2); c.lineTo(x + d * s, y - s * vrij); c.moveTo(x + d * s, y + s * vrij); c.lineTo(x + d * s, y + s / 2);
+      c.moveTo(x - e(3), y + d * s); c.lineTo(x - s * vrij, y + d * s); c.moveTo(x + s * vrij, y + d * s); c.lineTo(x + e(1), y + d * s);
+      c.moveTo(x + d * s, y - e(0)); c.lineTo(x + d * s, y - s * vrij); c.moveTo(x + d * s, y + s * vrij); c.lineTo(x + d * s, y + e(2));
     }
     c.stroke();
   }
@@ -1025,7 +1036,8 @@ function straatMeubels(c, x, y, s, plein = 0) {
   c.beginPath();
   for (let f = -0.5; f < 0.5; f += 0.012) {
     if (Math.abs(f) < Math.max(0.065, plein)) continue;
-    for (const d of [-0.046, 0.046]) { c.moveTo(x + f * s, y + d * s + Math.sign(d) * s * 0.016); c.lineTo(x + f * s, y + d * s); c.moveTo(x + d * s, y + f * s); c.lineTo(x + d * s + Math.sign(d) * s * 0.016, y + f * s); }
+    const hOpen = Math.abs(f) < KEER - 0.03 || armOpen(f < 0 ? 3 : 1), vOpen = Math.abs(f) < KEER - 0.03 || armOpen(f < 0 ? 0 : 2);
+    for (const d of [-0.046, 0.046]) { if (hOpen) { c.moveTo(x + f * s, y + d * s + Math.sign(d) * s * 0.016); c.lineTo(x + f * s, y + d * s); } if (vOpen) { c.moveTo(x + d * s, y + f * s); c.lineTo(x + d * s + Math.sign(d) * s * 0.016, y + f * s); } }
   }
   c.stroke();
   c.fillStyle = 'rgba(20,20,20,0.18)';
@@ -1282,28 +1294,60 @@ function lopendeBand(c, x0, y0, x1, y1) {
 // nooit gebouwen, want daar lopen de mensen en rijden de auto's van de levenslaag.
 const Z0 = 0.062;
 
+// C11: een arm van het straatkruis loopt alleen tot de vakrand als hij daar aansluit (een weg van infra.js die
+// het vakje door die zijde verlaat, of een buurvakje met ook een kruis). Anders eindigt hij in een keerlus op
+// KEER·s van het midden, met stoep eromheen en gras en een heg erachter. B.armen: bit z voor zijde z (0 N, 1 O, 2 Z, 3 W).
+const KEER = 0.38, ARM_DX = [0, 1, 0, -1], ARM_DY = [-1, 0, 1, 0];
+const armOpen = (z) => ((B.armen >> z) & 1) === 1;
 function straten(c, x, y, s) {
+  if (B.kavel && (B.soort === 'woonwijk' || B.soort === 'hoofdstad')) { straatErf(c, x, y, s); return; }
   const lod = B.lod;
+  // per arm: stoep en asfalt van het midden tot de rand of tot de keerlus
+  for (let z = 0; z < 4; z++) {
+    const L = armOpen(z) ? 0.5 : KEER, dx = ARM_DX[z], dy = ARM_DY[z];
+    const x0 = Math.min(0, dx * L), x1 = Math.max(0, dx * L), y0 = Math.min(0, dy * L), y1 = Math.max(0, dy * L);
+    c.fillStyle = STOEP;
+    c.fillRect(x + (dx ? x0 : -Z0) * s, y + (dy ? y0 : -Z0) * s, (dx ? x1 - x0 : 2 * Z0) * s, (dy ? y1 - y0 : 2 * Z0) * s);
+    if (L < 0.5) {
+      // achter de keerlus: gras met een heg dwars op de straat
+      const gx = dx ? (dx > 0 ? KEER : -0.5) : -Z0, gy = dy ? (dy > 0 ? KEER : -0.5) : -Z0;
+      const gw = dx ? 0.5 - KEER : 2 * Z0, gh = dy ? 0.5 - KEER : 2 * Z0;
+      rect(c, x + gx * s, y + gy * s, gw * s, gh * s, GRAS);
+      c.fillStyle = STOEP; rond(c, x + dx * KEER * s, y + dy * KEER * s, s * Z0);
+      const hx = x + dx * (KEER + Z0 + 0.012) * s, hy = y + dy * (KEER + Z0 + 0.012) * s;
+      rect(c, hx - (dx ? 0.008 : Z0) * s, hy - (dy ? 0.008 : Z0) * s, (dx ? 0.016 : 2 * Z0) * s, (dy ? 0.016 : 2 * Z0) * s, HEG);
+    }
+  }
   c.fillStyle = STOEP;
-  c.fillRect(x - s / 2, y - s * Z0, s, s * Z0 * 2);
-  c.fillRect(x - s * Z0, y - s / 2, s * Z0 * 2, s);
+  c.fillRect(x - s * Z0, y - s * Z0, s * Z0 * 2, s * Z0 * 2);
   c.fillStyle = ASFALT;
-  c.fillRect(x - s / 2, y - s * 0.03, s, s * 0.06);
-  c.fillRect(x - s * 0.03, y - s / 2, s * 0.06, s);
+  for (let z = 0; z < 4; z++) {
+    const L = armOpen(z) ? 0.5 : KEER, dx = ARM_DX[z], dy = ARM_DY[z];
+    if (dx) c.fillRect(x + Math.min(0, dx * L) * s, y - s * 0.03, L * s, s * 0.06);
+    else c.fillRect(x - s * 0.03, y + Math.min(0, dy * L) * s, s * 0.06, L * s);
+    if (L < 0.5) rond(c, x + dx * KEER * s, y + dy * KEER * s, s * 0.05);
+  }
+  c.fillRect(x - s * 0.03, y - s * 0.03, s * 0.06, s * 0.06);
   if (lod >= 1) {
     c.strokeStyle = 'rgba(0,0,0,0.3)';
     c.lineWidth = lijn(s, 0.003);
     c.beginPath();
-    for (const d of [-0.03, 0.03]) {
-      c.moveTo(x - s / 2, y + d * s); c.lineTo(x - s * 0.03, y + d * s); c.moveTo(x + s * 0.03, y + d * s); c.lineTo(x + s / 2, y + d * s);
-      c.moveTo(x + d * s, y - s / 2); c.lineTo(x + d * s, y - s * 0.03); c.moveTo(x + d * s, y + s * 0.03); c.lineTo(x + d * s, y + s / 2);
+    for (let z = 0; z < 4; z++) {
+      const L = (armOpen(z) ? 0.5 : KEER - 0.04) * s, dx = ARM_DX[z], dy = ARM_DY[z];
+      for (const d of [-0.03, 0.03]) {
+        if (dx) { c.moveTo(x + dx * s * 0.03, y + d * s); c.lineTo(x + dx * L, y + d * s); }
+        else { c.moveTo(x + d * s, y + dy * s * 0.03); c.lineTo(x + d * s, y + dy * L); }
+      }
+      if (!armOpen(z)) { c.moveTo(x + dx * KEER * s + s * 0.05, y + dy * KEER * s); c.arc(x + dx * KEER * s, y + dy * KEER * s, s * 0.05, 0, Math.PI * 2); }
     }
     c.stroke();
     c.strokeStyle = 'rgba(240,236,220,0.6)';
     c.setLineDash([s * 0.03, s * 0.025]);
     c.beginPath();
-    c.moveTo(x - s / 2, y); c.lineTo(x - s * 0.07, y); c.moveTo(x + s * 0.07, y); c.lineTo(x + s / 2, y);
-    c.moveTo(x, y - s / 2); c.lineTo(x, y - s * 0.07); c.moveTo(x, y + s * 0.07); c.lineTo(x, y + s / 2);
+    for (let z = 0; z < 4; z++) {
+      const L = (armOpen(z) ? 0.5 : KEER - 0.06) * s, dx = ARM_DX[z], dy = ARM_DY[z];
+      c.moveTo(x + dx * s * 0.07, y + dy * s * 0.07); c.lineTo(x + dx * L, y + dy * L);
+    }
     c.stroke();
     c.setLineDash([]);
   }
@@ -1317,6 +1361,70 @@ function straten(c, x, y, s) {
       c.fillRect(x + s * 0.085 - l / 2, y + o - b / 2, l, b);
       c.fillRect(x + o - b / 2, y - s * 0.085 - l / 2, b, l);
       c.fillRect(x + o - b / 2, y + s * 0.085 - l / 2, b, l);
+    }
+  }
+}
+
+// C12: op een kavel is het kruis van de woonwijk een woonerf (klinkers, geen stoepranden, strepen of zebrapaden) en dat
+// van de hoofdstad een plein. Een arm die niet op een straat van het net uitkomt, loopt na de paaltjes als voetpad door
+// naar de buren; er is geen keerlus meer.
+function straatErf(c, x, y, s) {
+  const plein = B.soort === 'hoofdstad', lod = B.lod;
+  const vlak = plein ? PLEIN : KLINKER, rand = plein ? '#a49d8e' : '#7d5f52';
+  const P = (u) => x + u * s, Q = (v) => y + v * s;
+  c.fillStyle = vlak;
+  c.fillRect(P(-Z0), Q(-Z0), 2 * Z0 * s, 2 * Z0 * s);
+  for (let z = 0; z < 4; z++) {
+    const dx = ARM_DX[z], dy = ARM_DY[z], open = armOpen(z), L = open ? 0.5 : KEER;
+    const a = Math.min(0, (dx || dy) * L), b = Math.max(0, (dx || dy) * L);
+    if (dx) c.fillRect(P(a), Q(-Z0), (b - a) * s, 2 * Z0 * s); else c.fillRect(P(-Z0), Q(a), 2 * Z0 * s, (b - a) * s);
+    if (!open) {
+      // voetpad naar de rand
+      const p0 = Math.min(dx || dy, 0) * 0.5, k = (dx || dy) * KEER, q0 = Math.min(p0, k), q1 = Math.max((dx || dy) * 0.5, k), w = 0.022;
+      c.fillStyle = plein ? '#d2ccbe' : '#b9ab95';
+      if (dx) c.fillRect(P(q0), Q(-w), (q1 - q0) * s, 2 * w * s); else c.fillRect(P(-w), Q(q0), 2 * w * s, (q1 - q0) * s);
+      c.fillStyle = vlak;
+    }
+  }
+  if (lod >= 1) {
+    // rabatband langs de randen en een goot van lichtere stenen in het midden
+    c.strokeStyle = rand; c.lineWidth = lijn(s, 0.004);
+    c.beginPath();
+    for (let z = 0; z < 4; z++) {
+      const dx = ARM_DX[z], dy = ARM_DY[z], L = (armOpen(z) ? 0.5 : KEER) * s;
+      for (const d of [-Z0, Z0]) {
+        if (dx) { c.moveTo(x + dx * Z0 * s, y + d * s); c.lineTo(x + dx * L, y + d * s); }
+        else { c.moveTo(x + d * s, y + dy * Z0 * s); c.lineTo(x + d * s, y + dy * L); }
+      }
+      if (!armOpen(z)) {
+        // kop van de arm: dwars band, behalve waar het voetpad doorloopt
+        if (dx) { c.moveTo(x + dx * L, y - Z0 * s); c.lineTo(x + dx * L, y - 0.022 * s); c.moveTo(x + dx * L, y + 0.022 * s); c.lineTo(x + dx * L, y + Z0 * s); }
+        else { c.moveTo(x - Z0 * s, y + dy * L); c.lineTo(x - 0.022 * s, y + dy * L); c.moveTo(x + 0.022 * s, y + dy * L); c.lineTo(x + Z0 * s, y + dy * L); }
+      }
+    }
+    c.stroke();
+    // steenverband: fijne voegen dwars op de rijrichting (woonerf) of een raster (plein)
+    c.strokeStyle = plein ? 'rgba(255,255,255,0.16)' : 'rgba(60,35,25,0.16)'; c.lineWidth = lijn(s, 0.0015);
+    c.beginPath();
+    const st = plein ? 0.03 : 0.014;
+    for (let z = 0; z < 4; z++) {
+      const dx = ARM_DX[z], dy = ARM_DY[z], L = armOpen(z) ? 0.5 : KEER;
+      for (let t = Z0 + st; t < L; t += st) {
+        if (dx) { c.moveTo(x + dx * t * s, y - Z0 * s); c.lineTo(x + dx * t * s, y + Z0 * s); }
+        else { c.moveTo(x - Z0 * s, y + dy * t * s); c.lineTo(x + Z0 * s, y + dy * t * s); }
+      }
+    }
+    c.stroke();
+    if (!plein) {
+      c.fillStyle = 'rgba(205,190,170,0.45)';
+      c.fillRect(P(-0.5 * (armOpen(3) ? 1 : KEER / 0.5) ), Q(-0.004), ((armOpen(3) ? 0.5 : KEER) + (armOpen(1) ? 0.5 : KEER)) * s, 0.008 * s);
+    }
+    // paaltjes aan de kop van een dichte arm
+    c.fillStyle = '#3b3a38';
+    for (let z = 0; z < 4; z++) {
+      if (armOpen(z)) continue;
+      const dx = ARM_DX[z], dy = ARM_DY[z];
+      for (const q of [-0.045, -0.015, 0.015, 0.045]) rond(c, x + (dx ? dx * (KEER - 0.008) : q) * s, y + (dy ? dy * (KEER - 0.008) : q) * s, Math.max(0.6, s * 0.0045));
     }
   }
 }
@@ -1366,13 +1474,25 @@ function vrijstaand(c, qx, qy, qw, qh, st, kw) {
     if (oprit) {
       rect(c, ox, py + ky * 0.12, kx * 0.2, ky * 0.84, BETON);
       if (vanaf(D11)) sneeuwHopen(c, ox, py + ky * 0.2, kx * 0.2, ky * 0.7);
-      if (h3 > 0.5) auto(c, ox + kx * 0.1, py + ky * 0.62, autoKleur(id), false);
-      // kliko's bovenaan de oprit, vanaf D13 een fiets ernaast en een brievenbus bij de straat
-      if (vanaf(D11)) containers(c, ox + kx * 0.025, py + ky * 0.15, 2 + (h1 > 0.6), false);
-      if (vanaf(D13) && h2 > 0.35) fiets(c, ox + kx * 0.15, py + ky * 0.2, false, autoKleur(id + 3));
+      // C11: een oprit die op de horizontale arm uitkomt (noordkwart onderste rij, zuidkwart bovenste rij) heeft een
+      // auto die echt wegrijdt en terugkomt; de andere opritten houden hun gebakken auto
+      const aanArm = kw > 1 ? i >> 1 === 0 : i >> 1 === 1;
+      if (h3 > 0.5) {
+        const ax = ox + kx * 0.1, ay = py + ky * 0.62;
+        // (buiten het potje van levendE om, hooguit acht per vakje: anders wordt de auto bij een seizoens- of
+        // zoomwissel, als sneeuwscheppers of tuinlampjes het potje vullen, ineens een gebakken auto en springt hij)
+        if (aanArm && B.levend) { levend(L_OPRIT, ax, ay, hx + w * 0.5 - ax, hy + d - S * 0.004 - ay, (id & 255) | (kw > 1 ? 256 : 0)); OPRIT_X.push(ax); }
+        else auto(c, ax, ay, autoKleur(id), false);
+      }
+      // kliko's bovenaan de oprit, vanaf D13 een fiets ernaast en een brievenbus bij de straat. C11: ligt de straat
+      // aan de bovenkant en rijdt de auto daar langs, dan staan ze achteraan de oprit (anders rijdt hij erdoorheen)
+      const achter = kw > 1 && aanArm && h3 > 0.5, ky0 = achter ? 0.86 : 0.15;
+      if (vanaf(D11)) containers(c, ox + kx * 0.025, py + ky * ky0, 2 + (h1 > 0.6), false);
+      if (vanaf(D13) && h2 > 0.35) fiets(c, ox + kx * 0.15, py + ky * (achter ? 0.82 : 0.2), false, autoKleur(id + 3));
       if (vanaf(D13)) brievenbus(c, links ? ox - kx * 0.035 : ox + kx * 0.235, py + ky * 0.9, id);
       // in de winter schept iemand de oprit sneeuwvrij
-      if (vanaf(D13) && B.sneeuw >= 2 && hash(B.seed, id, 65) < 0.4) levendE(L_SCHEP, ox, py + ky * 0.3, kx * 0.2, ky * 0.55, id & 255);
+      // (niet op een oprit waar de auto in en uit rijdt: die zou dwars door de sneeuwschepper rijden)
+      if (vanaf(D13) && B.sneeuw >= 2 && !achter && !(aanArm && h3 > 0.5) && hash(B.seed, id, 65) < 0.4) levendE(L_SCHEP, ox, py + ky * 0.3, kx * 0.2, ky * 0.55, id & 255);
     }
     if (lod >= 2) {
       // terras en tuinpad
@@ -1415,7 +1535,6 @@ function rijtjes(c, qx, qy, qw, qh, st, kw) {
       const h1 = rh * 0.05;
       voorstrook(c, x0, by + bd, qw * 0.94, h1, ry + rh * 0.995 - (by + bd) - h1, n, deuren);
     }
-    let masker = 0;
     for (let i = 0; i < n; i++) {
       const id = kw * 8 + rij * 4 + i, bx = x0 + i * bw;
       if (vanaf(D11)) gazon(c, bx, ry + rh * 0.04, bw, rh * 0.32, id);
@@ -1437,14 +1556,13 @@ function rijtjes(c, qx, qy, qw, qh, st, kw) {
       }
       pand(c, bx, by, bw, bd, v, st.daken[Math.floor(hash(B.seed, id, 6) * st.daken.length)], st.muur, { schuin: !st.plat, dicht: dichtGetimmerd(id), dakkapel: hash(B.seed, id, 8) < 0.5, woon: true });
       if (st.plat && hash(B.seed, id, 9) < 0.12) koepel(c, bx + bw / 2, by - hgt + bd / 2, Math.min(bw, bd) * 0.3, st.accent);
-      // vanaf D13 rijdt een deel van de bewoners 's ochtends weg en komt 's avonds terug; de rest blijft staan
+      // C11: de strook voor de rijtjes heeft geen eigen in- en uitrit, dus de auto's daar blijven staan (op elke
+      // zoomstap dezelfde, zodat er bij het inzoomen niets verschijnt of verdwijnt)
       const ha = hash(B.seed, id, 3);
-      if (lod >= 1 && (ha < 0.3 || (ha < 0.55 && !vanaf(D13)))) auto(c, bx + bw * 0.5, by + bd + rh * 0.13, autoKleur(id), true, 0.9);
-      else if (ha < 0.55 && vanaf(D13)) masker |= 1 << i;
+      if (lod >= 1 && ha < 0.55) auto(c, bx + bw * 0.5, by + bd + rh * 0.13, autoKleur(id), true, 0.9);
       if (vanaf(D11)) containers(c, bx + bw * 0.8, by + bd + S * 0.003, 2, true);
       if (vanaf(D13) && hash(B.seed, id, 14) < 0.35) fiets(c, bx + bw * 0.12, by + bd + S * 0.008, true, autoKleur(id + 5));
     }
-    parkeerLevend(x0 + bw * 0.5, by + bd + rh * 0.13, bw, S * 0.06 * 0.9, n, PARK_BEWONERS | PARK_LIGGEND, masker);
   }
 }
 
@@ -1507,14 +1625,12 @@ function platen(c, qx, qy, qw, qh, st, kw) {
     // parkeerstrook of bomen tussen de platen
     if (gat > S * 0.05) {
       rect(c, qx + qw * 0.08, by1 + d + gat * 0.3, qw * 0.84, gat * 0.6, '#55575a');
-      // vanaf D11 rijdt een deel van de auto's overdag weg (pakket E)
-      let masker = 0;
+      // C11: de strook tussen de platen is te smal voor een rijbaan langs de vakken, dus de auto's blijven staan
+      // (op elke zoomstap dezelfde, zodat er bij het inzoomen niets verschijnt of verdwijnt)
       for (let i = 0; i < 6; i++) {
         const ha = hash(B.seed, kw * 10 + i, 3);
-        if (ha < 0.3 || (ha < 0.7 && !vanaf(D11))) auto(c, qx + qw * (0.14 + i * 0.14), by1 + d + gat * 0.6, autoKleur(kw * 10 + i), false, 0.85);
-        else if (ha < 0.7) masker |= 1 << i;
+        if (ha < 0.7) auto(c, qx + qw * (0.14 + i * 0.14), by1 + d + gat * 0.6, autoKleur(kw * 10 + i), false, 0.85);
       }
-      if (vanaf(D11)) parkeerLevend(qx + qw * 0.14, by1 + d + gat * 0.6, qw * 0.14, S * 0.06 * 0.85, 6, PARK_BEWONERS, masker);
     } else {
       for (let i = 0; i < 4; i++) boom(c, qx + qw * (0.15 + i * 0.23), by1 + d + gat * 0.5 + S * 0.01, S * 0.016);
     }
@@ -1855,6 +1971,26 @@ function monument(c, x, y, s) {
 
 // ---------- pakket D: extra's per gebouwsoort (gebakken na de basistekening) ----------
 
+// C12: de banden eindigen in iets: een kolenbunker of een stortgoot, geen zwarte vlek.
+function kolenBunker(c, x, y, s) {
+  const w = s * 0.11, h = s * 0.08;
+  rect(c, x - w / 2 + s * 0.006, y - h / 2 + s * 0.005, w, h, 'rgba(0,0,0,0.28)');
+  rect(c, x - w / 2, y - h / 2, w, h, '#9d988c');
+  rect(c, x - w / 2 + s * 0.007, y - h / 2 + s * 0.007, w - s * 0.014, h - s * 0.014, '#34312d');
+  c.fillStyle = '#45413b';
+  c.beginPath(); c.ellipse(x - w * 0.08, y - h * 0.05, w * 0.3, h * 0.27, 0, 0, Math.PI * 2); c.fill();
+  c.fillStyle = '#58534b';
+  c.beginPath(); c.ellipse(x - w * 0.14, y - h * 0.12, w * 0.15, h * 0.12, 0, 0, Math.PI * 2); c.fill();
+  if (B.lod >= 1) { c.fillStyle = '#6b665d'; for (let i = 0; i < 6; i++) rond(c, x - w * 0.3 + w * 0.55 * hash(B.seed, i, 401), y - h * 0.25 + h * 0.4 * hash(B.seed, i, 402), Math.max(0.4, s * 0.0028)); }
+}
+function stortTrechter(c, x, y, s) {
+  const r = s * 0.025;
+  rect(c, x - r + s * 0.004, y - r + s * 0.004, r * 2, r * 2, 'rgba(0,0,0,0.28)');
+  rect(c, x - r, y - r, r * 2, r * 2, '#8c949c');
+  rect(c, x - r * 0.6, y - r * 0.6, r * 1.2, r * 1.2, '#4a4f55');
+  rect(c, x - r * 0.3, y - r * 0.3, r * 0.6, r * 0.6, '#2e3236');
+}
+
 const EXTRA = {
   boerderij(c, x, y, s) {
     if (B.sneeuw >= 2) { c.fillStyle = rgba('242,245,250', 0.45); c.fillRect(x - s * 0.5, y - s * 0.5, s, s * 0.47); c.fillRect(x - s * 0.5, y + s * 0.03, s * 0.47, s * 0.47); }
@@ -1910,9 +2046,9 @@ const EXTRA = {
   centrale(c, x, y, s) {
     if (vanaf(D7)) hoogspanningsmast(c, x + s * 0.1, y + s * 0.47, s * 0.12);
     if (!vanaf(D9)) return;
-    c.fillStyle = '#2a2826'; c.beginPath(); c.ellipse(x + s * 0.42, y + s * 0.06, s * 0.05, s * 0.035, 0, 0, Math.PI * 2); c.fill();
-    c.fillStyle = '#3e3a36'; c.beginPath(); c.ellipse(x + s * 0.41, y + s * 0.05, s * 0.025, s * 0.015, 0, 0, Math.PI * 2); c.fill();
-    lopendeBand(c, x + s * 0.38, y + s * 0.08, x + s * 0.0, y + s * 0.12);
+    // C12: kolenbunker binnen het terrein (betonnen bak met een hoop kolen), de band loopt van de bunker naar de ketel
+    kolenBunker(c, x + s * 0.36, y + s * 0.07, s);
+    lopendeBand(c, x + s * 0.3, y + s * 0.09, x + s * 0.0, y + s * 0.12);
     if (vanaf(D11)) vrachtwagen(c, x + s * 0.3, y - s * 0.46, '#8e2a24', true, '#c8ccd0');
   },
   zonnepark(c, x, y, s) {
@@ -1932,7 +2068,7 @@ const EXTRA = {
     }
   },
   industrie(c, x, y, s) {
-    if (vanaf(D7)) lopendeBand(c, x + s * 0.16, y - s * 0.015, x + s * 0.46, y - s * 0.015);
+    if (vanaf(D7)) { lopendeBand(c, x + s * 0.16, y - s * 0.015, x + s * 0.36, y - s * 0.015); stortTrechter(c, x + s * 0.385, y - s * 0.015, s); }
     if (!vanaf(D9)) return;
     // stoom uit de dakventilatoren en een pijpenbrug
     levendNieuw(L_STOOM, x - s * 0.3, y - s * 0.16, s * 0.12);
@@ -2081,12 +2217,17 @@ function nachtUur(t) { const k = klok(t); return k >= 1 ? k - 1 : 0.5; }
 // 's nachts -1: dan is niets van de dag (school, appèl) aan de gang.
 function dagUur(t) { const k = klok(t); return k < 1 ? k : -1; }
 const isOchtend = (t) => { const k = klok(t); return k > 0.04 && k < 0.2; };
+// C11: de zichtbare dag, van ochtendgloren tot ochtendgloren (klok 0). De speldag verspringt bij tempo 1 elke
+// seconde, dus weekdag, ophaaldag, schooldag en wedstrijddag volgen deze dag en niet ctx.dag: anders stonden de
+// kliko's één seconde op de zeven buiten en poppen de auto's van het personeel in en uit. Het seizoen en de
+// vakanties (traag) blijven de speldag volgen.
+const zichtDag = (t) => Math.floor(t / CYCLUS + 0.25);
 // Schooltijd: 0 niemand, 1 les (een paar kinderen buiten), 2 pauze (vol plein), 3 vrij overdag (buurtkinderen).
 // Werkdagen buiten de zomer- en kerstvakantie; de speldag 0 is 1 januari.
 function schoolStand(dag, t) {
   const u = dagUur(t), d = typeof dag === 'number' && Number.isFinite(dag) ? Math.floor(dag) : 100, j = ((d % 365) + 365) % 365;
   if (u < 0.1 || u > 0.85) return 0;
-  if (d % 7 >= 5 || (j >= 196 && j < 238) || j < 3 || j > 357) return u > 0.25 && u < 0.75 ? 3 : 0;
+  if (weekdag(zichtDag(t)) >= 5 || (j >= 196 && j < 238) || j < 3 || j > 357) return u > 0.25 && u < 0.75 ? 3 : 0;
   if (u < 0.14 || u > 0.72) return 0;
   return (u > 0.3 && u < 0.38) || (u > 0.52 && u < 0.6) ? 2 : 1;
 }
@@ -2381,7 +2522,7 @@ function bRust(soort, k, t, nacht) {
     case L_DUIF: return nacht >= 0.6;
     case L_MENSEN: return (k & 3) === 0 ? schoolStand(dagNu, t) === 0 : nacht >= 0.5;
     case L_APPEL: return nacht >= 0.5 || !isOchtend(t);
-    case L_PUBLIEK: return typeof dagNu !== 'number' || Math.floor(dagNu) % 4 !== 2;
+    case L_PUBLIEK: return zichtDag(t) % 4 !== 2;
     default: return soort >= L_HOND && eRust(soort, k, t, nacht);
   }
 }
@@ -2577,8 +2718,7 @@ function dienstauto(c, px, py, a, s, t, fase, nacht, accent) {
 
 // Publiek op de tribunes van het stadion: alleen op wedstrijddagen, overdag en in de vroege avond, met een wave.
 function publiek(c, mx, my, rx, ry, hgtF, s, t, nacht, accent) {
-  const d = dagNu;
-  if (typeof d !== 'number' || Math.floor(d) % 4 !== 2) return;
+  if (zichtDag(t) % 4 !== 2) return;
   if (nacht > 0.5 && nachtUur(t) > 0.35) return;
   const hgt = (hgtF / 10000) * s, n = 96, p = Math.max(0.8, s * 0.004), golf = (t * 0.9) % (Math.PI * 2);
   for (let laag = 0; laag < 4; laag++) {
@@ -2741,7 +2881,7 @@ const HOND_KLEUR = ['#6a4a30', '#2a2624', '#c9a46a'];
 const KAT_KLEUR = ['#d9822f', '#2e2c2a', '#9a9894', '#f0ece2'];
 const BRIEVENBUS = ['#c0392b', '#2e6eb5', '#3a3a3a', '#2f5d3a'];
 
-// Weekdag uit de speldag (0–4 werkdag, 5–6 weekend), zoals schoolStand; zonder dag een werkdag.
+// Weekdag uit een dagnummer (0–4 werkdag, 5–6 weekend); in gebruik met de zichtbare dag (zichtDag).
 const weekdag = (dag) => (typeof dag === 'number' && Number.isFinite(dag) ? ((Math.floor(dag) % 7) + 7) % 7 : 2);
 // Kinderen buiten: in het weekend en de vakanties overdag, op schooldagen na schooltijd tot de schemering.
 function kinderBuiten(t) {
@@ -2983,14 +3123,19 @@ function voorstrook(c, x, y, w, h1, h2, n, deuren) {
 // Kliko's aan de straat op ophaaldag: acht plekjes op de stoepband, tussen het looppad (±0.045·s) en de kavels,
 // waar geen lantaarn, bank, prullenbak, fietsenrek, brandkraan of bushokje staat. Elke wijk een eigen ophaaldag.
 const KLIKO_PLEK = [[-0.13, -1, 1], [-0.26, 1, 1], [0.2, -1, 1], [0.135, 1, 1], [-0.13, -1, 0], [-0.26, 1, 0], [0.13, 1, 0], [0.25, -1, 0]];
+// C11: OPRIT_X zijn de opritten met een rijdende auto (x in de bakcontext, gezet door vrijstaand): daar staat geen
+// kliko voor de opening op de stoep, anders rijdt de auto erdoorheen.
+const OPRIT_X = [];
 function straatKliko(c, x, y, s) {
   const dag = Math.floor(hash(B.seed, 61) * 5), b = s * 0.0065;
   for (let i = 0; i < KLIKO_PLEK.length; i++) {
     if (hash(B.seed, i, 62) < 0.3) continue;
     const [f, kant, langs] = KLIKO_PLEK[i], z = kant < 0 ? -0.0565 * s : 0.05 * s, n = 1 + (hash(B.seed, i, 63) < 0.5);
+    if (langs) { const k0 = x + f * s, k1 = k0 + (n - 1) * b * 1.25 + b; let voor = false; for (let j = 0; j < OPRIT_X.length; j++) if (k1 > OPRIT_X[j] - s * 0.024 && k0 < OPRIT_X[j] + s * 0.024) voor = true; if (voor) continue; }
     if (langs) levendE(L_KLIKO, x + f * s, y + z, b, 0, n | 4 | (dag << 3));
     else levendE(L_KLIKO, x + z, y + f * s, b, 0, n | (dag << 3));
   }
+  levendE(L_VUILWAGEN, x, y, 0, 0, dag << 3);
 }
 
 // ---- randen van bedrijfsterreinen ----
@@ -3011,8 +3156,11 @@ const RAND_E = {
 // en legen zich met de klok. Bij een bedrijf komt het personeel 's ochtends en gaat het 's avonds; bij woningen
 // rijden de bewoners 's ochtends weg en komen ze 's avonds terug. lengte is de autolengte in px.
 const PARK_BEWONERS = 16, PARK_LIGGEND = 32, PARK_NOORD = 64;
-function parkeerLevend(x, y, a, lengte, n, vlag, masker) {
-  if (masker) levendE(L_PARKEER, x, y, a, lengte, n | vlag | (masker << 7));
+// C11: gang is de afstand van de vakken tot de rijbaan (in px van de bakcontext), in eenheden van 0,002·S in k.
+function parkeerLevend(x, y, a, lengte, n, vlag, masker, gang = 0) {
+  if (B.kavel && !WONEN[B.soort]) return; // C12: op een kavel parkeert het personeel in de vakken van de voorstrook
+  const g = Math.max(0, Math.min(127, Math.round(gang / (B.S * 0.002))));
+  if (masker) levendE(L_PARKEER, x, y, a, lengte, n | vlag | ((masker & 1023) << 7) | (g << 17));
 }
 
 // ---------- pakket E: levende delen per beeld ----------
@@ -3029,14 +3177,15 @@ function eRust(soort, k, t, nacht) {
     case L_KAT: return nacht >= 0.6 || frac(t / 70 + (k >> 2) * 0.0131) > 0.78;
     case L_BBQ: return !isAvond(t);
     case L_HARK: case L_SCHEP: return nacht >= 0.5 || u < 0.08 || u > 0.8;
-    case L_KLIKO: return weekdag(dagNu) !== k >> 3 || u < 0 || u > 0.62;
+    case L_KLIKO: return weekdag(zichtDag(t)) !== (k >> 3) % 8 || u < 0 || u > 0.96;
+    case L_VUILWAGEN: return weekdag(zichtDag(t)) !== (k >> 3) % 8 || u < 0.28 || u > 0.92; // de ritten zelf: 0,30 tot hooguit 0,79
     case L_SILHOUET: { const nu = nachtUur(t); return nu < 0.04 || nu > 0.6 + 0.3 * hash(k, 3, 9); }
-    case L_PARKEER: return false;
-    case L_ROKER: return u < 0.12 || u > 0.82 || weekdag(dagNu) >= 5 || frac(t / 40 + (k >> 2) * 0.0131) > 0.55;
+    case L_PARKEER: case L_OPRIT: return false;
+    case L_ROKER: return u < 0.12 || u > 0.82 || weekdag(zichtDag(t)) >= 5;
     case L_STALLING: { const st = schoolStand(dagNu, t); return st !== 1 && st !== 2; }
     case L_MAAIER: return nacht >= 0.5 || u < 0.15 || u > 0.6;
     case L_SPELEN: return (k & SPEL_BANK) ? nacht >= 0.5 || u < 0.2 || u > 0.75 || szNu.koud > 0.7 : !kinderBuiten(t);
-    case L_TUINLAMP: return nachtUur(t) > 0.85;
+    case L_TUINLAMP: return nachtUur(t) > 0.91;
     case L_PLONS: return szNu.blad !== 'z' || u < 0.35 || u > 0.85;
     default: return false;
   }
@@ -3152,14 +3301,100 @@ function scheppen(c, px, py, a, b, s, t, fase) {
   mensje(c, x, y, d, WINTERJAS[Math.floor(fase * 4) % 4], HUID[Math.floor(fase * 3)]);
 }
 
-// Kliko's aan de straat: een of twee bakken op de stoep, langs het straatstuk (k & 4) of haaks daarop.
-function klikoStraat(c, px, py, b, k, s) {
-  const n = k & 3, langs = k & 4, stap = b * 1.25;
+// Kliko's aan de straat op ophaaldag (C11): een of twee bakken op de stoep, langs het straatstuk (k & 4) of haaks
+// daarop. 's Ochtends rolt iemand ze vanaf de kavel naar de stoeprand, de vuilniswagen rijdt langs en leegt ze (het
+// deksel staat daarna open), en aan het eind van de middag gaan ze één voor één weer naar binnen. Een arm zonder
+// doorgang voor de wagen (keerlus aan beide kanten) krijgt geen kliko's buiten.
+const KLIKO_ROL = 0.05; // klokeenheden (4,5 s) om een bak de stoep op of af te rollen
+function klikoStraat(c, px, py, b, k, s, t, fase) {
+  const n = k & 3, langs = k & 4, stap = b * 1.25, as = langs ? 0 : 1;
+  const f = langs ? (px - vakX) / s : (py - vakY) / s, z = langs ? (py - vakY) / s : (px - vakX) / s, weg = z < 0 ? -1 : 1;
+  const leeg = vuilPassage(as, f);
+  if (leeg < 0) return;
+  // (pas naar binnen als de wagen geweest is, ook op de verticale arm die later aan de beurt is)
+  const kk = klok(t), uit = 0.02 + 0.12 * fase, binnen = Math.max(0.66 + 0.24 * hash(zaadNu, Math.round(fase * 1e4), 64), leeg + 0.04);
+  // r: 0 binnen, 1 aan de stoeprand
+  const r = Math.min(klem((kk - uit) / KLIKO_ROL), klem((binnen + KLIKO_ROL - kk) / KLIKO_ROL));
+  if (r <= 0) return;
+  const o = (1 - glad(r)) * s * 0.03 * weg, ox = langs ? 0 : o, oy = langs ? o : 0, alfa = klem(r * 2.5);
+  const open = kk > leeg;
+  c.globalAlpha = alfa;
   for (let i = 0; i < n; i++) {
-    const x = langs ? px + i * stap : px, y = langs ? py : py + i * stap, kl = KLIKO[(i + (k >> 3)) % KLIKO.length];
+    const x = (langs ? px + i * stap : px) + ox, y = (langs ? py : py + i * stap) + oy, kl = KLIKO[(i + (k >> 3)) % KLIKO.length];
     c.fillStyle = 'rgba(0,0,0,0.25)'; c.fillRect(x + s * 0.0015, y + s * 0.0015, b, b);
     c.fillStyle = kl; c.fillRect(x, y, b, b);
-    c.fillStyle = tint(kl, 1.25); c.fillRect(x, y, b, b * 0.3);
+    // het deksel: dicht een lichte rand aan de kavelkant, na het legen open naar de straat toe
+    c.fillStyle = tint(kl, open ? 0.8 : 1.25);
+    if (!open) c.fillRect(x, y, b, b * 0.3);
+    else if (langs) c.fillRect(x, weg < 0 ? y + b : y - b * 0.35, b, b * 0.35);
+    else c.fillRect(weg < 0 ? x + b : x - b * 0.35, y, b * 0.35, b);
+    spoor(3, x, y, alfa);
+  }
+  // tijdens het rollen loopt er iemand achter de bakken
+  if (r < 1) {
+    const d = Math.max(1, s * 0.0045), mx = px + ox + (langs ? b * 0.5 : weg * b * 1.6), my = py + oy + (langs ? weg * b * 1.6 : b * 0.5);
+    // hij duwt de bakken en loopt bij de stoeprand terug naar huis (vervaagt bij het hek)
+    const ma = Math.min(alfa, klem((1 - r) * 4));
+    c.globalAlpha = ma;
+    mensje(c, mx, my, d, KLEREN[Math.floor(fase * 6) % KLEREN.length], HUID[Math.floor(fase * 3)]);
+    spoor(2, mx, my, ma);
+  }
+  c.globalAlpha = 1;
+}
+
+// De vuilniswagen op ophaaldag: eerst over de horizontale arm, dan over de verticale. Kan hij aan beide kanten
+// door, dan rijdt hij er recht doorheen; anders keert hij in de keerlus en rijdt hij terug. Hij verschijnt en
+// verdwijnt alleen aan de vakrand. Rijdt rechts, 0,1 tegel per seconde.
+const VW_X = new Float64Array(4), VW_Y = new Float64Array(4), VW_V = 0.1 * (CYCLUS / 2), VW_R = 0.02;
+let vwN = 0;
+// Zet de route van de wagen over arm 'as' (0 horizontaal, 1 verticaal) in VW_X/VW_Y, in tegels rond het midden.
+function vuilRoute(as) {
+  const keer = KEER - 0.05, R = RIJBAAN;
+  const a = as === 0 ? (armNu >> 3) & 1 : armNu & 1, b = as === 0 ? (armNu >> 1) & 1 : (armNu >> 2) & 1; // west/noord, oost/zuid
+  // langs de as: p, dwars: q (rechts rijden: richting +p heeft de strook op +q bij de horizontale arm)
+  if (a && b) { vwZet(as, 0, -0.5, R); vwZet(as, 1, 0.5, R); vwN = 2; }
+  else if (b) { vwZet(as, 0, 0.5, -R); vwZet(as, 1, -keer, -R); vwZet(as, 2, -keer, R); vwZet(as, 3, 0.5, R); vwN = 4; }
+  else if (a) { vwZet(as, 0, -0.5, R); vwZet(as, 1, keer, R); vwZet(as, 2, keer, -R); vwZet(as, 3, -0.5, -R); vwN = 4; }
+  else vwN = 0;
+}
+function vwZet(as, j, p, q) { if (as === 0) { VW_X[j] = p; VW_Y[j] = q; } else { VW_X[j] = -q; VW_Y[j] = p; } }
+// Begin en duur (klokeenheden) van de rit over arm 'as'; vwDuur 0 als er geen route is.
+let vwBegin = 0, vwDuur = 0;
+function vuilTijden(as) {
+  const begin = 0.3 + 0.07 * hash(zaadNu, 61, 7); // na de vertrekkende opritauto's (klaar voor 0,29)
+  vuilRoute(0);
+  const dh = vwN ? ritLengte(VW_X, VW_Y, vwN, VW_R) / VW_V : 0;
+  if (as === 0) { vwBegin = begin; vwDuur = dh; return; }
+  vuilRoute(1);
+  vwBegin = begin + dh + 0.04; vwDuur = vwN ? ritLengte(VW_X, VW_Y, vwN, VW_R) / VW_V : 0;
+}
+// Wanneer de wagen langs plek f (in tegels langs de as) op arm 'as' komt; -1 als hij daar niet komt.
+function vuilPassage(as, f) {
+  vuilTijden(as);
+  if (!vwDuur) return -1;
+  const p0 = as === 0 ? VW_X[0] : VW_Y[0];
+  return vwBegin + Math.abs(f - p0) / VW_V + 0.01;
+}
+function vuilwagen(c, px, py, s, t, nacht) {
+  const kk = klok(t), l = s * 0.075, rand = 0.07;
+  for (let as = 0; as < 2; as++) {
+    vuilTijden(as);
+    if (!vwDuur || kk < vwBegin || kk > vwBegin + vwDuur) continue;
+    vuilRoute(as);
+    const L = ritLengte(VW_X, VW_Y, vwN, VW_R), d = (kk - vwBegin) * VW_V;
+    ritPunt(VW_X, VW_Y, vwN, VW_R, d);
+    const alfa = Math.min(glij(d / rand), glij((L - d) / rand));
+    if (alfa <= 0.004) continue;
+    const x = px + ritX * s, y = py + ritY * s, hx = ritHx, hy = ritHy, a = l / 2, b2 = l * 0.2;
+    c.globalAlpha = alfa;
+    c.fillStyle = 'rgba(0,0,0,0.3)'; c.beginPath(); hoekVlak(c, x + l * 0.05, y + l * 0.05, hx, hy, a, b2); c.fill();
+    c.fillStyle = '#cfd3d6'; c.beginPath(); hoekVlak(c, x - hx * a * 0.2, y - hy * a * 0.2, hx, hy, a * 0.8, b2); c.fill();
+    c.fillStyle = '#d9822b'; c.beginPath(); hoekVlak(c, x + hx * a * 0.8, y + hy * a * 0.8, hx, hy, a * 0.2, b2); c.fill();
+    // zwaailicht op de cabine
+    if (Math.floor(t * 3) % 2 === 0) { c.fillStyle = '#ffb02e'; rond(c, x + hx * a * 0.7, y + hy * a * 0.7, Math.max(0.6, s * 0.002)); }
+    if (nacht > 0.3) { c.fillStyle = rgba('255,240,200', 0.8); rond(c, x + hx * a, y + hy * a, Math.max(0.6, l * 0.05)); }
+    c.globalAlpha = 1;
+    spoor(4, x, y, alfa);
   }
 }
 
@@ -3177,45 +3412,258 @@ function silhouet(c, px, py, a, b, k, s, t, nacht) {
   c.globalAlpha = 1;
 }
 
-// Auto van bovenaf voor een levend deel (de maat komt binnen in px, niet uit de bakcontext).
-function autoL(c, x, y, kleur, liggend, l, alfa) {
-  const b = l * 0.53, w = liggend ? l : b, h = liggend ? b : l;
+// Auto van bovenaf voor een levend deel (de maat komt binnen in px, niet uit de bakcontext). C11: gedraaid langs
+// (hx, hy), zodat een auto die een vak of oprit in- en uitrijdt de bocht echt neemt.
+function hoekVlak(c, x, y, hx, hy, a, b) {
+  const ax = hx * a, ay = hy * a, bx = -hy * b, by = hx * b;
+  c.moveTo(x + ax + bx, y + ay + by); c.lineTo(x + ax - bx, y + ay - by); c.lineTo(x - ax - bx, y - ay - by); c.lineTo(x - ax + bx, y - ay + by); c.closePath();
+}
+function autoR(c, x, y, hx, hy, kleur, l, alfa, licht = 0) {
+  if (alfa <= 0.004) return;
+  const a = l / 2, b = l * 0.265;
   c.globalAlpha = alfa;
-  c.fillStyle = 'rgba(0,0,0,0.3)'; c.fillRect(x - w / 2 + l * 0.07, y - h / 2 + l * 0.07, w, h);
-  c.fillStyle = kleur; c.fillRect(x - w / 2, y - h / 2, w, h);
-  c.fillStyle = 'rgba(20,28,36,0.75)';
-  if (liggend) c.fillRect(x - w * 0.16, y - h * 0.38, w * 0.4, h * 0.76); else c.fillRect(x - w * 0.38, y - h * 0.16, w * 0.76, h * 0.4);
+  c.fillStyle = 'rgba(0,0,0,0.3)'; c.beginPath(); hoekVlak(c, x + l * 0.07, y + l * 0.07, hx, hy, a, b); c.fill();
+  c.fillStyle = kleur; c.beginPath(); hoekVlak(c, x, y, hx, hy, a, b); c.fill();
+  c.fillStyle = 'rgba(20,28,36,0.75)'; c.beginPath(); hoekVlak(c, x + hx * a * 0.04, y + hy * a * 0.04, hx, hy, a * 0.4, b * 0.76); c.fill();
+  // 's avonds en 's nachts koplampen als de auto rijdt
+  if (licht > 0) {
+    c.fillStyle = rgba('255,240,200', licht);
+    rond(c, x + hx * a - hy * b * 0.6, y + hy * a + hx * b * 0.6, Math.max(0.6, l * 0.07));
+    rond(c, x + hx * a + hy * b * 0.6, y + hy * a - hx * b * 0.6, Math.max(0.6, l * 0.07));
+  }
   c.globalAlpha = 1;
+  if (SPOOR) SPOOR.push(1, x, y, alfa);
 }
 
+// Spoor voor de samenhangstests: wie hier een lijst zet, krijgt per getekende auto, mensje, kliko en vuilniswagen
+// (soort, x, y, alfa). Soorten: 1 auto, 2 mensje, 3 kliko, 4 vuilniswagen, 5 kraanlast, 6 doos of krat.
+let SPOOR = null;
+export function zetSpoor(lijst) { SPOOR = lijst ?? null; }
+const spoor = (soort, x, y, a) => { if (SPOOR) SPOOR.push(soort, x, y, a); };
+
+// ---- ritten (C11) ----
+// Een korte rit over een gebroken lijn met afgeronde hoeken. ritPunt zet (ritX, ritY) en de rijrichting (ritHx,
+// ritHy) op afstand d langs de lijn; een hoek wordt een kwadratische bocht met straal r (hooguit de halve lengte
+// van de stukken ernaast). Vaste buffers, geen allocaties per beeld.
+const RIT_X = new Float64Array(8), RIT_Y = new Float64Array(8), RIT2_X = new Float64Array(8), RIT2_Y = new Float64Array(8);
+const R_IN = 4, RIT_VX = RIT_X.subarray(R_IN), RIT_VY = RIT_Y.subarray(R_IN); // het vooruitstuk na het achteruitrijden
+let ritX = 0, ritY = 0, ritHx = 1, ritHy = 0;
+function stukR(X, Y, n, j, r) {
+  if (j <= 0 || j >= n - 1) return 0;
+  const a = Math.hypot(X[j] - X[j - 1], Y[j] - Y[j - 1]), b = Math.hypot(X[j + 1] - X[j], Y[j + 1] - Y[j]);
+  return Math.min(r, a / 2, b / 2);
+}
+// Lengte van de rit: de rechte stukken plus de bochten (iets langer dan een kwartcirkel).
+function ritLengte(X, Y, n, r) {
+  let L = 0;
+  for (let j = 0; j < n - 1; j++) {
+    L += Math.hypot(X[j + 1] - X[j], Y[j + 1] - Y[j]) - stukR(X, Y, n, j, r) - stukR(X, Y, n, j + 1, r);
+    if (j + 1 < n - 1) L += stukR(X, Y, n, j + 1, r) * 1.62;
+  }
+  return L;
+}
+function ritPunt(X, Y, n, r, d) {
+  for (let j = 0; j < n - 1; j++) {
+    const dx = X[j + 1] - X[j], dy = Y[j + 1] - Y[j], seg = Math.hypot(dx, dy) || 1e-6, ux = dx / seg, uy = dy / seg;
+    const r0 = stukR(X, Y, n, j, r), r1 = stukR(X, Y, n, j + 1, r), recht = seg - r0 - r1;
+    if (d <= recht || j === n - 2) {
+      const q = d < 0 ? 0 : d > recht ? recht : d;
+      ritX = X[j] + ux * (r0 + q); ritY = Y[j] + uy * (r0 + q); ritHx = ux; ritHy = uy;
+      return;
+    }
+    d -= recht;
+    const bl = r1 * 1.62;
+    if (d <= bl) {
+      // bocht van (punt j+1 - u·r1) via het hoekpunt naar (punt j+1 + v·r1)
+      const ex = X[j + 2] - X[j + 1], ey = Y[j + 2] - Y[j + 1], el = Math.hypot(ex, ey) || 1e-6, vx = ex / el, vy = ey / el;
+      const sx = X[j + 1] - ux * r1, sy = Y[j + 1] - uy * r1, tx = X[j + 1] + vx * r1, ty = Y[j + 1] + vy * r1;
+      const f = d / bl, g = 1 - f;
+      ritX = g * g * sx + 2 * g * f * X[j + 1] + f * f * tx; ritY = g * g * sy + 2 * g * f * Y[j + 1] + f * f * ty;
+      const hx = g * (X[j + 1] - sx) + f * (tx - X[j + 1]), hy = g * (Y[j + 1] - sy) + f * (ty - Y[j + 1]), hl = Math.hypot(hx, hy) || 1;
+      ritHx = hx / hl; ritHy = hy / hl;
+      return;
+    }
+    d -= bl;
+  }
+}
+
+// Aankomst en vertrek op de zichtbare dag (klok kk: 0 bij ochtendgloren, 1 bij de schemering, 2 de volgende
+// ochtend). Bewoners gaan 's ochtends weg en komen 's middags of na het donker terug (in het weekend blijft een deel
+// thuis); personeel komt 's ochtends en gaat 's avonds (in het weekend een kleine ploeg). Om middernacht en bij het
+// ochtendgloren rijdt er niemand, dus de wissel van de weekdag is nooit te zien. Zet ritFase: 0 weg, 1 staat er,
+// 2 vertrekt, 3 komt aan; ritDt is de tijd in seconden sinds het begin van de rit.
+let ritFase = 1, ritDt = 0;
+const K_SEC = CYCLUS / 2; // seconden per klokeenheid
+const aankomstThuis = (h2) => (h2 < 0.65 ? 0.6 + 0.3 * (h2 / 0.65) : 1.02 + 0.25 * ((h2 - 0.65) / 0.35));
+// Opritten aan de straat rijden om de beurt (ritSlot 0-7: kwart en kolom), anders botsen ze op de arm; zo
+// overlappen ook vertrek en aankomst nooit, ook niet als maar één arm aansluit en iedereen dezelfde kant op moet.
+// C11 (review): bij opritten (ritAank >= 0) is ritSlot de beurt bij vertrek (wie het dichtst bij de vakrand woont
+// waar hij de straat af rijdt, eerst) en ritAank die bij aankomst (wie het verst moet, eerst); zo rijdt niemand
+// langs een oprit waar net iemand uit- of indraait, en kunnen ze vlak na elkaar (AUTO_BEURT_OPRIT) rijden. Alle
+// vertrekken zijn zo voor klok 0,29 klaar, voordat de vuilniswagen (vanaf 0,30) over de horizontale arm komt.
+let ritSlot = -1, ritAank = -1;
+const BEURT_OPRIT = 0.024;
+const vertrekThuis = (h1) => (ritAank >= 0 ? 0.06 + BEURT_OPRIT * ritSlot : ritSlot >= 0 ? 0.06 + 0.06 * ritSlot : 0.06 + 0.18 * h1);
+const aankomstSlot = (h2) => (ritAank >= 0 ? 0.62 + BEURT_OPRIT * ritAank + (h2 >= 0.65 ? 0.5 : 0) : ritSlot >= 0 ? 0.62 + 0.06 * ritSlot + (h2 >= 0.65 ? 0.5 : 0) : aankomstThuis(h2));
+function ritTijden(kk, bewoners, weekend, h1, h2, duurA, duurV) {
+  if (bewoners) {
+    if (weekend && h1 < 0.6) { ritFase = 1; return; }
+    const kv = vertrekThuis(h1), ka = aankomstSlot(h2);
+    if (kk < kv) ritFase = 1;
+    else if (kk < kv + duurV) { ritFase = 2; ritDt = (kk - kv) * K_SEC; }
+    else if (kk < ka) ritFase = 0;
+    else if (kk < ka + duurA) { ritFase = 3; ritDt = (kk - ka) * K_SEC; }
+    else ritFase = 1;
+  } else {
+    if (weekend && h1 > 0.3) { ritFase = 0; return; }
+    const ka = ritSlot >= 0 ? 0.03 + 0.03 * ritSlot : 0.03 + 0.2 * h1, kv = ritSlot >= 0 ? 0.68 + 0.055 * ritSlot : 0.68 + 0.26 * h2;
+    if (kk < ka) ritFase = 0;
+    else if (kk < ka + duurA) { ritFase = 3; ritDt = (kk - ka) * K_SEC; }
+    else if (kk < kv) ritFase = 1;
+    else if (kk < kv + duurV) { ritFase = 2; ritDt = (kk - kv) * K_SEC; }
+    else ritFase = 0;
+  }
+}
+// Tijdens het tekenen van de levende delen: midden van het vakje, aansluitende armen en het zaad van het vakje.
+let vakX = 0, vakY = 0, armNu = 15, zaadNu = 0, kavelNu = false;
+const RIJBAAN = 0.015; // midden van de rijstrook van de woonstraat (asfalt ±0,03·s): rechts rijden
+const RIT_V = 0.14; // rijsnelheid in tegels per seconde
 const klem = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
-// Parkeervakken die met de klok vol- en leeglopen; een auto rijdt het vak in of uit (schuift en vervaagt).
-function parkeer(c, px, py, a, l, k, s, t, seed) {
-  const n = k & 15, bewoners = k & PARK_BEWONERS, liggend = k & PARK_LIGGEND, sg = k & PARK_NOORD ? -1 : 1, masker = k >> 7;
-  const u = dagUur(t), weekend = weekdag(dagNu) >= 5;
-  const pal = stNu.strak ? AUTOS_STRAK : AUTOS;
+const glij = (v) => { const t = klem(v); return t * t * (3 - 2 * t); };
+const ritStraal = (gang, s) => Math.min(gang * 0.85, s * 0.04);
+
+// De route tussen een vak en de vakrand. Zet de aankomst (vooruit) in RIT_X/RIT_Y en het vertrek als achteruit
+// (RIT2) gevolgd door vooruit (RIT_VX/RIT_VY). Geeft false als er geen uitweg is.
+// soort 0: bedrijfsparkeerplaats (gang langs de vakken, uit aan de dichtste vakrand), 1: vak van bewoners (zelfde
+// route), 2: oprit aan de horizontale arm van het straatkruis.
+let ritNA = 0, ritNR = 0, ritNV = 0;
+function ritRoute(soort, sx, sy, sg, gang, s) {
+  const r = ritStraal(gang, s);
+  if (soort < 2) {
+    let e = sx < vakX ? -1 : 1;
+    // C12: op een kavel rijdt men alleen het vak uit door een open arm (oost of west); anders blijft de auto staan
+    if (kavelNu && !((armNu >> (e < 0 ? 3 : 1)) & 1)) { e = -e; if (!((armNu >> (e < 0 ? 3 : 1)) & 1)) return false; }
+    const ay = sy + sg * gang, ex = vakX + e * s * 0.5;
+    RIT_X[0] = ex; RIT_Y[0] = ay; RIT_X[1] = sx; RIT_Y[1] = ay; RIT_X[2] = sx; RIT_Y[2] = sy; ritNA = 3;
+    RIT2_X[0] = sx; RIT2_Y[0] = sy; RIT2_X[1] = sx; RIT2_Y[1] = ay; RIT2_X[2] = sx - e * r; RIT2_Y[2] = ay; ritNR = 3;
+    RIT_VX[0] = sx - e * r; RIT_VY[0] = ay; RIT_VX[1] = ex; RIT_VY[1] = ay; ritNV = 2;
+    return true;
+  }
+  let ex = sx < vakX ? -1 : 1;
+  if (!((armNu >> (ex < 0 ? 3 : 1)) & 1)) ex = -ex;
+  if (!((armNu >> (ex < 0 ? 3 : 1)) & 1)) return false;
+  const rand = vakX + ex * s * 0.5, inY = vakY - ex * RIJBAAN * s, uitY = vakY + ex * RIJBAAN * s;
+  RIT_X[0] = rand; RIT_Y[0] = inY; RIT_X[1] = sx; RIT_Y[1] = inY; RIT_X[2] = sx; RIT_Y[2] = sy; ritNA = 3;
+  RIT2_X[0] = sx; RIT2_Y[0] = sy; RIT2_X[1] = sx; RIT2_Y[1] = uitY; RIT2_X[2] = sx - ex * r; RIT2_Y[2] = uitY; ritNR = 3;
+  RIT_VX[0] = sx - ex * r; RIT_VY[0] = uitY; RIT_VX[1] = rand; RIT_VY[1] = uitY; ritNV = 2;
+  return true;
+}
+// Duur van aankomst en vertrek in klokeenheden, uit de lengte van de route (0 als er geen uitweg is).
+let RIT_DA = 0, RIT_DV = 0;
+function ritDuur(soort, sx, sy, sg, gang, s) {
+  if (!ritRoute(soort, sx, sy, sg, gang, s)) { RIT_DA = RIT_DV = 0; return; }
+  const r = ritStraal(gang, s), v = RIT_V * s * K_SEC;
+  RIT_DA = ritLengte(RIT_X, RIT_Y, ritNA, r) / v;
+  RIT_DV = (ritLengte(RIT2_X, RIT2_Y, ritNR, r) + ritLengte(RIT_VX, RIT_VY, ritNV, r)) / v;
+}
+// Teken een auto volgens ritFase (de route staat al klaar uit ritDuur). Hij verschijnt en verdwijnt alleen aan de
+// vakrand, geleidelijk over de laatste 0,07·s: daar rijdt hij het vakje in of uit.
+function rijdendeAuto(c, sx, sy, hx0, hy0, gang, l, s, kleur, nacht) {
+  if (ritFase === 0) return;
+  if (ritFase === 1) { autoR(c, sx, sy, hx0, hy0, kleur, l, 1); return; }
+  const r = ritStraal(gang, s), d = ritDt * RIT_V * s, rand = s * 0.07, licht = nacht > 0.3 ? 0.8 : 0;
+  if (ritFase === 3) {
+    const L = ritLengte(RIT_X, RIT_Y, ritNA, r);
+    ritPunt(RIT_X, RIT_Y, ritNA, r, d < L ? d : L);
+    autoR(c, ritX, ritY, ritHx, ritHy, kleur, l, glij(d / rand), d < L ? licht : 0);
+    return;
+  }
+  const LR = ritLengte(RIT2_X, RIT2_Y, ritNR, r);
+  if (d < LR) { ritPunt(RIT2_X, RIT2_Y, ritNR, r, d); autoR(c, ritX, ritY, -ritHx, -ritHy, kleur, l, 1, licht); return; }
+  const LV = ritLengte(RIT_VX, RIT_VY, ritNV, r), dv = d - LR < LV ? d - LR : LV;
+  ritPunt(RIT_VX, RIT_VY, ritNV, r, dv);
+  autoR(c, ritX, ritY, ritHx, ritHy, kleur, l, glij((LV - dv) / rand), licht);
+}
+
+// Parkeervakken die met de klok vol- en leeglopen. C11: een auto rijdt vanaf de vakrand over de gang (of de arm
+// van het straatkruis) naar zijn vak en draait erin; bij vertrek steekt hij achteruit de gang op en rijdt weg.
+// Altijd vol zichtbaar; alleen aan de vakrand vervaagt hij. Zonder uitweg (keerlus aan beide kanten) blijven de
+// auto's van bewoners staan en komt het personeel niet. De gang (afstand van vak tot rijbaan) staat in eenheden
+// van 0,002·s in bits 17-23 van k; zonder gang 1,15 autolengte.
+function parkeer(c, px, py, a, l, k, s, t, seed, nacht) {
+  const n = k & 15, bewoners = k & PARK_BEWONERS, sg = k & PARK_NOORD ? -1 : 1, masker = (k >> 7) & 1023;
+  const gang = ((k >> 17) & 127) * 0.002 * s || l * 1.15;
+  const kk = klok(t), weekend = weekdag(zichtDag(t)) >= 5;
+  const pal = stNu.strak ? AUTOS_STRAK : AUTOS, soort = bewoners ? 1 : 0;
+  let beurt = 0;
   for (let i = 0; i < n; i++) {
     if (!((masker >> i) & 1)) continue;
-    const h1 = hash(seed, i, 201), h2 = hash(seed, i, 202);
-    let q;
-    if (bewoners) {
-      if (u < 0 || (weekend && h1 < 0.6)) q = 1;
-      else q = 1 - klem((u - 0.06 - 0.18 * h1) / 0.03) * klem((0.6 + 0.3 * h2 - u) / 0.03);
-    } else {
-      if (u < 0 || (weekend && h1 > 0.3)) continue;
-      q = klem((u - 0.03 - 0.2 * h1) / 0.03) * klem((0.68 + 0.26 * h2 - u) / 0.03);
-    }
-    if (q <= 0) continue;
-    const o = (1 - q) * l * 0.8;
-    autoL(c, px + i * a + (liggend ? o : 0), py + (liggend ? 0 : sg * o), pal[Math.floor(hash(seed, i, 203) * pal.length)], liggend, l, q);
+    const h1 = hash(seed, i, 201), h2 = hash(seed, i, 202), sx = px + i * a, kl = pal[Math.floor(hash(seed, i, 203) * pal.length)];
+    // het personeel komt en gaat om de beurt over de gang (niemand steekt achteruit in iemand die langsrijdt)
+    ritSlot = bewoners ? -1 : beurt++;
+    ritDuur(soort, sx, py, sg, gang, s);
+    if (RIT_DA === 0) ritFase = bewoners ? 1 : 0;
+    else ritTijden(kk, bewoners, weekend, h1, h2, RIT_DA, RIT_DV);
+    rijdendeAuto(c, sx, py, 0, -sg, gang, l, s, kl, nacht);
   }
+  ritSlot = -1;
+}
+
+// Oprit (C11): de auto van een vrijstaand huis aan de horizontale arm rijdt 's ochtends weg en komt 's middags of
+// na het donker terug. Een paar tellen na thuiskomst in het donker gaat in de woonkamer het licht aan (het raam op
+// (px + a, py + b)), en tegen bedtijd weer uit. k: kavel-id (0-255), bit 8: de straat ligt ten noorden.
+function oprit(c, px, py, a, b, k, s, t, nacht) {
+  const id = k & 255, sg = k & 256 ? -1 : 1, h1 = hash(zaadNu, id, 211), h2 = hash(zaadNu, id, 212);
+  const pal = stNu.strak ? AUTOS_STRAK : AUTOS, kl = pal[Math.floor(hash(zaadNu, id, 213) * pal.length)];
+  const gang = Math.abs(vakY - py), l = s * 0.06, kk = klok(t), weekend = weekdag(zichtDag(t)) >= 5;
+  const oost = px > vakX, kx = s * (0.5 - Z0) * 0.5, kolom = Math.floor((px - (oost ? vakX + Z0 * s : vakX - 0.5 * s)) / kx) & 1;
+  // kolom van west naar oost (0 buiten-west, 1 binnen-west, 2 binnen-oost, 3 buiten-oost) en de rand waar hij de
+  // straat af rijdt (als in ritRoute: de dichtste open arm)
+  const k4 = oost ? 2 + kolom : kolom, wOpen = (armNu >> 3) & 1, oOpen = (armNu >> 1) & 1;
+  const naarOost = oost ? oOpen || !wOpen : !wOpen && oOpen, beide = wOpen && oOpen;
+  const rang = naarOost ? 3 - k4 : k4, nKol = beide ? 2 : 4;
+  ritSlot = rang * 2 + (sg < 0 ? 1 : 0); ritAank = (nKol - 1 - rang) * 2 + (sg < 0 ? 1 : 0);
+  ritDuur(2, px, py, sg, gang, s);
+  if (RIT_DA === 0) ritFase = 1;
+  else ritTijden(kk, true, weekend, h1, h2, RIT_DA, RIT_DV);
+  rijdendeAuto(c, px, py, 0, -sg, gang, l, s, kl, nacht);
+  const aankomst = aankomstSlot(h2);
+  ritSlot = ritAank = -1;
+  // woonkamerlicht: na het donker aan als er iemand thuis is (wie pas na het donker thuiskomt: kort na aankomst)
+  if (nacht <= 0.05 || kk < 1) return;
+  const thuisAl = (weekend && h1 < 0.6) || h2 < 0.65 || RIT_DA === 0;
+  const aan = thuisAl ? 1.01 + 0.1 * hash(zaadNu, id, 214) : aankomst + RIT_DA + 0.03;
+  const bed = 1.55 + 0.35 * hash(zaadNu, id, 215);
+  const f = Math.min(klem((kk - aan) / 0.012), klem((bed - kk) / 0.012));
+  if (f <= 0) return;
+  const w = s * 0.02, h = s * 0.0075;
+  c.fillStyle = rgba('255,214,140', 0.35 * f * Math.min(1, nacht)); c.fillRect(px + a - w, py + b - h, w * 2, h * 2.4);
+  c.fillStyle = rgba('255,233,168', f * (0.5 + 0.5 * Math.min(1, nacht))); c.fillRect(px + a - w / 2, py + b - h / 2, w, h);
 }
 
 // Rokers bij de ingang: twee of drie mensen in werkkleding, één met een sigaret waar een rookje vanaf kringelt.
 const WERKKLEDING = [['#eef0f0', '#d8dcdc'], ['#3a6ea5', '#2c4a6e'], ['#2c3e5a', '#1c2433']];
+// C11: een rookpauze duurt ruim een halve minuut; ze lopen een voor een de deur uit (drie lijfmaten naar boven)
+// en gaan na hun sigaret weer naar binnen, vervagend in de deuropening.
 function rokers(c, px, py, k, s, t, fase, wx) {
   const d = Math.max(1, s * 0.0045), kl = WERKKLEDING[k & 3] ?? WERKKLEDING[0], n = 2 + (fase > 0.5);
-  for (let j = 0; j < n; j++) mensje(c, px + (j - 1) * d * 1.8 + Math.sin(t * 0.4 + j * 2) * d * 0.15, py + (j % 2) * d * 0.9, d, kl[j % 2], HUID[(j + Math.floor(fase * 3)) % 3]);
+  const p = frac(t / 80 + fase), u = dagUur(t);
+  if (p > 0.5) return;
+  // buiten werktijd (eRust) zijn ze er niet; aan de randen van de werkdag vervagen ze in de deur
+  const werk = Math.min(klem((u - 0.12) / 0.01), klem((0.82 - u) / 0.01));
+  const deurY = py - d * 3;
+  for (let j = 0; j < n; j++) {
+    const bx = px + (j - 1) * d * 1.8 + Math.sin(t * 0.4 + j * 2) * d * 0.15, by = py + (j % 2) * d * 0.9;
+    // naar buiten tussen p = 0,02j en 0,02j + 0,05; naar binnen tussen 0,43 - 0,02j en 0,48 - 0,02j
+    const g = Math.min(glij((p - 0.02 * j) / 0.05), glij((0.48 - 0.02 * j - p) / 0.05));
+    if (g <= 0) continue;
+    const x = px + (bx - px) * g, y = deurY + (by - deurY) * g;
+    c.globalAlpha = klem(g * 3) * werk;
+    mensje(c, x, y, d, kl[j % 2], HUID[(j + Math.floor(fase * 3)) % 3]);
+    spoor(2, x, y, klem(g * 3) * werk);
+  }
+  c.globalAlpha = 1;
+  if (p < 0.1 || p > 0.42) return;
   const f = frac(t * 0.4 + fase);
   c.fillStyle = rgba('215,215,220', 0.5 * (1 - f));
   rond(c, px - d * 1.2 + f * s * 0.01 * (0.3 + wx), py - d - f * s * 0.012, s * (0.0015 + f * 0.003));
@@ -3270,13 +3718,16 @@ function spelen(c, px, py, a, b, k, s, t, fase) {
   }
 }
 
-// Tuinlampjes langs het terras: warm licht in de avond, uit tegen de ochtend.
-function tuinlampjes(c, px, py, a, b, n, s, nacht) {
-  c.fillStyle = rgba('255,214,150', 0.22 * nacht);
+// Tuinlampjes langs het terras: warm licht in de avond. C11: elk terras gaat op een eigen moment in de nacht uit
+// (een korte dimmer), niet allemaal tegelijk.
+function tuinlampjes(c, px, py, a, b, n, s, t, fase, nacht) {
+  const u = nachtUur(t), uit = 0.6 + 0.3 * fase, f = klem((uit - u) / 0.01) * Math.min(1, nacht);
+  if (f <= 0) return;
+  c.fillStyle = rgba('255,214,150', 0.22 * f);
   c.beginPath();
   for (let j = 0; j < n; j++) { const f = n > 1 ? j / (n - 1) : 0.5, x = px + a * f, y = py + b * f; c.moveTo(x + s * 0.005, y); c.arc(x, y, s * 0.005, 0, Math.PI * 2); }
   c.fill();
-  c.fillStyle = rgba('255,236,190', nacht);
+  c.fillStyle = rgba('255,236,190', f);
   for (let j = 0; j < n; j++) { const f = n > 1 ? j / (n - 1) : 0.5; c.fillRect(px + a * f - s * 0.0009, py + b * f - s * 0.0009, Math.max(0.6, s * 0.0018), Math.max(0.6, s * 0.0018)); }
 }
 
@@ -3297,14 +3748,16 @@ function tekenWijk(c, soort, px, py, a, b, k, s, ctx, t, sz, nacht, fase, wx, wy
     case L_BBQ: barbecue(c, px, py, s, t, fase, nacht, wx, wy); break;
     case L_HARK: harken(c, px, py, a, s, t, fase); break;
     case L_SCHEP: scheppen(c, px, py, a, b, s, t, fase); break;
-    case L_KLIKO: klikoStraat(c, px, py, a, k, s); break;
+    case L_KLIKO: klikoStraat(c, px, py, a, k, s, t, fase); break;
+    case L_VUILWAGEN: vuilwagen(c, px, py, s, t, nacht); break;
     case L_SILHOUET: if (!ctx.uit) silhouet(c, px, py, a, b, k, s, t, nacht); break;
-    case L_PARKEER: parkeer(c, px, py, a, b, k, s, t, Math.floor(fase * 1e6)); break;
+    case L_PARKEER: parkeer(c, px, py, a, b, k, s, t, Math.floor(fase * 1e6), nacht); break;
+    case L_OPRIT: oprit(c, px, py, a, b, k, s, t, nacht); break;
     case L_ROKER: rokers(c, px, py, k, s, t, fase, wx); break;
     case L_STALLING: stalling(c, px, py, a, b, k, s, Math.floor(fase * 1e6)); break;
     case L_MAAIER: maaier(c, px, py, a, b, s, t, fase); break;
     case L_SPELEN: spelen(c, px, py, a, b, k, s, t, fase); break;
-    case L_TUINLAMP: if (!ctx.uit) tuinlampjes(c, px, py, a, b, k, s, nacht); break;
+    case L_TUINLAMP: if (!ctx.uit) tuinlampjes(c, px, py, a, b, k, s, t, fase, nacht); break;
     case L_PLONS: plonzen(c, px, py, a, b, s, t, fase); break;
   }
 }
@@ -3430,7 +3883,7 @@ const TEKEN = {
     pand(c, ex + s * 0.15, ey + s * 0.3, s * 0.14, s * 0.1, 2, st.daken[0], st.muur, { schuin: !st.plat });
     for (let i = 0; i < n; i++) silo(c, ex + s * 0.38, ey + s * (0.27 + i * 0.07), s * 0.032);
   },
-  mijn(c, x, y, s) {
+  mijn(c, x, y, s, st) {
     const lod = B.lod, n = B.niveau;
     rect(c, x - s / 2, y - s / 2, s, s, AARDE);
     // terrassen van de dagbouwput, van licht (rand) naar donker (bodem)
@@ -3469,7 +3922,7 @@ const TEKEN = {
         c.setLineDash([]);
       }
     }
-    pand(c, sx, sy, s * 0.26, s * 0.12, 2, '#7d858c', '#9a958c', { raamAfstand: 0.05 });
+    pand(c, sx, sy, s * 0.26, s * 0.12, 2, '#7d858c', st.muur, { raamAfstand: 0.05 });
     // schachtbok
     c.strokeStyle = '#c9b48a';
     c.lineWidth = Math.max(1, s * 0.02);
@@ -3647,15 +4100,18 @@ const TEKEN = {
       rect(c, x - s * 0.44, y + s * 0.26, s * 0.88, s * 0.18, '#55575a');
       c.strokeStyle = 'rgba(255,255,255,0.5)'; c.lineWidth = lijn(s, 0.002);
       c.beginPath(); for (let i = 0; i <= 10; i++) { c.moveTo(x - s * 0.42 + i * s * 0.084, y + s * 0.27); c.lineTo(x - s * 0.42 + i * s * 0.084, y + s * 0.33); } c.stroke();
-      // vanaf D11 komt het personeel 's ochtends en gaat het 's avonds weer naar huis (pakket E)
+      // het personeel komt 's ochtends over de gang en gaat 's avonds weer naar huis (pakket E, C11)
       let masker = 0;
       for (let i = 0; i < 10; i++) {
         const h = hash(B.seed, i, 41);
-        if (h >= (lod >= 2 ? 0.75 : 0.45)) continue;
-        if (vanaf(D11) && h >= 0.22) masker |= 1 << i;
+        if (h >= 0.75) continue;
+        if (h >= 0.22) masker |= 1 << i;
         else auto(c, x - s * 0.38 + i * s * 0.084, y + s * 0.3, autoKleur(i), false, 0.85);
       }
-      parkeerLevend(x - s * 0.38, y + s * 0.3, s * 0.084, B.S * 0.06 * 0.85, 10, 0, masker);
+      // C11: de gang ligt op 0,36·s, vrij van de bomen (0,41·s); vanaf niveau 3 staat het kantoortje (x −0,28 tot
+      // −0,16·s) op de parkeerplaats, dus de westelijke vakken (die via die kant wegrijden) krijgen geen rijdende auto's
+      if (n >= 3) masker &= ~31;
+      parkeerLevend(x - s * 0.38, y + s * 0.3, s * 0.084, B.S * 0.06 * 0.85, 10, 0, masker, s * 0.06);
       for (let i = 0; i < 4; i++) boom(c, x - s * 0.36 + i * s * 0.24, y + s * 0.41, s * 0.022);
     } else rect(c, x - s * 0.4, y + s * 0.3, s * 0.8, s * 0.12, '#55575a');
     // witte cleanroomhal met ventilatiepunten op het dak en een band in het accent
@@ -3724,9 +4180,11 @@ const TEKEN = {
       levend(L_KRAAN, kx, ky, s * 0.26, 0, i);
     }
   },
-  opslag(c, x, y, s) {
+  opslag(c, x, y, s, st) {
     const lod = B.lod, n = B.niveau;
     rect(c, x - s / 2, y - s / 2, s, s, '#8a857c');
+    // kantoortje in de bouwstijl van het regime
+    pand(c, x + s * 0.22, y + s * 0.3 + 2 * s * 0.017, s * 0.2, s * 0.1, 2, st.daken[0], st.muur, { schuin: !st.plat && !st.blokken, raamAfstand: 0.03 });
     for (let i = 0; i < 2; i++) {
       const by = y - s * 0.4 + i * s * 0.32 + 2 * s * 0.017;
       const top = pand(c, x - s * 0.44, by, s * 0.58, s * 0.2, 2, '#8c949c', '#a0a6ab', { units: 0, raamAfstand: 0.06 });
@@ -3803,10 +4261,10 @@ const TEKEN = {
       for (let i = 0; i < 6; i++) {
         const h = hash(B.seed, i, 61);
         if (h >= 0.7) continue;
-        if (vanaf(D11) && h >= 0.35) masker |= 1 << i;
+        if (h >= 0.35) masker |= 1 << i;
         else auto(c, x - s * 0.42 + i * s * 0.08, y + s * 0.38, autoKleur(i), false, 0.85);
       }
-      parkeerLevend(x - s * 0.42, y + s * 0.38, s * 0.08, B.S * 0.06 * 0.85, 6, PARK_NOORD, masker);
+      parkeerLevend(x - s * 0.42, y + s * 0.38, s * 0.08, B.S * 0.06 * 0.85, 6, PARK_NOORD, masker, s * 0.06);
       for (let i = 0; i < 3; i++) boom(c, x + s * 0.12 + i * s * 0.12, y + s * 0.44, s * 0.022);
     }
     if (n >= 2) pand(c, x + s * 0.22, y - s * 0.3 + 3 * s * 0.017, s * 0.22, s * 0.44, 3, '#e4e8e8', '#dfe3e3', { raamAfstand: 0.025 });
@@ -3992,6 +4450,19 @@ const TEKEN = {
   },
 };
 
+// C12: varianten, soorten uit de omgeving en eigen tekeningen (tekeningen.js). Een variant geldt alleen op een kavel
+// (B.variant uit omgeving.variant); variant 0 is de tekening hierboven.
+const TEK = maakTekeningen({
+  B, rect, rond, pand, silo, boom, lijn, hash, tint, levend, raamVast, rails, spoorwagons, steenhoop, lopendeBand, hoogspanningsmast, kolenBunker,
+  CONTAINERS, AKKER, GLAS, AARDE, kleuren: () => ({ GRAS, GRAS_LICHT, HEG }),
+  L: { ROOK: L_ROOK, STOOM: L_STOOM, KNIPPER: L_KNIPPER, KRAAN: L_KRAAN, VUUR: L_VUUR, VOERTUIG: L_VOERTUIG, SCHACHT: L_SCHACHT },
+});
+for (const naam of Object.keys(TEK.varianten)) {
+  const basis = TEKEN[naam], lijst = TEK.varianten[naam];
+  TEKEN[naam] = (c, x, y, s, st, r, d) => { const v = B.variant | 0; return v > 0 && lijst[v - 1] ? lijst[v - 1](c, x, y, s, st, r, d) : basis(c, x, y, s, st, r, d); };
+}
+Object.assign(TEKEN, TEK.soorten);
+
 // Soorten met bewoners: hun niveau volgt uit bezetting, en onrust timmert ramen dicht.
 const WONEN = { hoofdstad: true, woonwijk: true };
 
@@ -4020,7 +4491,7 @@ const lodVan = (s) => (s < LOD1 ? 0 : s <= LOD2 ? 1 : 2);
 const effEmmer = (eff) => (eff < 0.7 ? 0 : eff < 1.05 ? 1 : 2);
 
 // Zet de bakcontext voor één gebouw.
-function zetB(soort, ctx, S, cx, cy, niveau, effB, ramen, levendLijst, sz, groeiend, wv = 1) {
+function zetB(soort, ctx, S, cx, cy, niveau, effB, ramen, levendLijst, sz, groeiend, wv = 1, armen = 15) {
   B.S = S; B.cx = cx; B.cy = cy; B.lod = lodVan(S); B.niveau = niveau;
   B.seed = ctx.seed ?? 0; B.regime = ctx.regime; B.kleur = ctx.kleur;
   B.verwaarloosd = effB === 0; B.uit = !!ctx.uit;
@@ -4030,16 +4501,18 @@ function zetB(soort, ctx, S, cx, cy, niveau, effB, ramen, levendLijst, sz, groei
   B.r2 = rnd(B.seed * 7919 + 101);
   B.ramen = ramen; B.levend = levendLijst;
   B.sneeuw = sz.sneeuw; B.blad = sz.blad; B.groeiend = groeiend; B.nieuw = 0; B.lamp = 0;
-  B.soort = soort; B.wv = wv; B.nieuwB = 0; B.nieuwE = 0;
+  B.soort = soort; B.wv = wv; B.nieuwB = 0; B.nieuwE = 0; B.armen = armen;
+  OPRIT_X.length = 0;
   [GRAS, GRAS_LICHT, HEG] = GRAS_SEIZOEN[sz.blad];
 }
 
 // Basistekening plus de extra's van pakket D voor deze soort.
 function tekenAlles(f, naam, c, x, y, s, st, ctx) {
   f(c, x, y, s, st, rnd((ctx.seed ?? 0) * 7919 + 13), B);
-  EXTRA[naam]?.(c, x, y, s, st);
-  BEDRIJF[naam]?.(c, x, y, s, st);
-  if (vanaf(D11)) { kavelStaat(c, x, y, s, naam); RAND_E[naam]?.(c, x, y, s); }
+  // de extra's van pakket D horen bij de plattegrond van variant 0
+  const eigen = B.variant > 0 && TEK.varianten[naam];
+  if (!eigen) { EXTRA[naam]?.(c, x, y, s, st); BEDRIJF[naam]?.(c, x, y, s, st); }
+  if (vanaf(D11)) { kavelStaat(c, x, y, s, naam); if (!eigen) RAND_E[naam]?.(c, x, y, s); }
   if (!WONEN[naam] && !GEEN_RANDGOED[naam] && vanaf(D13)) randGoed(c, x, y, s);
 }
 
@@ -4071,10 +4544,855 @@ function groeitVan(naam, ctx, dag) {
   return hash(seed, blok, 13) < 0.15;
 }
 
+// ---------- C12: het gebouw op zijn kavel ----------
+//
+// De omgeving van een tegel (wegennet.omgeving(t), via ctx.omgeving) zegt per zijde of er een straat ligt, een buur
+// uit dezelfde groep (naad), een andere buur (haag), open land (rand) of water; waar de poort met oprit en dock zit;
+// hoe het terrein afloopt; welk water er in de tegel ligt (8 × 8) en welke variant het gebouw krijgt. Daaruit volgt de
+// kavel: de tegel min de inzet per zijde, zodat het asfalt van het net zichtbaar blijft.
+//
+// Bedrijven, diensten en boerderijen: het gebouw wordt uniform geschaald in het droge deel van de kavel en naar achteren
+// geschoven; aan de poortzijde blijft een voorstrook met poort, oprit, laadperron en parkeervakken op de plekken uit de
+// omgeving. Woonwijk en hoofdstad vullen de kavel zelf (woonerf en plein, met de straten van het net eromheen).
+// Er worden geen voertuigen in de bitmap gebakken: auto's en vrachtwagens komen van de ritten. De bitmap hangt niet af
+// van de verkeersklok u; het dock (ctx.dock) en de lichten 's nachts tekenen per beeld.
+const OPRIT_D = 0.5 - OPRIT; // afstand van het tegelmidden tot het dock aan het eind van de oprit (0,22 T)
+const PERRON = 0.045; // diepte van het laadperron achter het dock
+const NAT_MIN = 0.3; // kleiner droog deel dan dit (T): het gebouw mag over het water, dat er daarna uit gesneden wordt
+const VERGROOT = 1.2; // hoeveel groter dan de korte zijde van het vak een bedrijf getekend mag worden (de rest valt in de knip)
+const KAVEL_VOL = { woonwijk: true, hoofdstad: true, kolonie: true };
+const GEEN_ERF = { kolonie: true };
+const ZN = [[0, -1], [1, 0], [0, 1], [-1, 0]]; // buitenwaartse normaal per zijde N, O, Z, W
+// Grond van de eigen tekening: de kavel krijgt dezelfde grond, zodat het gebouw er naadloos op staat.
+const GROND_VAN = {
+  mijn: '#8c8270', houtkap: '#6f7f45', centrale: '#8f8b82', zonnepark: '#7c8f58', industrie: '#8a857c', haven: '#77726a', opslag: '#8a857c',
+  school: '#b3aa98', universiteit: '#b9b09c', ziekenhuis: '#a9b1a6', politie: '#8f918c', omroep: '#8e9188', kazerne: '#8a8a76',
+  wapenfabriek: '#7a7a70', dronebasis: '#7c8f58', cybercentrum: '#7d8084',
+};
+const ZONE_ERF = { werk: '#8a857c', logistiek: '#8a857c', energie: '#8d897f', delf: '#8c8270', haven: '#77726a', leger: '#8a8a76', voorziening: '#8a857c' };
+const WERKZONE = { werk: true, logistiek: true, energie: true, delf: true, haven: true, leger: true, voorziening: true };
+const GROEN_ZONE = { woon: true, centrum: true, dienst: true, land: true };
+const KLINKER = '#9a7666', KLINKER_LICHT = '#ad8a78', PERRON_KLEUR = '#a7a296', OPRIT_KLEUR = '#78756e';
+
+// Grond van de kavel: de grond van de tekening, op de berg grind, anders per zone.
+function erfKleur(naam, o) {
+  if (o.terrein === 'berg') return GRIND;
+  const g = GROND_VAN[naam] ?? GROND_VAN[NIEUW_GROND[naam]];
+  if (g) return g;
+  if (naam === 'hoofdstad') return PLEIN;
+  if (naam === 'chipfabriek' || naam === 'ruimtevaartcentrum') return GRAS_LICHT;
+  return ZONE_ERF[o.zone] ?? GRAS;
+}
+// Nieuwe tekeningen erven de grond van een bestaande soort.
+const NIEUW_GROND = { olieveld: 'centrale', staalfabriek: 'industrie', spoor: 'opslag', distributiecentrum: 'opslag', zagerij: 'mijn', compacteCentrale: 'centrale', havenKade: 'haven' };
+
+// De omgeving kan een andere tekening vragen: stadsboerderij in de kern, zagerij zonder bos, compacte centrale in de
+// kern en een distributiecentrum voor een haven zonder water.
+function soortOpKavel(naam, o) {
+  if (!o) return naam;
+  if (naam === 'boerderij' && o.stadsdeel === 0) return 'stadsboerderij';
+  if (naam === 'houtkap' && !o.bos && o.terrein !== 'bos') return 'zagerij';
+  if (naam === 'centrale' && o.stadsdeel === 0) return 'compacteCentrale';
+  if (naam === 'haven') {
+    let nat = !!o.water;
+    for (let i = 0; i < 64 && !nat; i++) if (o.waterMasker?.[i]) nat = true;
+    return nat ? 'havenKade' : 'distributiecentrum';
+  }
+  return naam;
+}
+
+// Maat van de kavel in tegeleenheden (midden 0, randen ±0,5): de kavel zelf (x0..y1), het droge deel (d*) en het vak
+// van het gebouw (midden bx, by, zijde k). Een gebouw krimpt naar het grootste droge deel; bedrijven schuiven naar
+// achteren tot achter het laadperron.
+const KAVEL_CACHE = new Map();
+function kavelVan(o, naam) {
+  const sl = `${naam}|${o.sleutel}`;
+  let kv = KAVEL_CACHE.get(sl);
+  if (kv) return kv;
+  const I = o.inzet;
+  const x0 = -0.5 + I[3], x1 = 0.5 - I[1], y0 = -0.5 + I[0], y1 = 0.5 - I[2];
+  kv = { x0, y0, x1, y1, dx0: x0, dy0: y0, dx1: x1, dy1: y1, vol: !!KAVEL_VOL[naam], poort: o.poort, nat: false, bx: 0, by: 0, k: 1, armen: 15 };
+  const wm = o.waterMasker;
+  for (let i = 0; i < 64; i++) if (wm && wm[i]) { kv.nat = true; break; }
+  if (kv.nat) {
+    droogDeel(kv, wm, o.poort);
+    kv.wm = wm;
+    // Is het droge deel te klein om het gebouw nog te herkennen (een beek schuin door de tegel), dan krijgt het het
+    // grootste vierkant met hooguit een kwart water; het water wordt er daarna uitgesneden, met kade of boulevard.
+    if (Math.min(kv.dx1 - kv.dx0, kv.dy1 - kv.dy0) < NAT_MIN) natVak(kv, wm);
+  }
+  // het vak van het gebouw
+  let rx0 = kv.dx0, rx1 = kv.dx1, ry0 = kv.dy0, ry1 = kv.dy1;
+  const p = o.poort, d = OPRIT_D + PERRON;
+  if (!kv.vol && p >= 0) {
+    if (p === 0) ry0 = Math.max(ry0, -d); else if (p === 2) ry1 = Math.min(ry1, d);
+    else if (p === 1) rx1 = Math.min(rx1, d); else rx0 = Math.max(rx0, -d);
+  }
+  let k = Math.min(rx1 - rx0, ry1 - ry0);
+  if (k < 0.36 && !kv.vol) {
+    // te weinig droog land achter de voorstrook: het gebouw schuift over het perron heen, maar nooit het water in
+    rx0 = kv.dx0; rx1 = kv.dx1; ry0 = kv.dy0; ry1 = kv.dy1;
+    k = Math.min(rx1 - rx0, ry1 - ry0);
+  }
+  // op elke as: tegen de poortzijde (of de enige straatzijde) aan, anders zo dicht mogelijk bij het midden
+  const voorkeur = (lo, hi) => {
+    if (p === lo) return -1;
+    if (p === hi) return 1;
+    if (!kv.vol) return 0;
+    const sl0 = (o.straat >> lo) & 1, sl1 = (o.straat >> hi) & 1;
+    return sl0 && !sl1 ? -1 : sl1 && !sl0 ? 1 : 0;
+  };
+  // Een bedrijf op een langwerpig vak wordt iets groter getekend dan de korte zijde en daarop geknipt: de eigen tekening
+  // heeft rondom een marge van erf, dus zo blijft er geen breed leeg erf naast een klein gebouw over.
+  const w = rx1 - rx0, h = ry1 - ry0;
+  if (!kv.vol) k = Math.min(Math.max(w, h), k * VERGROOT);
+  const plaats = (a0, a1, v) => (a1 - a0 < k - 1e-9 ? (a0 + a1) / 2 : v < 0 ? a0 + k / 2 : v > 0 ? a1 - k / 2 : Math.min(Math.max(0, a0 + k / 2), a1 - k / 2));
+  kv.bx = plaats(rx0, rx1, voorkeur(3, 1));
+  kv.by = plaats(ry0, ry1, voorkeur(0, 2));
+  kv.k = k;
+  // knip van de tekening: het vak achter de voorstrook (bedrijven) of de kavel (woonerf en plein)
+  kv.knip = kv.vol ? [x0, y0, x1, y1] : [rx0, ry0, rx1, ry1];
+  // straatkruis van woonerf en plein: een arm loopt door waar het vak tegen een straatzijde ligt
+  let armen = 0;
+  const raak = [Math.abs(kv.by - k / 2 - y0) < 0.006, Math.abs(kv.bx + k / 2 - x1) < 0.006, Math.abs(kv.by + k / 2 - y1) < 0.006, Math.abs(kv.bx - k / 2 - x0) < 0.006];
+  for (let z = 0; z < 4; z++) if (raak[z] && (((o.straat >> z) & 1) || z === p)) armen |= 1 << z;
+  kv.armen = armen || (p >= 0 ? 1 << p : 15);
+  if (KAVEL_CACHE.size > 4000) KAVEL_CACHE.clear();
+  KAVEL_CACHE.set(sl, kv);
+  return kv;
+}
+
+// Het grootste droge rechthoek van achtste tegels binnen de kavel; een vak aan de poortzijde telt zwaarder.
+function droogDeel(kv, wm, p) {
+  const P = new Int16Array(81);
+  for (let j = 0; j < 8; j++) for (let i = 0; i < 8; i++) P[(j + 1) * 9 + i + 1] = (wm[j * 8 + i] ? 1 : 0) + P[j * 9 + i + 1] + P[(j + 1) * 9 + i] - P[j * 9 + i];
+  let best = 0, b = null;
+  for (let j0 = 0; j0 < 8; j0++) for (let j1 = j0; j1 < 8; j1++) for (let i0 = 0; i0 < 8; i0++) for (let i1 = i0; i1 < 8; i1++) {
+    const nat = P[(j1 + 1) * 9 + i1 + 1] - P[j0 * 9 + i1 + 1] - P[(j1 + 1) * 9 + i0] + P[j0 * 9 + i0];
+    if (nat) break;
+    const ux0 = Math.max(kv.x0, -0.5 + i0 / 8), ux1 = Math.min(kv.x1, -0.5 + (i1 + 1) / 8);
+    const uy0 = Math.max(kv.y0, -0.5 + j0 / 8), uy1 = Math.min(kv.y1, -0.5 + (j1 + 1) / 8);
+    if (ux1 <= ux0 || uy1 <= uy0) continue;
+    const raakt = p === 0 ? uy0 <= kv.y0 + 1e-6 : p === 2 ? uy1 >= kv.y1 - 1e-6 : p === 1 ? ux1 >= kv.x1 - 1e-6 : p === 3 ? ux0 <= kv.x0 + 1e-6 : true;
+    const w = ux1 - ux0, h = uy1 - uy0, score = Math.min(w, h) * Math.max(w, h) ** 0.5 * (raakt ? 1.4 : 1);
+    if (score > best) { best = score; b = [ux0, uy0, ux1, uy1]; }
+  }
+  if (b) [kv.dx0, kv.dy0, kv.dx1, kv.dy1] = b;
+}
+
+// Het grootste vierkant van achtste tegels binnen de kavel met hooguit een kwart natte cellen (bij gelijke maat het
+// droogste, dan het eerste in leesvolgorde). Alleen als het groter is dan het droge deel.
+function natVak(kv, wm) {
+  const huidig = Math.min(kv.dx1 - kv.dx0, kv.dy1 - kv.dy0);
+  let best = null, bestK = huidig * 1.25, bestNat = 1;
+  for (let n = 8; n >= 3; n--) for (let j0 = 0; j0 + n <= 8; j0++) for (let i0 = 0; i0 + n <= 8; i0++) {
+    let nat = 0;
+    for (let j = j0; j < j0 + n; j++) for (let i = i0; i < i0 + n; i++) if (wm[j * 8 + i]) nat++;
+    const f = nat / (n * n);
+    if (f > 0.25) continue;
+    const ux0 = Math.max(kv.x0, -0.5 + i0 / 8), ux1 = Math.min(kv.x1, -0.5 + (i0 + n) / 8);
+    const uy0 = Math.max(kv.y0, -0.5 + j0 / 8), uy1 = Math.min(kv.y1, -0.5 + (j0 + n) / 8);
+    const k = Math.min(ux1 - ux0, uy1 - uy0);
+    if (k > bestK + 1e-6 || (best && Math.abs(k - bestK) <= 1e-6 && f < bestNat)) { best = [ux0, uy0, ux1, uy1]; bestK = k; bestNat = f; }
+  }
+  if (best) { [kv.dx0, kv.dy0, kv.dx1, kv.dy1] = best; kv.overNat = true; }
+}
+
+// Emmers voor de cachesleutel: sneeuw op erf en dak (0-4) en ijs langs de kade (0-2), op de seizoensstap van terrein.
+const dekEmmer = (dag) => (typeof dag === 'number' ? Math.round(sneeuwDekVan(dag) * 4) : 0);
+const ijsEmmer = (dag) => (typeof dag === 'number' ? Math.round(ijsVan(dag) * 2) : 0);
+
+// Levende delen van de kavel, in tegeleenheden: [soort, u, v, a, b, k].
+const K_LAMP = 1, K_DOCK = 2, K_GEVEL = 3;
+let kavelLijst = null;
+const kavelLevend = (soort, u, v, a = 0, b = 0, k = 0) => { if (kavelLijst) kavelLijst.push(soort, u, v, a, b, k); };
+
+// Bak een gebouw op zijn kavel: grond (met terrassen, grind en sneeuw), voorstrook, het gebouw in zijn vak, de zijden
+// (haag, hek, zachte rand) en tot slot het water dat uit de kavel gesneden wordt, met kade of boulevard.
+function bakKavel(c, x, y, s, naam, f, st, ctx, o, kv, dek, ijs) {
+  const P = (u) => x + u * s, Q = (v) => y + v * s;
+  const zone = o.zone, werk = !!WERKZONE[zone], grof = lodVan(s) === 0;
+  const S0 = B.S, cx0 = B.cx, cy0 = B.cy, lod0 = B.lod;
+  B.S = s; B.cx = x; B.cy = y; B.lod = lodVan(s);
+  const erf = GEEN_ERF[naam] ? null : erfKleur(naam, o);
+  const vorm = kv.nat ? waterVorm(o, x, y, s) : null;
+  if (vorm && B.direct) {
+    // rechtstreeks op de kaart: alles blijft buiten het water (even-oneven: de tegel min de natte veelhoeken)
+    c.save();
+    c.beginPath(); c.rect(x - s / 2, y - s / 2, s, s); waterPad(c, vorm.vlak); c.clip('evenodd');
+  }
+  if (erf) kavelGrond(c, x, y, s, o, kv, erf, dek, werk);
+  if (!kv.vol && o.poort >= 0) kavelVoor(c, x, y, s, o, kv, zone, dek, grof);
+  if (erf && !grof) zijstroken(c, x, y, s, o, kv, zone, naam);
+  // haven: de kade van de tekening loopt door tot de kavelrand aan de waterkant, zodat het echte water (dat er straks
+  // uit gesneden wordt) aan beton met een kademuur ligt en niet aan een leeg erf
+  if (naam === 'havenKade' && !grof) {
+    const z = TEK.waterZijde(o), h = kv.k / 2;
+    const u0 = z === 1 ? kv.bx + h - 0.12 * kv.k : kv.x0, u1 = z === 3 ? kv.bx - h + 0.12 * kv.k : kv.x1;
+    const v0 = z === 2 ? kv.by + h - 0.12 * kv.k : kv.y0, v1 = z === 0 ? kv.by - h + 0.12 * kv.k : kv.y1;
+    if (u1 > u0 && v1 > v0) {
+      rect(c, P(u0), Q(v0), (u1 - u0) * s, (v1 - v0) * s, '#b0aca2');
+      c.strokeStyle = 'rgba(0,0,0,0.08)'; c.lineWidth = lijn(s, 0.002);
+      c.beginPath();
+      for (let u = Math.ceil(u0 * 12.5) / 12.5; u < u1; u += 0.08) { c.moveTo(P(u), Q(v0)); c.lineTo(P(u), Q(v1)); }
+      for (let v = Math.ceil(v0 * 12.5) / 12.5; v < v1; v += 0.08) { c.moveTo(P(u0), Q(v)); c.lineTo(P(u1), Q(v)); }
+      c.stroke();
+    }
+  }
+  // het gebouw in zijn vak, binnen de kavel geknipt
+  const bs = kv.k * s, bx = P(kv.bx), by = Q(kv.by);
+  B.S = bs; B.cx = bx; B.cy = by; B.lod = lodVan(bs);
+  B.kavel = true; B.vangGrond = !!erf;
+  c.save();
+  const [kx0, ky0, kx1, ky1] = kv.knip;
+  c.beginPath(); c.rect(P(kx0) - 0.5, Q(ky0) - 0.5, (kx1 - kx0) * s + 1, (ky1 - ky0) * s + 1); c.clip();
+  tekenAlles(f, naam, B.lod === 0 ? grofDoek(c) : c, bx, by, bs, st, ctx);
+  c.restore();
+  B.vangGrond = false;
+  B.S = s; B.cx = x; B.cy = y; B.lod = lodVan(s);
+  if (!kv.vol && o.poort >= 0) perron(c, x, y, s, o, kv, zone, grof);
+  if (!GEEN_ERF[naam]) zijden(c, x, y, s, o, kv, zone, grof);
+  if (vorm) { snijWater(c, x, y, s, o, kv, zone, ijs, vorm, !erf); if (B.direct) c.restore(); }
+  B.S = S0; B.cx = cx0; B.cy = cy0; B.lod = lod0;
+}
+
+// Laagste detailtrede: alleen grondvlak, dakmassa's, koeltorens en schoorstenen. De tekening krijgt een doek waarop
+// lijnen (hekken, rails, voegen, leidingen, markeringen) niets doen; vlakken en ronde massa's blijven.
+const NIETS_DOEN = () => {};
+const GROF = new WeakMap();
+function grofDoek(c) {
+  let g = GROF.get(c);
+  if (!g) {
+    g = new Proxy(c, {
+      get(t, k) { if (k === 'stroke' || k === 'strokeRect') return NIETS_DOEN; const v = t[k]; return typeof v === 'function' ? v.bind(t) : v; },
+      set(t, k, v) { t[k] = v; return true; },
+    });
+    GROF.set(c, g);
+  }
+  return g;
+}
+
+// Grond: erf tot de kavelrand (bij een naad tot de tegelrand), terrassen met keermuren op een helling, grind en rots
+// op de berg, sneeuw volgens sneeuwDekVan, en een zachte overgang naar het land aan een randzijde.
+function kavelGrond(c, x, y, s, o, kv, erf, dek, werk) {
+  const P = (u) => x + u * s, Q = (v) => y + v * s;
+  const lod = B.lod;
+  c.fillStyle = erf;
+  c.fillRect(P(kv.x0), Q(kv.y0), (kv.x1 - kv.x0) * s, (kv.y1 - kv.y0) * s);
+  // naad: naar een buur uit dezelfde groep loopt de grond over in de gedeelde grond van die groep, zodat twee erven
+  // van een andere kleur zonder harde streep in elkaar overgaan
+  const samen = o.terrein === 'berg' ? null : groepGrond(o.zone);
+  if (o.naad && samen && samen !== erf && lod >= 1) {
+    const rgb = hexRgb(samen), w = 0.11 * s;
+    for (let z = 0; z < 4; z++) {
+      if (!((o.naad >> z) & 1)) continue;
+      const g = z === 0 ? c.createLinearGradient(0, Q(kv.y0), 0, Q(kv.y0) + w) : z === 2 ? c.createLinearGradient(0, Q(kv.y1), 0, Q(kv.y1) - w)
+        : z === 1 ? c.createLinearGradient(P(kv.x1), 0, P(kv.x1) - w, 0) : c.createLinearGradient(P(kv.x0), 0, P(kv.x0) + w, 0);
+      g.addColorStop(0, rgba(rgb, 1)); g.addColorStop(1, rgba(rgb, 0));
+      c.fillStyle = g;
+      if (z === 0) c.fillRect(P(kv.x0), Q(kv.y0), (kv.x1 - kv.x0) * s, w);
+      else if (z === 2) c.fillRect(P(kv.x0), Q(kv.y1) - w, (kv.x1 - kv.x0) * s, w);
+      else if (z === 1) c.fillRect(P(kv.x1) - w, Q(kv.y0), w, (kv.y1 - kv.y0) * s);
+      else c.fillRect(P(kv.x0), Q(kv.y0), w, (kv.y1 - kv.y0) * s);
+    }
+  }
+  // textuur: voegen in het beton, plekken in het gras
+  if (lod >= 1) {
+    if (werk && o.terrein !== 'berg') {
+      c.strokeStyle = 'rgba(0,0,0,0.07)'; c.lineWidth = lijn(s, 0.002);
+      c.beginPath();
+      for (let u = Math.ceil(kv.x0 * 10) / 10; u < kv.x1; u += 0.1) { c.moveTo(P(u), Q(kv.y0)); c.lineTo(P(u), Q(kv.y1)); }
+      for (let v = Math.ceil(kv.y0 * 10) / 10; v < kv.y1; v += 0.1) { c.moveTo(P(kv.x0), Q(v)); c.lineTo(P(kv.x1), Q(v)); }
+      c.stroke();
+    }
+    for (let i = 0; i < 7; i++) {
+      const u = kv.x0 + 0.09 + (kv.x1 - kv.x0 - 0.18) * hash(B.seed, i, 301), v = kv.y0 + 0.09 + (kv.y1 - kv.y0 - 0.18) * hash(B.seed, i, 302);
+      c.fillStyle = hash(B.seed, i, 303) < 0.5 ? 'rgba(0,0,0,0.045)' : 'rgba(255,255,255,0.05)';
+      c.beginPath(); c.ellipse(P(u), Q(v), s * (0.03 + 0.05 * hash(B.seed, i, 304)), s * (0.02 + 0.03 * hash(B.seed, i, 305)), hash(B.seed, i, 306) * 3, 0, Math.PI * 2); c.fill();
+    }
+  }
+  // terrassen: banden dwars op de helling, de hoogste het lichtst, met een keermuur aan elke lage kant. Op de berg
+  // zijn het echte niveaus: een stenen muur met een lichte deksteen, een slagschaduw op het lagere terras en een trap.
+  if (o.helling >= 0.25) {
+    const berg = o.terrein === 'berg';
+    const z = o.laag >= 0 ? o.laag : 2, n = o.helling >= 0.6 ? 3 : 2, [nx, ny] = ZN[z];
+    const lo = nx ? (nx > 0 ? kv.x0 : kv.x1) : ny > 0 ? kv.y0 : kv.y1; // hoge kant
+    const hi = nx ? (nx > 0 ? kv.x1 : kv.x0) : ny > 0 ? kv.y1 : kv.y0; // lage kant
+    const ri = nx || ny; // +1: laag ligt naar rechts of onder
+    const dwars0 = nx ? kv.y0 : kv.x0, dwars1 = nx ? kv.y1 : kv.x1;
+    // strook dwars op de helling van a tot b (langs de helling), over de hele kavel
+    const strook = (a, b, kleur) => {
+      c.fillStyle = kleur;
+      if (nx) c.fillRect(P(Math.min(a, b)), Q(kv.y0), Math.abs(b - a) * s, (kv.y1 - kv.y0) * s);
+      else c.fillRect(P(kv.x0), Q(Math.min(a, b)), (kv.x1 - kv.x0) * s, Math.abs(b - a) * s);
+    };
+    for (let i = 0; i < n; i++) {
+      const a = lo + ((hi - lo) * i) / n, b = lo + ((hi - lo) * (i + 1)) / n;
+      strook(a, b, i === 0 ? 'rgba(255,250,235,0.08)' : `rgba(40,30,20,${((berg ? 0.03 : 0.05) * i).toFixed(3)})`);
+    }
+    const muur = (m, dik, trap) => {
+      // muur op lijn m (dwars), schaduw aan de lage kant
+      const w = dik * s, sch = s * (berg ? 0.04 : 0.012);
+      if (berg && lod >= 1) {
+        // slagschaduw die uitloopt over het lagere terras
+        const g = nx ? c.createLinearGradient(P(m), 0, P(m) + ri * sch, 0) : c.createLinearGradient(0, Q(m), 0, Q(m) + ri * sch);
+        g.addColorStop(0, 'rgba(30,22,14,0.42)'); g.addColorStop(1, 'rgba(30,22,14,0)');
+        c.fillStyle = g;
+        if (nx) c.fillRect(P(m) + (ri > 0 ? 0 : -sch), Q(kv.y0), sch, (kv.y1 - kv.y0) * s);
+        else c.fillRect(P(kv.x0), Q(m) + (ri > 0 ? 0 : -sch), (kv.x1 - kv.x0) * s, sch);
+      } else if (nx) rect(c, P(m) + (ri > 0 ? 0 : -sch), Q(kv.y0), sch, (kv.y1 - kv.y0) * s, 'rgba(0,0,0,0.22)');
+      else rect(c, P(kv.x0), Q(m) + (ri > 0 ? 0 : -sch), (kv.x1 - kv.x0) * s, sch, 'rgba(0,0,0,0.22)');
+      // de muur zelf: het aanzicht aan de lage kant donker, de deksteen aan de hoge kant licht
+      if (nx) {
+        rect(c, P(m) - w / 2, Q(kv.y0), w, (kv.y1 - kv.y0) * s, '#8d877b');
+        if (berg) rect(c, P(m) - w / 2 + (ri > 0 ? w * 0.45 : 0), Q(kv.y0), w * 0.55, (kv.y1 - kv.y0) * s, '#6f695e');
+        rect(c, P(m) - w / 2 + (ri > 0 ? 0 : w * 0.55), Q(kv.y0), w * 0.45, (kv.y1 - kv.y0) * s, berg ? '#c4bdad' : '#a9a396');
+      } else {
+        rect(c, P(kv.x0), Q(m) - w / 2, (kv.x1 - kv.x0) * s, w, '#8d877b');
+        if (berg) rect(c, P(kv.x0), Q(m) - w / 2 + (ri > 0 ? w * 0.45 : 0), (kv.x1 - kv.x0) * s, w * 0.55, '#6f695e');
+        rect(c, P(kv.x0), Q(m) - w / 2 + (ri > 0 ? 0 : w * 0.55), (kv.x1 - kv.x0) * s, w * 0.45, berg ? '#c4bdad' : '#a9a396');
+      }
+      if (lod >= 1) {
+        // voegen in de stenen muur
+        c.strokeStyle = 'rgba(60,50,40,0.35)'; c.lineWidth = lijn(s, 0.0015);
+        c.beginPath();
+        const len = dwars1 - dwars0, st = 0.025;
+        for (let q = st; q < len; q += st) {
+          if (nx) { c.moveTo(P(m) - w / 2, Q(kv.y0 + q)); c.lineTo(P(m) + w / 2, Q(kv.y0 + q)); }
+          else { c.moveTo(P(kv.x0 + q), Q(m) - w / 2); c.lineTo(P(kv.x0 + q), Q(m) + w / 2); }
+        }
+        c.stroke();
+      }
+      if (berg && trap >= 0 && lod >= 1) {
+        // trap door de muur naar het lagere terras: lichte treden, op een vaste plek per kavel en muur
+        const q = dwars0 + (dwars1 - dwars0) * (0.18 + 0.64 * hash(B.seed, trap, 316)), tb = 0.022, tl = dik * 0.5 + 0.03;
+        for (let k = 0; k < 4; k++) {
+          const a = m - ri * dik * 0.5 + ri * (tl * k) / 4, kl = k % 2 ? '#b9b2a3' : '#d2cbbb';
+          if (nx) rect(c, P(Math.min(a, a + ri * tl / 4)), Q(q - tb), (tl / 4) * s, 2 * tb * s, kl);
+          else rect(c, P(q - tb), Q(Math.min(a, a + ri * tl / 4)), 2 * tb * s, (tl / 4) * s, kl);
+        }
+      }
+    };
+    for (let i = 1; i < n; i++) muur(lo + ((hi - lo) * i) / n, berg ? 0.026 : 0.014, i);
+    muur(hi - ri * 0.009, 0.018, -1); // keermuur langs de lage kavelrand
+  }
+  // op de berg: grind met rotsblokken in de hoeken
+  if (o.terrein === 'berg' && lod >= 1) {
+    for (let i = 0; i < 6; i++) {
+      const hoek = i % 4, u = hoek & 1 ? kv.x1 - 0.06 * hash(B.seed, i, 311) - 0.02 : kv.x0 + 0.06 * hash(B.seed, i, 311) + 0.02;
+      const v = hoek & 2 ? kv.y1 - 0.06 * hash(B.seed, i, 312) - 0.02 : kv.y0 + 0.06 * hash(B.seed, i, 312) + 0.02;
+      rots(c, P(u), Q(v), s * (0.012 + 0.016 * hash(B.seed, i, 313)), i);
+    }
+    c.fillStyle = 'rgba(70,60,50,0.18)';
+    for (let i = 0; i < 40; i++) rond(c, P(kv.x0 + (kv.x1 - kv.x0) * hash(B.seed, i, 314)), Q(kv.y0 + (kv.y1 - kv.y0) * hash(B.seed, i, 315)), Math.max(0.4, s * 0.0025));
+  }
+  if (dek > 0) {
+    c.fillStyle = rgba('240,244,249', Math.min(0.9, dek * 0.23));
+    c.fillRect(P(kv.x0), Q(kv.y0), (kv.x1 - kv.x0) * s, (kv.y1 - kv.y0) * s);
+  }
+  // zachte rand naar het open land: de laatste 0,035 T van de grond loopt uit
+  if (o.rand && !B.direct) {
+    c.save();
+    c.globalCompositeOperation = 'destination-out';
+    for (let z = 0; z < 4; z++) {
+      if (!((o.rand >> z) & 1)) continue;
+      const w = 0.035 * s;
+      let g;
+      if (z === 0) { g = c.createLinearGradient(0, Q(kv.y0), 0, Q(kv.y0) + w); }
+      else if (z === 2) { g = c.createLinearGradient(0, Q(kv.y1), 0, Q(kv.y1) - w); }
+      else if (z === 1) { g = c.createLinearGradient(P(kv.x1), 0, P(kv.x1) - w, 0); }
+      else { g = c.createLinearGradient(P(kv.x0), 0, P(kv.x0) + w, 0); }
+      g.addColorStop(0, 'rgba(0,0,0,0.85)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+      c.fillStyle = g;
+      if (z === 0) c.fillRect(P(kv.x0), Q(kv.y0), (kv.x1 - kv.x0) * s, w);
+      else if (z === 2) c.fillRect(P(kv.x0), Q(kv.y1) - w, (kv.x1 - kv.x0) * s, w);
+      else if (z === 1) c.fillRect(P(kv.x1) - w, Q(kv.y0), w, (kv.y1 - kv.y0) * s);
+      else c.fillRect(P(kv.x0), Q(kv.y0), w, (kv.y1 - kv.y0) * s);
+    }
+    c.restore();
+  }
+}
+
+// De gedeelde grond van een groep buren (zie 'naad of haag' in het plan): gras bij wonen, centrum, diensten en land,
+// beton bij bedrijven, en eigen tinten voor leger en haven.
+function groepGrond(zone) {
+  if (zone === 'woon' || zone === 'centrum' || zone === 'dienst' || zone === 'land') return GRAS;
+  if (zone === 'werk' || zone === 'logistiek' || zone === 'energie' || zone === 'delf') return '#8a857c';
+  if (zone === 'leger') return '#8a8a76';
+  if (zone === 'haven' || zone === 'voorziening') return '#77726a';
+  return null;
+}
+const HEX_RGB = new Map();
+function hexRgb(hex) {
+  let t = HEX_RGB.get(hex);
+  if (!t) { const n = parseInt(hex.slice(1), 16); t = `${(n >> 16) & 255},${(n >> 8) & 255},${n & 255}`; HEX_RGB.set(hex, t); }
+  return t;
+}
+
+function rots(c, x, y, r, i) {
+  c.fillStyle = 'rgba(0,0,0,0.25)';
+  c.beginPath(); c.ellipse(x + r * 0.35, y + r * 0.3, r, r * 0.7, 0, 0, Math.PI * 2); c.fill();
+  c.fillStyle = i % 2 ? '#7d776d' : '#8a8478';
+  c.beginPath(); c.moveTo(x - r, y + r * 0.4); c.lineTo(x - r * 0.5, y - r * 0.6); c.lineTo(x + r * 0.4, y - r * 0.7); c.lineTo(x + r, y + r * 0.1); c.lineTo(x + r * 0.3, y + r * 0.6); c.closePath(); c.fill();
+  c.fillStyle = '#a29b8e';
+  c.beginPath(); c.moveTo(x - r * 0.5, y - r * 0.6); c.lineTo(x + r * 0.4, y - r * 0.7); c.lineTo(x + r * 0.1, y - r * 0.1); c.closePath(); c.fill();
+}
+
+// Rechthoek in het assenstelsel van de poort: q dwars op de poortzijde (0 = midden), d de diepte vanaf de tegelrand
+// naar binnen. Geeft x, y, w, h in px.
+const PR = [0, 0, 0, 0];
+function poortRect(x, y, s, z, q0, q1, d0, d1) {
+  const [nx, ny] = ZN[z];
+  if (nx === 0) {
+    const v0 = ny < 0 ? -0.5 + d0 : 0.5 - d1, v1 = ny < 0 ? -0.5 + d1 : 0.5 - d0;
+    PR[0] = x + q0 * s; PR[1] = y + v0 * s; PR[2] = (q1 - q0) * s; PR[3] = (v1 - v0) * s;
+  } else {
+    const u0 = nx < 0 ? -0.5 + d0 : 0.5 - d1, u1 = nx < 0 ? -0.5 + d1 : 0.5 - d0;
+    PR[0] = x + u0 * s; PR[1] = y + q0 * s; PR[2] = (u1 - u0) * s; PR[3] = (q1 - q0) * s;
+  }
+  return PR;
+}
+const pRect = (c, x, y, s, z, q0, q1, d0, d1, kleur) => { const r = poortRect(x, y, s, z, q0, q1, d0, d1); rect(c, r[0], r[1], r[2], r[3], kleur); };
+
+// Voorstrook aan de poortzijde: oprit naar het dock, parkeervakken op de plekken uit de omgeving, beplanting op de hoeken.
+function kavelVoor(c, x, y, s, o, kv, zone, dek, grof) {
+  const z = o.poort, inz = o.inzet[z], lod = B.lod, werk = !!WERKZONE[zone];
+  const q0 = z === 0 || z === 2 ? kv.x0 : kv.y0, q1 = z === 0 || z === 2 ? kv.x1 : kv.y1;
+  const dock = 0.5 - OPRIT_D;
+  // groen op de hoeken van de voorstrook (niet bij zware bedrijven)
+  if (!werk || zone === 'voorziening') {
+    pRect(c, x, y, s, z, q0, -0.07, inz, dock, GRAS_LICHT);
+    pRect(c, x, y, s, z, 0.07, q1, inz, dock, GRAS_LICHT);
+  }
+  // parkeerplaats: een verharde strook onder de vakken
+  const pk = o.parkeer;
+  if (pk && pk.length) {
+    let mq0 = Infinity, mq1 = -Infinity, md0 = Infinity, md1 = -Infinity;
+    const [nx, ny] = ZN[z];
+    for (let i = 0; i < pk.length; i += 3) {
+      const q = nx === 0 ? pk[i] : pk[i + 1], d = 0.5 - (nx === 0 ? pk[i + 1] * ny : pk[i] * nx);
+      mq0 = Math.min(mq0, q - 0.045); mq1 = Math.max(mq1, q + 0.045); md0 = Math.min(md0, d - 0.03); md1 = Math.max(md1, d + 0.03);
+    }
+    md0 = Math.max(md0, inz); md1 = Math.min(Math.max(md1, inz + 0.055), dock + PERRON); // minstens een parkeerhaven diep
+    mq0 = Math.max(mq0, q0); mq1 = Math.min(mq1, q1);
+    pRect(c, x, y, s, z, mq0, mq1, md0, md1, '#66645f');
+    if (dek > 0 && !grof) { const r = poortRect(x, y, s, z, mq0, mq1, md0, md1); c.fillStyle = rgba('236,240,245', Math.min(0.6, dek * 0.12)); c.fillRect(r[0], r[1], r[2], r[3]); }
+    if (lod >= 1 && !grof) {
+      // de vakken: witte lijnen aan drie kanten, open naar de oprit; binnen de kavel geknipt, want de eerste rij van
+      // het net ligt op de kavelrand en de lijnen horen niet over stoep en asfalt
+      c.save();
+      c.beginPath(); c.rect(x + kv.x0 * s, y + kv.y0 * s, (kv.x1 - kv.x0) * s, (kv.y1 - kv.y0) * s); c.clip();
+      c.strokeStyle = 'rgba(240,240,232,0.75)'; c.lineWidth = lijn(s, 0.0025);
+      c.beginPath();
+      for (let i = 0; i < pk.length; i += 3) {
+        const px = x + pk[i] * s, py = y + pk[i + 1] * s, h = pk[i + 2], cs = Math.cos(h), sn = Math.sin(h);
+        const L = 0.04 * s, W = 0.024 * s; // halve lengte en halve breedte van een vak
+        const hoek = (a, b) => [px + cs * a - sn * b, py + sn * a + cs * b];
+        const [ax, ay] = hoek(-L, -W), [bx, by] = hoek(L, -W), [cx, cy] = hoek(L, W), [dx, dy] = hoek(-L, W);
+        c.moveTo(ax, ay); c.lineTo(bx, by); c.lineTo(cx, cy); c.lineTo(dx, dy);
+      }
+      c.stroke();
+      c.restore();
+    }
+  }
+  // de oprit: van de kavelrand tot het dock
+  pRect(c, x, y, s, z, -0.05, 0.05, inz, dock + 0.004, OPRIT_KLEUR);
+  if (lod >= 1 && !grof) {
+    pRect(c, x, y, s, z, -0.05, -0.044, inz, dock, 'rgba(255,255,255,0.18)');
+    pRect(c, x, y, s, z, 0.044, 0.05, inz, dock, 'rgba(255,255,255,0.18)');
+    // stopstreep bij de poort
+    pRect(c, x, y, s, z, -0.044, 0.044, inz + 0.012, inz + 0.017, 'rgba(240,240,232,0.6)');
+  }
+  if (werk || zone === 'land') {
+    // lichtmast op het erf, aan beide kanten van de oprit
+    kavelLevend(K_LAMP, ...poortPunt(z, -0.16, dock - 0.02), 0.11, 0, 1);
+    kavelLevend(K_LAMP, ...poortPunt(z, 0.16, dock - 0.02), 0.11, 0, 1);
+  }
+}
+
+// Punt (u, v) in tegeleenheden uit (q, d) in het assenstelsel van de poort.
+function poortPunt(z, q, d) {
+  const [nx, ny] = ZN[z];
+  return nx === 0 ? [q, ny < 0 ? -0.5 + d : 0.5 - d] : [nx < 0 ? -0.5 + d : 0.5 - d, q];
+}
+
+// Laadperron achter het dock: verharde vloer, stootranden, een luifel en de dockdeur (per beeld, volgt ctx.dock).
+// Bij diensten een bordes met luifel in het accent, op het land een erf van grind.
+function perron(c, x, y, s, o, kv, zone, grof) {
+  const z = o.poort, dock = 0.5 - OPRIT_D, lod = B.lod, st = stijlVan(B.regime);
+  const d0 = dock, d1 = dock + PERRON;
+  if (zone === 'land') {
+    pRect(c, x, y, s, z, -0.09, 0.09, d0 - 0.02, d1, '#a39a84');
+    return;
+  }
+  const dienst = !WERKZONE[zone];
+  pRect(c, x, y, s, z, -0.1, 0.1, d0, d1, dienst ? '#c9c2b2' : PERRON_KLEUR);
+  if (grof) return;
+  // schaduw van de luifel en de luifel zelf
+  const [nx, ny] = ZN[z];
+  const r = poortRect(x, y, s, z, -0.085, 0.085, d0 + 0.01, d1);
+  c.fillStyle = 'rgba(0,0,0,0.22)'; c.fillRect(r[0] + s * 0.008, r[1] + s * 0.006, r[2], r[3]);
+  c.fillStyle = dienst ? st.accent : '#7f8890'; c.fillRect(r[0], r[1], r[2], r[3]);
+  c.fillStyle = 'rgba(255,255,255,0.18)'; c.fillRect(r[0], r[1], nx ? r[2] : r[2] * 0.5, ny ? r[3] : r[3] * 0.5);
+  if (lod >= 1) {
+    // stootranden geel-zwart langs de voorkant van het perron
+    for (let i = 0; i < 6; i++) pRect(c, x, y, s, z, -0.09 + i * 0.03, -0.075 + i * 0.03, d0, d0 + 0.006, i % 2 ? '#2a2a28' : '#e0b020');
+  }
+  kavelLevend(K_DOCK, ...poortPunt(z, 0, d0 + 0.004), z, dienst ? 1 : 0, 0);
+  kavelLevend(K_GEVEL, ...poortPunt(z, -0.06, d0 + 0.012), 0.05, 0, 0);
+  kavelLevend(K_GEVEL, ...poortPunt(z, 0.06, d0 + 0.012), 0.05, 0, 0);
+}
+
+// Stroken naast en achter het gebouw: opslag op een bedrijfserf, bomen en gazon bij diensten en op het land.
+function zijstroken(c, x, y, s, o, kv, zone, naam) {
+  if (B.lod < 1) return;
+  const k = kv.k, bx0 = kv.bx - k / 2, bx1 = kv.bx + k / 2, by0 = kv.by - k / 2, by1 = kv.by + k / 2;
+  const stroken = [];
+  if (bx0 - kv.dx0 > 0.05) stroken.push([kv.dx0, Math.max(by0, kv.dy0), bx0, Math.min(by1, kv.dy1)]);
+  if (kv.dx1 - bx1 > 0.05) stroken.push([bx1, Math.max(by0, kv.dy0), kv.dx1, Math.min(by1, kv.dy1)]);
+  if (by0 - kv.dy0 > 0.05 && kv.poort !== 0) stroken.push([Math.max(bx0, kv.dx0), kv.dy0, Math.min(bx1, kv.dx1), by0]);
+  if (kv.dy1 - by1 > 0.05 && kv.poort !== 2) stroken.push([Math.max(bx0, kv.dx0), by1, Math.min(bx1, kv.dx1), kv.dy1]);
+  const werk = !!WERKZONE[zone], P = (u) => x + u * s, Q = (v) => y + v * s;
+  let n = 0;
+  for (const [u0, v0, u1, v1] of stroken) {
+    const w = u1 - u0, h = v1 - v0, lang = Math.max(w, h), aantal = werk ? Math.min(3, Math.floor(lang / 0.11)) : Math.min(6, Math.floor(lang / 0.07));
+    if (werk && hash(B.seed, n, 320) < 0.3) { n++; continue; } // niet elke strook ligt vol
+    for (let i = 0; i < aantal; i++, n++) {
+      const f = (i + 0.5) / aantal, dw = 0.5 + (hash(B.seed, n, 321) - 0.5) * 0.4;
+      const kl0 = (a, lo, hi) => Math.min(Math.max(a, lo + 0.035), hi - 0.035);
+      const u = kl0(w >= h ? u0 + w * f : u0 + w * dw, kv.x0, kv.x1), v = kl0(w >= h ? v0 + h * dw : v0 + h * f, kv.y0, kv.y1);
+      const kies = hash(B.seed, n, 322);
+      if (werk && zone !== 'leger') {
+        if (kies < 0.5) for (let a = 0; a < 2; a++) for (let b = 0; b < 2; b++) pallet(c, P(u) - s * 0.024 + a * s * 0.026, Q(v) - s * 0.02 + b * s * 0.022);
+        else if (Math.min(w, h) > 0.06) {
+          const kl = CONTAINERS[Math.floor(hash(B.seed, n, 323) * CONTAINERS.length)], liggend = w >= h ? false : true;
+          const cw = (liggend ? 0.08 : 0.035) * s, ch = (liggend ? 0.035 : 0.08) * s;
+          rect(c, P(u) - cw / 2 + s * 0.005, Q(v) - ch / 2 + s * 0.005, cw, ch, 'rgba(0,0,0,0.3)');
+          rect(c, P(u) - cw / 2, Q(v) - ch / 2, cw, ch, kl);
+          if (B.lod >= 2) { c.strokeStyle = 'rgba(0,0,0,0.2)'; c.lineWidth = lijn(s, 0.0015); c.beginPath(); for (let q = 1; q < 6; q++) { if (liggend) { c.moveTo(P(u) - cw / 2 + (cw * q) / 6, Q(v) - ch / 2); c.lineTo(P(u) - cw / 2 + (cw * q) / 6, Q(v) + ch / 2); } else { c.moveTo(P(u) - cw / 2, Q(v) - ch / 2 + (ch * q) / 6); c.lineTo(P(u) + cw / 2, Q(v) - ch / 2 + (ch * q) / 6); } } c.stroke(); }
+        }
+      } else if (GROEN_ZONE[zone] || zone === 'leger') {
+        if (o.terrein !== 'berg') boom(c, P(u), Q(v), s * (0.018 + 0.01 * hash(B.seed, n, 324)));
+        else rots(c, P(u), Q(v), s * 0.014, n);
+      }
+    }
+  }
+  void naam;
+}
+
+// Halve breedte van de opening in hek of haag aan de poortzijde: de poort zelf, of breder als de eerste rij
+// parkeervakken van het net op de kavelrand ligt (dan is het een parkeerhaven aan de straat, zonder hek ervoor).
+function poortOpening(o, smal) {
+  const pk = o.parkeer, z = o.poort;
+  if (!pk || !pk.length || z < 0) return smal;
+  const [nx, ny] = ZN[z], inz = o.inzet[z];
+  let open = smal;
+  for (let i = 0; i < pk.length; i += 3) {
+    const q = Math.abs(nx === 0 ? pk[i] : pk[i + 1]), d = 0.5 - (nx === 0 ? pk[i + 1] * ny : pk[i] * nx);
+    if (d - 0.03 < inz + 0.012) open = Math.max(open, q + 0.05);
+  }
+  return open;
+}
+
+// De zijden van de kavel: een haag of hek op de eigen helft van de grens met een andere buur, een hek langs de straat
+// (behalve de poortopening) en langs het open land. Een naad blijft open: de grond loopt door naar de buur.
+function zijden(c, x, y, s, o, kv, zone, grof) {
+  const P = (u) => x + u * s, Q = (v) => y + v * s;
+  const werk = !!WERKZONE[zone], lod = B.lod, groen = !werk;
+  for (let z = 0; z < 4; z++) {
+    const bit = 1 << z;
+    if (o.naad & bit || o.water & bit) continue;
+    const vert = z === 1 || z === 3;
+    const rand = z === 0 ? kv.y0 : z === 1 ? kv.x1 : z === 2 ? kv.y1 : kv.x0;
+    const a0 = vert ? kv.y0 : kv.x0, a1 = vert ? kv.y1 : kv.x1;
+    if (o.haag & bit) {
+      // eigen helft van de haag: in de strook tussen de kavel en de tegelrand
+      const buiten = z === 0 ? -0.5 : z === 1 ? 0.5 : z === 2 ? 0.5 : -0.5, m = (rand + buiten) / 2, b = Math.abs(buiten - rand) * 0.95;
+      if (groen || hash(B.seed, z, 331) < 0.5) {
+        const kl = o.terrein === 'berg' ? '#5b6a46' : HEG;
+        if (vert) rect(c, P(m) - (b * s) / 2, Q(a0), b * s, (a1 - a0) * s, kl); else rect(c, P(a0), Q(m) - (b * s) / 2, (a1 - a0) * s, b * s, kl);
+        if (lod >= 1 && !grof) {
+          c.fillStyle = tint(kl, 1.18);
+          const n = Math.max(2, Math.round((a1 - a0) / 0.03));
+          for (let i = 0; i < n; i++) { const t = a0 + ((i + 0.5) * (a1 - a0)) / n; if (vert) rond(c, P(m) - b * s * 0.15, Q(t), b * s * 0.32); else rond(c, P(t), Q(m) - b * s * 0.15, b * s * 0.32); }
+          c.fillStyle = 'rgba(0,0,0,0.18)';
+          if (vert) c.fillRect(P(m) + (b * s) / 2, Q(a0), s * 0.004, (a1 - a0) * s); else c.fillRect(P(a0), Q(m) + (b * s) / 2, (a1 - a0) * s, s * 0.004);
+        }
+      } else hekLijn(c, x, y, s, vert, rand, a0, a1, z, -1, grof);
+    } else if ((o.straat & bit) || (o.rand & bit)) {
+      if (!werk && !(o.rand & bit) && zone !== 'land') {
+        // diensten aan de straat: een lage haag met een opening bij de poort
+        const kl = HEG, d = 0.012;
+        const m = rand + (z === 1 || z === 2 ? -d : d);
+        const open = z === o.poort, ho = open ? poortOpening(o, 0.06) : 0;
+        for (const [b0, b1] of open ? [[a0, -ho], [ho, a1]] : [[a0, a1]]) {
+          if (b1 <= b0) continue;
+          if (vert) rect(c, P(m) - s * 0.008, Q(b0), s * 0.016, (b1 - b0) * s, kl); else rect(c, P(b0), Q(m) - s * 0.008, (b1 - b0) * s, s * 0.016, kl);
+        }
+      } else if (werk) hekLijn(c, x, y, s, vert, rand + (z === 1 || z === 2 ? -0.006 : 0.006), a0, a1, z, z === o.poort ? poortOpening(o, 0.065) : -1, grof);
+    }
+  }
+  // poort: twee palen met een lamp, en bij bedrijven een portiershokje
+  if (o.poort >= 0 && !kv.vol) {
+    const z = o.poort, inz = o.inzet[z];
+    for (const q of [-0.065, 0.065]) {
+      const [u, v] = poortPunt(z, q, inz + 0.006);
+      c.fillStyle = '#4a4d50'; rond(c, P(u), Q(v), Math.max(0.6, s * 0.005));
+      kavelLevend(K_LAMP, u, v, 0.05, 0, 0);
+    }
+    if (werk && !grof && zone !== 'delf') {
+      // het portiershokje staat naast de poort, of voorbij de parkeerhaven als die er ligt
+      const ho = poortOpening(o, 0.065), [u, v] = poortPunt(z, ho > 0.07 ? -(ho + 0.035) : -0.105, inz + 0.035);
+      const w = 0.05 * s, h = 0.036 * s;
+      pand(c, P(u) - w / 2, Q(v) - h / 2, w, h, 1, '#d8d4c8', '#cfcabd', { geenRamen: B.lod < 2, raamAfstand: 0.02 });
+    }
+  } else if (kv.vol && o.poort >= 0) {
+    // woonerf en plein: lantaarns aan het begin van de arm
+    const z = o.poort, inz = o.inzet[z];
+    for (const q of [-0.075, 0.075]) { const [u, v] = poortPunt(z, q, inz + 0.01); kavelLevend(K_LAMP, u, v, 0.05, 0, 0); }
+  }
+}
+
+// Een hek langs een zijde, met een opening van ±open rond het midden (open < 0: dicht).
+function hekLijn(c, x, y, s, vert, m, a0, a1, z, open, grof) {
+  if (grof) return; // op de laagste trede geen hekken
+  const P = (u) => x + u * s, Q = (v) => y + v * s;
+  const delen = open > 0 ? [[a0, -open], [open, a1]] : [[a0, a1]];
+  c.strokeStyle = 'rgba(0,0,0,0.25)'; c.lineWidth = lijn(s, 0.004);
+  c.beginPath();
+  for (const [b0, b1] of delen) { if (b1 <= b0) continue; if (vert) { c.moveTo(P(m) + s * 0.004, Q(b0)); c.lineTo(P(m) + s * 0.004, Q(b1)); } else { c.moveTo(P(b0), Q(m) + s * 0.004); c.lineTo(P(b1), Q(m) + s * 0.004); } }
+  c.stroke();
+  c.strokeStyle = '#b9bdb8'; c.lineWidth = lijn(s, 0.003);
+  c.beginPath();
+  for (const [b0, b1] of delen) { if (b1 <= b0) continue; if (vert) { c.moveTo(P(m), Q(b0)); c.lineTo(P(m), Q(b1)); } else { c.moveTo(P(b0), Q(m)); c.lineTo(P(b1), Q(m)); } }
+  c.stroke();
+  if (B.lod >= 1 && !grof) {
+    c.fillStyle = '#6d7174';
+    for (const [b0, b1] of delen) for (let t = b0; t <= b1 + 1e-6; t += 0.04) { if (vert) rond(c, P(m), Q(t), Math.max(0.5, s * 0.0028)); else rond(c, P(t), Q(m), Math.max(0.5, s * 0.0028)); }
+  }
+  void z;
+}
+
+// Het water uit de kavel snijden: een vloeiende rand (marching squares op het 8 × 8-masker, uitgebreid tot de tegelrand),
+// destination-out over de natte delen, dan een kademuur (werk, haven), een boulevard (wonen, centrum, diensten) of een
+// oever met riet (land). Bij ijs een witte rijprand langs de kade.
+const WV = new Float32Array(100);
+const WATER_DREMPEL = 0.36;
+const WN = 33, WF = new Float32Array(WN * WN), WF2 = new Float32Array(WN * WN);
+function waterVorm(o, x, y, s) {
+  const wm = o.waterMasker;
+  // knopen op -0,5, de celmiddens en +0,5; licht verzacht zodat de rand niet trapsgewijs loopt
+  const pos = [-0.5];
+  for (let i = 0; i < 8; i++) pos.push(-0.5 + (i + 0.5) / 8);
+  pos.push(0.5);
+  const cel = (i, j) => (wm[Math.min(7, Math.max(0, j)) * 8 + Math.min(7, Math.max(0, i))] ? 1 : 0);
+  for (let j = 0; j < 10; j++) for (let i = 0; i < 10; i++) {
+    const ci = i - 1, cj = j - 1;
+    let som = 0, gew = 0;
+    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) { const g = di === 0 && dj === 0 ? 4 : di === 0 || dj === 0 ? 2 : 1; som += g * cel(ci + di, cj + dj); gew += g; }
+    WV[j * 10 + i] = som / gew;
+  }
+  // Fijner raster (WN × WN knopen over de tegel): de waarden bilineair uit de 10 × 10 knopen, daarna twee keer verzacht.
+  // De contour daarvan is een vloeiende bocht in plaats van een hoekige lijn per cel van het masker.
+  const N = WN, F = WF, F2 = WF2;
+  for (let gj = 0; gj < N; gj++) {
+    const v = -0.5 + gj / (N - 1);
+    let j = v <= pos[1] ? 0 : v >= pos[8] ? 8 : 1 + Math.min(6, Math.floor((v - pos[1]) * 8));
+    const tv = (v - pos[j]) / (pos[j + 1] - pos[j]);
+    for (let gi = 0; gi < N; gi++) {
+      const u = -0.5 + gi / (N - 1);
+      let i = u <= pos[1] ? 0 : u >= pos[8] ? 8 : 1 + Math.min(6, Math.floor((u - pos[1]) * 8));
+      const tu = (u - pos[i]) / (pos[i + 1] - pos[i]);
+      const a = WV[j * 10 + i], b = WV[j * 10 + i + 1], d = WV[(j + 1) * 10 + i], e = WV[(j + 1) * 10 + i + 1];
+      F[gj * N + gi] = (a + (b - a) * tu) * (1 - tv) + (d + (e - d) * tu) * tv;
+    }
+  }
+  for (let ronde = 0; ronde < 2; ronde++) {
+    for (let gj = 0; gj < N; gj++) for (let gi = 0; gi < N; gi++) {
+      const j0 = gj > 0 ? gj - 1 : 0, j1 = gj < N - 1 ? gj + 1 : N - 1, i0 = gi > 0 ? gi - 1 : 0, i1 = gi < N - 1 ? gi + 1 : N - 1;
+      F2[gj * N + gi] = (F[gj * N + gi] * 4 + (F[gj * N + i0] + F[gj * N + i1] + F[j0 * N + gi] + F[j1 * N + gi]) * 2 + F[j0 * N + i0] + F[j0 * N + i1] + F[j1 * N + i0] + F[j1 * N + i1]) / 16;
+    }
+    F.set(F2);
+  }
+  const X = (i) => x + (-0.5 + i / (N - 1)) * s, Y = (j) => y + (-0.5 + j / (N - 1)) * s;
+  const lijnen = [], vlak = [];
+  // drempel onder de helft: een beek van één cel breed blijft open en het erf dekt nooit echt water af; wat te ruim
+  // is uitgesneden toont de oever van het terrein eronder
+  const T = WATER_DREMPEL;
+  const hoeken = [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  const tus = (p, q, pa, pb) => pa + ((T - p) / (q - p)) * (pb - pa);
+  for (let j = 0; j < N - 1; j++) for (let i = 0, rij = null; i < N - 1; i++) {
+    const a = F[j * N + i], b = F[j * N + i + 1], d = F[(j + 1) * N + i], e = F[(j + 1) * N + i + 1];
+    const nat = (a >= T) + (b >= T) + (d >= T) + (e >= T);
+    if (!nat) { rij = null; continue; }
+    const xa = X(i), xb = X(i + 1), ya = Y(j), yb = Y(j + 1);
+    if (nat === 4) {
+      // helemaal nat: aaneengesloten cellen in een rij worden één rechthoek
+      if (rij) { rij[2] = xb; rij[4] = xb; } else { rij = [xa, ya, xb, ya, xb, yb, xa, yb]; vlak.push(rij); }
+      continue;
+    }
+    rij = null;
+    const pts = [], rand = [];
+    // rondgang: linksboven, rechtsboven, rechtsonder, linksonder
+    hoeken[0][0] = xa; hoeken[0][1] = ya; hoeken[0][2] = a; hoeken[1][0] = xb; hoeken[1][1] = ya; hoeken[1][2] = b;
+    hoeken[2][0] = xb; hoeken[2][1] = yb; hoeken[2][2] = e; hoeken[3][0] = xa; hoeken[3][1] = yb; hoeken[3][2] = d;
+    for (let k = 0; k < 4; k++) {
+      const [px, py, pv] = hoeken[k], [qx, qy, qv] = hoeken[(k + 1) % 4];
+      if (pv >= T) pts.push(px, py);
+      if ((pv >= T) !== (qv >= T)) {
+        const sx = px === qx ? px : tus(pv, qv, px, qx), sy = py === qy ? py : tus(pv, qv, py, qy);
+        pts.push(sx, sy); rand.push(sx, sy);
+      }
+    }
+    if (pts.length >= 6) vlak.push(pts);
+    if (rand.length === 4) lijnen.push(rand[0], rand[1], rand[2], rand[3]);
+    else if (rand.length === 8) lijnen.push(rand[0], rand[1], rand[2], rand[3], rand[4], rand[5], rand[6], rand[7]);
+  }
+  return { lijnen, vlak };
+}
+
+// Pad van de natte delen (losse, niet-overlappende veelhoeken).
+function waterPad(c, vlak) {
+  for (const pts of vlak) { c.moveTo(pts[0], pts[1]); for (let k = 2; k < pts.length; k += 2) c.lineTo(pts[k], pts[k + 1]); c.closePath(); }
+}
+
+// Wordt er rechtstreeks op de kaart getekend (geen bitmap: het bakbudget van dit beeld is op), dan mag er niets uit
+// het doek gesneden worden, want dan verdwijnt het terrein eronder. In plaats daarvan wordt de kavel vooraf op het
+// droge deel geknipt (B.direct) en vervalt het uitsnijden hier.
+function snijWater(c, x, y, s, o, kv, zone, ijs, vorm, kaal) {
+  const { vlak } = vorm;
+  // een kolonie heeft geen erf en dus ook geen kade of boulevard: alleen het water gaat eruit
+  const lijnen = kaal ? [] : vorm.lijnen;
+  // eerst de kade of boulevard over de rand trekken, dan het water eruit snijden: alleen de landhelft blijft staan,
+  // dus ook een smalle beek krijgt een oever zonder dat er een dichte worst over het water ligt
+  const werk = !!WERKZONE[zone], land = zone === 'land', lod = B.lod;
+  const trek = (kleur, b) => { c.strokeStyle = kleur; c.lineWidth = Math.max(0.6, b * 2 * s); c.beginPath(); for (let i = 0; i < lijnen.length; i += 4) { c.moveTo(lijnen[i], lijnen[i + 1]); c.lineTo(lijnen[i + 2], lijnen[i + 3]); } c.stroke(); };
+  // kade en boulevard blijven binnen de kavel: niet over stoep en asfalt in de strook langs de straat
+  const knipKavel = () => { c.beginPath(); c.rect(x + kv.x0 * s, y + kv.y0 * s, (kv.x1 - kv.x0) * s, (kv.y1 - kv.y0) * s); c.clip(); };
+  if (lijnen.length) {
+    c.save();
+    knipKavel();
+    c.lineCap = 'round';
+    if (werk) {
+      trek('rgba(0,0,0,0.25)', 0.026);
+      trek(ijs >= 2 ? '#c9ccc8' : '#a9a497', 0.02);
+      trek('#bdb8ab', 0.007);
+    } else if (land) {
+      trek('#6d7d48', 0.022);
+      trek('#7f8f52', 0.012);
+    } else {
+      // boulevard: lichte strook met een rand van donkere steen aan de waterkant
+      trek('rgba(0,0,0,0.2)', 0.042);
+      trek(ijs >= 2 ? '#e4e2dc' : '#cdc3ad', 0.038);
+      trek('#ddd3bd', 0.012);
+    }
+    c.restore();
+  }
+  if (!B.direct) {
+    c.save();
+    c.globalCompositeOperation = 'destination-out';
+    c.fillStyle = '#000';
+    c.beginPath();
+    waterPad(c, vlak);
+    c.fill();
+    c.restore();
+  }
+  if (!lijnen.length) return;
+  c.save();
+  knipKavel();
+  c.lineCap = 'round';
+  // de waterlijn zelf: kademuur, oever met riet of de reling van de boulevard, en ijs langs de rand
+  if (ijs > 0) trek(rgba('235,244,250', ijs >= 2 ? 0.8 : 0.45), 0.012);
+  if (werk) {
+    trek('#7d786c', 0.003);
+    if (lod >= 2) {
+      // bolders langs de kade
+      c.fillStyle = '#2e2a26';
+      for (let i = 0; i < lijnen.length; i += 56) rond(c, (lijnen[i] + lijnen[i + 2]) / 2, (lijnen[i + 1] + lijnen[i + 3]) / 2, Math.max(0.5, s * 0.004));
+    }
+  } else if (land) {
+    if (lod >= 1) { c.fillStyle = '#8c9a58'; for (let i = 0; i < lijnen.length; i += 12) rond(c, lijnen[i], lijnen[i + 1], s * 0.006); }
+  } else {
+    if (lod >= 1) trek('rgba(60,64,70,0.55)', 0.0015);
+    for (let i = 0; i < lijnen.length; i += 84) {
+      const u = (lijnen[i] - x) / s, v = (lijnen[i + 1] - y) / s;
+      if (u > kv.x0 && u < kv.x1 && v > kv.y0 && v < kv.y1) kavelLevend(K_LAMP, u, v, 0.05, 0, 0);
+    }
+  }
+  c.restore();
+}
+
+// Levend op de kavel, per beeld: lampen op erf, poort en boulevard ('s nachts), de dockdeur en de heftruck (volgen
+// ctx.dock) en gevellicht boven het perron.
+function tekenKavelLevend(c, x, y, s, e, ctx, t) {
+  const L = e.kavelLevend;
+  if (!L || !L.length) return;
+  const nacht = ctx.nacht ?? 0, aan = nacht > 0.05 && !ctx.uit && !e.uit, a = Math.min(1, nacht * 1.5);
+  for (let i = 0; i < L.length; i += 6) {
+    const soort = L[i], px = x + L[i + 1] * s, py = y + L[i + 2] * s;
+    if (soort === K_LAMP) {
+      if (!aan) continue;
+      const r = L[i + 3] * s;
+      c.fillStyle = rgba('255,214,140', 0.13 * a); rond(c, px, py, r);
+      c.fillStyle = rgba('255,214,140', 0.2 * a); rond(c, px, py, r * 0.55);
+      c.fillStyle = rgba('255,240,200', 0.95 * a); rond(c, px, py, Math.max(0.9, s * 0.006));
+    } else if (soort === K_GEVEL) {
+      if (!aan) continue;
+      c.fillStyle = rgba('255,226,170', 0.22 * a); rond(c, px, py, L[i + 3] * s);
+      c.fillStyle = rgba('255,244,214', 0.95 * a); rond(c, px, py, Math.max(0.8, s * 0.005));
+    } else if (soort === K_DOCK) dockDeur(c, px, py, L[i + 3] | 0, L[i + 4], s, t, ctx.dock, aan, a);
+  }
+}
+
+// De dockdeur aan de achterkant van het perron: dicht, of open met licht en een heftruck die pendelt zolang er een
+// vrachtwagen aan het dock staat (ctx.dock.bezet). Bij laden gaan de pallets naar buiten, bij lossen naar binnen.
+const HEFTRUCK_GEEL = '#e3b21c'; // eigen tint, zodat de heftruck niet verward wordt met ander geel
+function dockDeur(c, px, py, z, dienst, s, t, dock, aan, a) {
+  if (dienst) return;
+  const [nx, ny] = ZN[z], dx = -nx, dy = -ny; // naar binnen
+  const w = 0.07 * s, dik = Math.max(1, 0.012 * s);
+  const deurX = px + dx * PERRON * s * 0.82, deurY = py + dy * PERRON * s * 0.82;
+  const bezet = dock && dock.bezet;
+  const hw = nx === 0 ? w / 2 : dik / 2, hh = nx === 0 ? dik / 2 : w / 2;
+  c.fillStyle = bezet ? '#1d2024' : '#5c6168';
+  c.fillRect(deurX - hw, deurY - hh, hw * 2, hh * 2);
+  if (!bezet) {
+    c.fillStyle = 'rgba(255,255,255,0.18)';
+    if (nx === 0) for (let i = 1; i < 4; i++) c.fillRect(deurX - hw + (hw * 2 * i) / 4, deurY - hh, Math.max(0.5, s * 0.0015), hh * 2);
+    else for (let i = 1; i < 4; i++) c.fillRect(deurX - hw, deurY - hh + (hh * 2 * i) / 4, hw * 2, Math.max(0.5, s * 0.0015));
+  } else {
+    if (aan) { c.fillStyle = rgba('255,226,170', 0.5 * a); c.fillRect(deurX - hw, deurY - hh, hw * 2, hh * 2); }
+    // heftruck: pendelt tussen de deur en de laadbak, ritme uit de voortgang van het laden
+    const v = dock.voortgang ?? 0, n = 6, f = frac(v * n), heen = f < 0.5, q = heen ? f * 2 : 2 - f * 2;
+    const lossen = dock.soort === 1, vol = lossen ? !heen : heen;
+    const d = (0.82 - 0.7 * glij(q)) * PERRON * s, zij = (0.025 * (Math.floor(v * n) % 2 ? 1 : -1)) * s;
+    const hx = px + dx * d + (nx === 0 ? zij : 0), hy = py + dy * d + (nx === 0 ? 0 : zij);
+    const l = 0.022 * s, b = 0.014 * s, lw = nx === 0 ? b : l, lh = nx === 0 ? l : b;
+    c.fillStyle = 'rgba(0,0,0,0.3)'; c.fillRect(hx - lw / 2 + s * 0.003, hy - lh / 2 + s * 0.003, lw, lh);
+    c.fillStyle = HEFTRUCK_GEEL; c.fillRect(hx - lw / 2, hy - lh / 2, lw, lh);
+    c.fillStyle = '#2a2e33'; c.fillRect(hx - lw * 0.3, hy - lh * 0.3, lw * 0.6, lh * 0.6);
+    if (vol) { c.fillStyle = '#c8b48a'; c.fillRect(hx - nx * l * 0.6 - lw * 0.35, hy - ny * l * 0.6 - lh * 0.35, lw * 0.7, lh * 0.7); }
+  }
+  if (aan) { c.fillStyle = rgba('255,240,200', 0.9 * a); rond(c, deurX - dx * dik, deurY - dy * dik, Math.max(0.7, s * 0.004)); }
+}
+
+// Voor de tests: de kavel en het vak van het gebouw voor een omgeving (alleen lezen).
+export function kavelInfo(o, naam) {
+  const n = TEKEN[soortOpKavel(naam, o)] ? soortOpKavel(naam, o) : naam;
+  const kv = kavelVan(o, n);
+  return { naam: n, x0: kv.x0, y0: kv.y0, x1: kv.x1, y1: kv.y1, droog: [kv.dx0, kv.dy0, kv.dx1, kv.dy1], bx: kv.bx, by: kv.by, k: kv.k, knip: kv.knip.slice(),
+    // het zichtbare deel van het gebouw: het vak binnen de knip
+    zicht: [Math.max(kv.bx - kv.k / 2, kv.knip[0]), Math.max(kv.by - kv.k / 2, kv.knip[1]), Math.min(kv.bx + kv.k / 2, kv.knip[2]), Math.min(kv.by + kv.k / 2, kv.knip[3])], armen: kv.armen };
+}
+
 // Tekent een gebouw in detail. Geeft false terug als er geen detailtekening is (dan valt de kaart terug op het icoon).
+// Met ctx.omgeving staat het gebouw op zijn kavel; zonder omgeving vult het de tegel zoals vroeger.
 export function tekenGebouwDetail(c, soort, x, y, s, ctx) {
-  const naam = TEKEN[soort] ? soort : TEKEN[ctx.alias] ? ctx.alias : null;
+  const o = ctx.omgeving ?? null;
+  let naam = ctx.gebouw && TEKEN[ctx.gebouw] ? ctx.gebouw : TEKEN[soort] ? soort : TEKEN[ctx.alias] ? ctx.alias : null;
   if (!naam) return false;
+  const andere = soortOpKavel(naam, o);
+  if (TEKEN[andere]) naam = andere;
   const f = TEKEN[naam];
   const st = stijlVan(ctx.regime);
   const niveau = niveauVan(naam, ctx);
@@ -4088,14 +5406,17 @@ export function tekenGebouwDetail(c, soort, x, y, s, ctx) {
   const echt = Math.round(s * dpr); // exacte maat in apparaatpixels; boven MAX_PX wordt de bitmap geschaald getoond
   const px = Math.min(MAX_PX, Math.max(8, echt));
   const lod = lodVan(s);
-  // De eigenaarskleur hoort niet in de sleutel: rand en vlaggen in die kleur worden per beeld getekend,
-  // dus een land dat van blok wisselt hoeft niets opnieuw te bakken.
+  // De eigenaarskleur hoort niet in de sleutel (en wordt niet meer als kader getekend).
   // Seizoen en bouwplaats wisselen vanzelf in de loop van het spel, voor alle gebouwen in beeld tegelijk. Daarom
   // zitten ze wel in de sleutel maar niet in 'vast': zolang de nieuwe bitmap nog niet gebakken is (hoogstens vier
   // per beeld), staat de vorige als vervanger klaar en hoeft er niets rechtstreeks getekend te worden.
+  // C12: de omgeving (straten, buren, water, helling, variant) en de sneeuw- en ijsemmers van de kavel zitten in de
+  // sleutel; ook die wisselen in de loop van het spel, dus ook buiten 'vast'.
   const vast = `${naam}|${ctx.seed}|${ctx.regime}|${niveau}|${effB}|${uit}|${toestand}`;
-  // Welvaart en rust van het land (pakket B) wisselen ook in de loop van het spel: net als het seizoen buiten 'vast'.
-  const basis = `${vast}|${groeiend ? 'g' : ''}|${sz.sleutel}|${wv}`;
+  const kv = o ? kavelVan(o, naam) : null;
+  const dek = o ? dekEmmer(dag) : 0, ijs = kv?.nat ? ijsEmmer(dag) : 0;
+  const armen = kv ? kv.armen : typeof ctx.armen === 'number' ? ctx.armen & 15 : 15;
+  const basis = `${vast}|${groeiend ? 'g' : ''}|${sz.sleutel}|${wv}|${armen}|${o ? `${o.sleutel}|${dek}${ijs}` : '-'}`;
   const sleutel = `${basis}|${px}|${lod}`;
 
   let e = CACHE.get(sleutel);
@@ -4119,11 +5440,8 @@ export function tekenGebouwDetail(c, soort, x, y, s, ctx) {
         bakTeller++;
         const g = doek.getContext('2d');
         g.setTransform(px / s, 0, 0, px / s, 0, 0);
-        const ramen = [], lev = [];
-        zetB(naam, ctx, s, s / 2, s / 2, niveau, effB, ramen, lev, sz, groeiend, wv);
-        tekenAlles(f, naam, g, s / 2, s / 2, s, st, ctx);
-        B.ramen = B.levend = null;
-        e = { doek, px, bytes: px * px * 4, vast, ramen: Float32Array.from(ramen), levend: Float32Array.from(lev), lod, verwaarloosd: effB === 0, uit: !!uit };
+        e = bak(g, naam, f, st, ctx, s / 2, s / 2, s, niveau, effB, sz, groeiend, wv, armen, o, kv, dek, ijs);
+        Object.assign(e, { doek, px, bytes: px * px * 4, vast });
         CACHE.set(sleutel, e);
         LAATSTE.set(vast, e);
         cacheBytes += e.bytes;
@@ -4133,7 +5451,6 @@ export function tekenGebouwDetail(c, soort, x, y, s, ctx) {
   }
   VORIGE_MAAT.set(vast, s);
 
-  if (ctx.voortgang != null) c.globalAlpha = 0.35 + 0.65 * ctx.voortgang;
   if (e) {
     if (e.px === echt) {
       // exacte maat: op hele apparaatpixels, dan kopieert de browser zonder herbemonstering
@@ -4141,40 +5458,81 @@ export function tekenGebouwDetail(c, soort, x, y, s, ctx) {
     } else c.drawImage(e.doek, x - s / 2, y - s / 2, s, s);
   } else {
     // Geen canvas beschikbaar (headless zonder fabriek): rechtstreeks tekenen, binnen het vakje geknipt.
-    const ramen = [], lev = [];
     c.save();
     c.beginPath();
     c.rect(x - s / 2, y - s / 2, s, s);
     c.clip();
-    zetB(naam, ctx, s, x, y, niveau, effB, ramen, lev, sz, groeiend, wv);
-    tekenAlles(f, naam, c, x, y, s, st, ctx);
-    B.ramen = B.levend = null;
+    B.direct = true; // geen destination-out op de kaart zelf
+    e = bak(c, naam, f, st, ctx, x, y, s, niveau, effB, sz, groeiend, wv, armen, o, kv, dek, ijs);
+    B.direct = false;
     c.restore();
-    e = { ramen, levend: lev, lod: lodVan(s), verwaarloosd: effB === 0, uit: !!uit };
   }
   c.globalAlpha = 1;
 
+  // ramen en levende delen in het vak van het gebouw; kavellichten en dock in de hele tegel
+  const ks = e.kavel ? e.kavel.k * s : s, kx = e.kavel ? x + e.kavel.bx * s : x, ky = e.kavel ? y + e.kavel.by * s : y;
   const tijd = ctx.tijd ?? 0;
-  tekenRamen(c, x, y, s, e, ctx, tijd * 1000);
-  tekenLevend(c, x, y, s, e, st, ctx, tijd, sz);
+  tekenRamen(c, kx, ky, ks, e, ctx, tijd * 1000);
+  tekenLevend(c, kx, ky, ks, e, st, ctx, tijd, sz);
+  if (e.kavel) tekenKavelLevend(c, x, y, s, e, ctx, tijd);
 
   if (ctx.voortgang != null) {
-    if (e.lod >= 1) { steigers(c, x, y, s, ctx.voortgang); bouwkraan(c, x, y, s, tijd, ctx.seed ?? 0); }
-    c.strokeStyle = '#f0b429';
-    c.setLineDash([s * 0.06, s * 0.05]);
-    c.lineWidth = Math.max(1, s * 0.025);
-    c.strokeRect(x - s * 0.46, y - s * 0.46, s * 0.92, s * 0.92);
-    c.setLineDash([]);
-    rect(c, x - s * 0.4, y + s * 0.38, s * 0.8, s * 0.06, '#0c131b');
-    rect(c, x - s * 0.4, y + s * 0.38, s * 0.8 * ctx.voortgang, s * 0.06, '#f0b429');
+    // de bouw blijft zichtbaar aan het casco, de steigers, de kraan en (op een kavel) het bouwhek
+    const r = e.kavel ? e.kavelRand : null;
+    if (r) { c.save(); c.beginPath(); c.rect(x + r[0] * s, y + r[1] * s, (r[2] - r[0]) * s, (r[3] - r[1]) * s); c.clip(); }
+    bouwfase(c, kx, ky, ks, ctx.voortgang);
+    if (e.lod >= 1) steigers(c, kx, ky, ks, ctx.voortgang);
+    if (r) c.restore();
+    if (e.lod >= 1) bouwkraan(c, kx, ky, ks, tijd, ctx.seed ?? 0);
+    if (r) bouwhek(c, x, y, s, r);
   }
-  // dunne rand in de kleur van de eigenaar
-  c.strokeStyle = ctx.kleur;
-  c.globalAlpha = 0.55;
-  c.lineWidth = Math.max(1, s * 0.02);
-  c.strokeRect(x - s / 2 + 1, y - s / 2 + 1, s - 2, s - 2);
-  c.globalAlpha = 1;
   return true;
+}
+
+// Bouwhek langs de kavel tijdens de bouw: lichte hekdelen op voetjes, geen kader in een UI-kleur.
+function bouwhek(c, x, y, s, r) {
+  const [x0, y0, x1, y1] = r;
+  c.strokeStyle = 'rgba(205,208,204,0.85)';
+  c.lineWidth = Math.max(0.6, s * 0.004);
+  c.setLineDash([s * 0.035, s * 0.006]);
+  c.strokeRect(x + x0 * s + s * 0.01, y + y0 * s + s * 0.01, (x1 - x0) * s - s * 0.02, (y1 - y0) * s - s * 0.02);
+  c.setLineDash([]);
+}
+
+// Ramen en levende delen van een tekening die buiten de knip vallen (geknipt deel), gaan weg: anders branden er
+// 's nachts ramen of rookt er een schoorsteen boven het perron of de straat. stap = velden per stuk, i = veld van u.
+function binnenKnip(lijst, stap, i, kv) {
+  const [x0, y0, x1, y1] = kv.knip;
+  let n = 0;
+  for (let j = 0; j < lijst.length; j += stap) {
+    const u = kv.bx + lijst[j + i] * kv.k, v = kv.by + lijst[j + i + 1] * kv.k;
+    if (u < x0 - 0.005 || u > x1 + 0.005 || v < y0 - 0.005 || v > y1 + 0.005) continue;
+    if (kv.overNat && kv.wm[Math.min(7, Math.max(0, Math.floor((v + 0.5) * 8))) * 8 + Math.min(7, Math.max(0, Math.floor((u + 0.5) * 8)))]) continue;
+    for (let q = 0; q < stap; q++) lijst[n + q] = lijst[j + q];
+    n += stap;
+  }
+  lijst.length = n;
+}
+
+// Bakt één gebouw (met of zonder kavel) in c, met het midden van de tegel op (x, y). Geeft de bitmapgegevens terug
+// zonder doek: ramen en levende delen genormaliseerd op het vak van het gebouw, kavellevend op de tegel.
+function bak(c, naam, f, st, ctx, x, y, s, niveau, effB, sz, groeiend, wv, armen, o, kv, dek, ijs) {
+  const ramen = [], lev = [], kl = [];
+  zetB(naam, ctx, s, x, y, niveau, effB, ramen, lev, sz, groeiend, wv, armen);
+  B.omg = o; B.variant = o ? o.variant | 0 : 0;
+  if (o) {
+    kavelLijst = kl;
+    bakKavel(c, x, y, s, naam, f, st, ctx, o, kv, dek, ijs);
+    kavelLijst = null;
+    binnenKnip(ramen, 4, 0, kv); binnenKnip(lev, 6, 1, kv);
+  } else tekenAlles(f, naam, c, x, y, s, st, ctx);
+  B.ramen = B.levend = null; B.kavel = false; B.omg = null;
+  return {
+    ramen: Float32Array.from(ramen), levend: Float32Array.from(lev), lod: lodVan(s), verwaarloosd: effB === 0, uit: !!ctx.uit, armen,
+    kavel: kv ? { bx: kv.bx, by: kv.by, k: kv.k } : null, kavelLevend: kl.length ? Float32Array.from(kl) : null,
+    // bouwhek om het zichtbare deel van het gebouw (het vak binnen de knip), niet om de hele kavel of over het water
+    kavelRand: kv ? [Math.max(kv.bx - kv.k / 2, kv.knip[0]), Math.max(kv.by - kv.k / 2, kv.knip[1]), Math.min(kv.bx + kv.k / 2, kv.knip[2]), Math.min(kv.by + kv.k / 2, kv.knip[3])] : null,
+  };
 }
 
 // ---------- levende delen per beeld ----------
@@ -4195,9 +5553,10 @@ function raamIndeling(e, seed) {
     groep[i] = g;
     const h = hash(seed, i, 5);
     klas[i] = h < 0.1 ? 1 : h < 0.18 ? 2 : 0;
-    // aan tussen het begin van de avond en een derde van de nacht; ruim een derde gaat voor de ochtend weer uit
+    // aan tussen het begin van de avond en een derde van de nacht; ruim een derde gaat midden in de nacht weer uit,
+    // de rest bij het opstaan, ook een voor een (C11: niet allemaal tegelijk op het moment dat het licht wordt)
     aan[i] = 0.02 + 0.3 * hash(seed, g, 11);
-    uit[i] = hash(seed, g, 12) < 0.4 ? 0.48 + 0.4 * hash(seed, g, 13) : 2;
+    uit[i] = hash(seed, g, 12) < 0.4 ? 0.48 + 0.4 * hash(seed, g, 13) : 0.86 + 0.11 * hash(seed, g, 13);
   }
   e.indeling = { groep, klas, patroon, aan, uit };
   return e.indeling;
@@ -4237,6 +5596,7 @@ function tekenLevend(c, x, y, s, e, st, ctx, t, sz = GEEN_SEIZOEN) {
   const L = e.levend;
   if (!L.length) return;
   dagNu = dagVan(ctx); isKerst = kerstVan(dagNu); stNu = st; szNu = sz;
+  vakX = x; vakY = y; armNu = e.armen ?? 15; zaadNu = ctx.seed ?? 0; kavelNu = !!e.kavel;
   const nu = t * 1000, nacht = ctx.nacht ?? 0, seed = ctx.seed ?? 0;
   const draait = ctx.actief !== false && !ctx.uit && ctx.voortgang == null && !e.verwaarloosd;
   const wx = Math.cos(sz.windHoek) * sz.windKracht, wy = Math.sin(sz.windHoek) * sz.windKracht;
@@ -4514,12 +5874,15 @@ function tekenExtra(c, soort, px, py, a, b, k, s, e, ctx, t, sz, draait, nacht, 
       if (isKerst && !ctx.uit) snoer(c, px, py, a, k, s, t, nacht);
       break;
     case L_ROLLUIK: {
-      // 's avonds gaat het rolluik op een vast moment per winkel dicht, tegen de ochtend weer open
-      const u = nachtUur(t);
-      if (u < 0.05 + 0.4 * hash(k, 1, 3) || u > 0.96) break;
-      c.fillStyle = '#80858a'; c.fillRect(px, py, a, b);
+      // 's avonds gaat het rolluik op een vast moment per winkel dicht, tegen de ochtend weer open. C11: het schuift
+      // in een paar tellen omlaag en omhoog, elke winkel op een eigen moment
+      const u = nachtUur(t), dicht = 0.05 + 0.4 * hash(k, 1, 3), open = 0.9 + 0.06 * hash(k, 2, 3);
+      const f = Math.min(klem((u - dicht) / 0.02), klem((open + 0.02 - u) / 0.02));
+      if (f <= 0) break;
+      const h = b * f;
+      c.fillStyle = '#80858a'; c.fillRect(px, py, a, h);
       c.strokeStyle = 'rgba(0,0,0,0.25)'; c.lineWidth = Math.max(0.5, s * 0.0008);
-      c.beginPath(); for (let j = 1; j < 5; j++) { c.moveTo(px, py + (b * j) / 5); c.lineTo(px + a, py + (b * j) / 5); } c.stroke();
+      c.beginPath(); for (let j = 1; j < 5; j++) { const yy = py + (b * j) / 5; if (yy >= py + h) break; c.moveTo(px, yy); c.lineTo(px + a, yy); } c.stroke();
       break;
     }
     case L_DOCK:
@@ -4609,17 +5972,46 @@ function voertuig(c, px, py, a, b, soort, draait, t, fase, s, lod) {
   }
 }
 
-// Bouwkraan op een bouwplaats: mast in de noordoosthoek, de giek draait langzaam.
+// C11: de bouw in fasen in plaats van een doorschijnend spookgebouw. Eerst een bouwput met de fundering, dan de
+// ruwbouw (het gebouw onder een laag grijs beton die met het werk wegtrekt), tot het af is. Alles loopt geleidelijk
+// mee met de voortgang.
+function bouwfase(c, x, y, s, v) {
+  const ruw = klem((0.85 - v) / 0.6), put = klem((0.25 - v) / 0.1);
+  if (ruw > 0) { c.fillStyle = rgba('170,166,158', 0.7 * ruw); c.fillRect(x - s * 0.42, y - s * 0.42, s * 0.84, s * 0.78); }
+  if (put > 0) {
+    c.fillStyle = rgba('122,90,60', put); c.fillRect(x - s * 0.36, y - s * 0.34, s * 0.62, s * 0.6);
+    // de funderingsplaat groeit met het werk mee
+    const f = klem(v / 0.2);
+    c.fillStyle = rgba('150,148,142', put); c.fillRect(x - s * 0.33, y - s * 0.31, s * 0.56 * f, s * 0.54);
+  }
+}
+
+// Bouwkraan op een bouwplaats: mast in de noordoosthoek. C11: hij draait niet rond maar werkt: haakt een last op bij
+// de opslag (zuidelijk onder de mast), zwaait met de last naar het midden van de bouw, laat hem zakken en zwaait
+// leeg terug. Elke ronde 40 s, een andere last (stenen, balken of een bekisting).
+const KRAANLAST = ['#a0522d', '#c8a26a', '#8a8f96'];
 function bouwkraan(c, x, y, s, t, seed) {
-  const mx = x + s * 0.3, my = y - s * 0.3, len = s * 0.42, hoek = t * 0.15 + hash(seed, 5) * 6;
+  const mx = x + s * 0.3, my = y - s * 0.3, len = s * 0.42;
+  const pak = Math.PI / 2, los = Math.PI * 0.75; // ophalen recht onder de mast, neerzetten in het midden
+  const q = t / 40 + hash(seed, 5), p = frac(q), ronde = Math.floor(q + 0.1); // de last van de volgende ronde wordt al bij p = 0,9 opgehaald
+  // 0-0,1 aanhaken, 0,1-0,45 zwaaien met last, 0,45-0,55 last neerlaten, 0,55-0,9 leeg terug, 0,9-1 wachten
+  const z = p < 0.1 ? 0 : p < 0.45 ? glij((p - 0.1) / 0.35) : p < 0.55 ? 1 : p < 0.9 ? 1 - glij((p - 0.55) / 0.35) : 0;
+  const hoek = pak + (los - pak) * z;
   const ex = mx + Math.cos(hoek) * len, ey = my + Math.sin(hoek) * len;
+  // de opslag onder het ophaalpunt: pallets met bouwmateriaal
+  const ox = mx + Math.cos(pak) * len, oy = my + Math.sin(pak) * len, lk = KRAANLAST[ronde % 3], lb = s * 0.03;
+  rect(c, ox - s * 0.022, oy - s * 0.022, s * 0.044, s * 0.044, '#7a6a55');
+  rect(c, ox - s * 0.018, oy - s * 0.018, s * 0.036, s * 0.036, '#9a8a70');
   c.strokeStyle = 'rgba(0,0,0,0.25)';
   c.lineWidth = Math.max(1, s * 0.012);
   c.beginPath(); c.moveTo(mx + s * 0.05, my + s * 0.04); c.lineTo(ex + s * 0.05, ey + s * 0.04); c.stroke();
   c.strokeStyle = '#f0b429';
   c.beginPath(); c.moveTo(mx - Math.cos(hoek) * len * 0.25, my - Math.sin(hoek) * len * 0.25); c.lineTo(ex, ey); c.stroke();
   rect(c, mx - s * 0.02, my - s * 0.02, s * 0.04, s * 0.04, '#d9a020');
-  rect(c, ex - s * 0.015, ey - s * 0.015, s * 0.03, s * 0.03, '#8a8f96');
+  // de last hangt aan de haak tot hij is neergelaten, daarna vervaagt hij in de bouw
+  const la = p >= 0.9 ? glij((p - 0.9) / 0.08) : p < 0.45 ? 1 : p < 0.55 ? 1 - glij((p - 0.45) / 0.1) : 0;
+  if (la > 0) { c.globalAlpha = la; rect(c, ex - lb / 2, ey - lb / 2, lb, lb, lk); c.globalAlpha = 1; spoor(5, ex, ey, la); }
+  c.fillStyle = '#3a3c3e'; c.fillRect(ex - s * 0.004, ey - s * 0.004, s * 0.008, s * 0.008);
 }
 
 // ---------- landschap (oude tekening, blijft voor compatibiliteit; de terreinlaag neemt het over) ----------

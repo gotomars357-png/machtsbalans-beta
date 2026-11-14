@@ -1,12 +1,18 @@
-// Infrastructuur op de kaart (pakket B van de inzoomronde): wegdetail over de bestaande wegen, spoorlijnen met
-// rijdende treinen, hoogspanningslijnen, containerhavens met kranen, een vliegveld bij elke hoofdstad, bruggen,
-// brandstofdepots en pijpleidingen. Alles komt trapsgewijs op bij het inzoomen (zie DREMPEL).
+// Infrastructuur op de kaart: het wegdek van het wegennet (wegennet.js) per profiel met stoepen, markering,
+// afgeronde hoeken, stopstrepen, zebra's, verkeerslichten, haltes, parkeerhavens, overwegen, bruggen en tunnels; verder
+// spoorlijnen met treinen, hoogspanningslijnen, containerhavens met kranen, een vliegveld bij elke hoofdstad en
+// brandstofdepots met pijpleidingen. Alles komt trapsgewijs op bij het inzoomen (zie DREMPEL).
+// voorbereid(view) zet station, vliegveld, havens, depots, spoor en leidingen neer, op elke zoom en zonder wegen: het
+// wegennet bouwt daarop verder. Wat van het net afhangt (wegdek, bruggen, overwegen) volgt daarna uit net.versie.
+// Eén klok: alles wat rijdt of schakelt (treinen, lichten, slagbomen, kranen, vliegtuigen) loopt op u = verkeersTijd(nu)
+// en is periodiek in de dag van 180 s; er is geen eigen klok die op pauze stilstaat.
 // Puur decor: deze laag leest de toestand en schrijft er nooit in. Waar iets ligt volgt uit de kaart, de gebouwen
-// en vaste hashes van tegel en volgnummer; de klok stuurt alleen beweging. Geen Math.random, geen Date.
+// en vaste hashes van tegel en volgnummer. Geen Math.random, geen Date.
 // Licht uit het noordwesten zoals de andere lagen: schaduwen vallen naar het zuidoosten, hoge dingen (masten,
 // kranen, palen) staan schuin omhoog getekend zoals de gebouwen in detail.js.
 
 import { seizoen, weer, wind } from './seizoen.js';
+import { Wegennet, KLASSE, KNOOP as NK, PROFIEL, ROTONDE_STRAAL, H as DAG, verkeersTijd, lichtStand as netLicht } from './wegennet.js';
 
 // ---------- gedeelde hulpjes (eigen kopie, zie inzoom-spec §0) ----------
 
@@ -16,8 +22,13 @@ const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 const frac = (v) => v - Math.floor(v);
 const tri = (v) => 1 - Math.abs(1 - 2 * frac(v));
 const TAU = Math.PI * 2;
+// Periode die de dag (180 s) precies deelt, zo dicht mogelijk bij p: wat erop loopt, is na een dag weer gelijk.
+const pd = (p) => DAG / Math.max(1, Math.round(DAG / p));
 const SCHUIN = 0.566; // schaduwlengte per hoogte-eenheid, zon op ~45° in het noordwesten (0.8 · √½)
 const COS06 = Math.cos(0.6), SIN06 = Math.sin(0.6); // draaiing van de boomschaduw
+// Knoopsoort van een gewone kruising met voorrang: KNOOP.KRUIS uit het bevroren contract van wegennet.js (infratest
+// controleert dat het 0 blijft). Eigen naam, zodat het losse woord nergens in de tekencode staat (kusttest).
+const KRUISING = 0;
 
 // Reeks pseudo-random getallen uit één zaad (mulberry32, dezelfde als in detail.js en leven.js).
 function rnd(seed) {
@@ -39,27 +50,20 @@ export function zetCanvasFabriek(fn) { fabriek = fn ?? standaardFabriek; }
 // ---------- vaste waarden ----------
 
 // Harde plafonds per beeld: een drukke wereld mag nooit de framerate opeten.
-export const PLAFOND = { sporen: 60, treinen: 24, wagons: 160, masten: 240, lantaarns: 260, haltes: 16, borden: 120, bomen: 220, verkeerslichten: 80, kruisingen: 40, vliegtuigen: 16, kranen: 24, lichten: 600, bakken: 2, bruggen: 40, voetbruggen: 16, tunnels: 16, viaducten: 16, wegwerk: 8, hekjes: 160, wegwerkers: 16 };
+export const PLAFOND = { sporen: 60, treinen: 24, wagons: 160, masten: 240, lantaarns: 260, haltes: 16, borden: 120, bomen: 220, verkeerslichten: 80, kruisingen: 40, vliegtuigen: 16, kranen: 24, lichten: 600, bakken: 2, bruggen: 40, voetbruggen: 16, tunnels: 16, viaducten: 16, wegwerk: 8, hekjes: 160, wegwerkers: 16, kopperrons: 16, reizigers: 80 };
 // Vanaf welke zoom iets verschijnt (de kaart wordt 'diep' op zoom 4). Andere lagen mogen dit lezen.
-export const DREMPEL = { spoor: 4, kades: 4, vliegveld: 4, hoogspanning: 4.5, pijp: 4.5, tunnel: 4.5, brugtype: 5, dwarsliggers: 5.5, stoeprand: 5.5, voetbrug: 6.5, markering: 8, lantaarn: 8, zebra: 8, bovenleiding: 8, halte: 9, overweg: 9, verkeerslicht: 11, bord: 11, sein: 11, klein: 13 };
+export const DREMPEL = { spoor: 4, kades: 4, vliegveld: 4, hoogspanning: 4.5, pijp: 4.5, tunnel: 4.5, brugtype: 5, dwarsliggers: 5.5, stoeprand: 5.5, voetbrug: 6.5, markering: 8, lantaarn: 7, zebra: 7, bovenleiding: 8, halte: 9, overweg: 9, verkeerslicht: 9.5, bord: 11, sein: 11, klein: 13, wegdek: 3.6 };
 const MAX_SPRITES = 40, MAX_BYTES = 48 * 1024 * 1024, MAX_P = 640, MAX_KLEIN = 400;
 
-// Verkeerslichten: periode (ms) en waar groen en oranje ophouden, als deel van de periode; de rest is rood, met aan
-// het eind een kort moment waarop alles rood is. stad.js rekent zijn voetgangerslichten met dezelfde periodes en
-// fasen (14000 bij de stadsingang met hash(zaad, kant, 7), 16000 op het kruispunt met hash(zaad, 3); arm B een halve
-// periode later) en geeft voetgangers alleen groen binnen het rood van de auto's.
-export const CYCLUS = { ingang: [14000, 0.45, 0.52], kruispunt: [16000, 0.4, 0.47] };
-// Zebra zonder licht op een T-splitsing: af en toe steekt iemand over; dan wacht het verkeer (groen tot ZEBRA_VRIJ).
-const ZEBRA_VRIJ = 0.84;
-// Stand van een licht bij fase f (0..1): 2 groen, 1 oranje, 0 rood.
-export function lichtStand(f, groen, oranje) { return f < groen ? 2 : f < oranje ? 1 : 0; }
-// Stopplekken langs een weg, voor leven.js (w.stops, STOP getallen per stop): afstand vanaf A tot de stopstreep
-// (wereld; daar staat de neus van de voorste auto), richting (+1 rijdt naar B), periode (ms), fase (0..1), groen,
-// oranje, soort (0 stadsingang, 1 kruispunt, 2 zebra). Oversteekplekken (w.zebras, ZEBRA getallen): afstand vanaf A,
-// periode, fase en het venster waarin voetgangers lopen.
+// Verkeerslichten: de stand komt uit het wegennet (lichtStand van wegennet.js, op u); hier alleen doorgegeven, zodat
+// andere lagen en tests hem ook uit infra.js kunnen halen.
+export const lichtStand = netLicht;
+// Oude stopplekken voor leven.js (w.stops, STOP getallen per stop; w.zebras, ZEBRA getallen). Het net heeft ze niet
+// meer: de ritten (ritten.js) rekenen met de lichten en zebra's van het net zelf.
 export const STOP = 7, ZEBRA = 5;
-// Wegwerkzaamheden: per 24 speldagen ligt op een paar wegvakken één rijstrook open (zie werkOp).
-const WERK_DAGEN = 24, WERK_KANS = 0.18; // kans per kandidaat-vak
+// Overweg: de slagboom zakt in BOOM_TIJD s voor het dichte venster en gaat er in BOOM_TIJD s na weer omhoog; de lampen
+// knipperen vanaf KNIPPER_VOOR s voor het venster. Een venster dekt elke treinpassage met VENSTER_MARGE s marge.
+const BOOM_TIJD = 1.5, KNIPPER_VOOR = 3, VENSTER_MARGE = 2.2;
 
 // Brugsoorten. De breedte van het water kiest de soort: stenen bogen over een beek, staal of beton over een brede
 // rivier, tuien of een hangbrug over de breedste monding en over zee; het spoor krijgt eigen vormen.
@@ -130,9 +134,14 @@ function bakVliegveld(g, v, b) {
   // maaibanen evenwijdig aan de baan
   for (let i = 0; i < 10; i++) { g.fillStyle = i & 1 ? 'rgba(255,255,240,0.06)' : 'rgba(0,0,0,0.05)'; g.fillRect(-1, -0.5 + i * 0.1, 2, 0.1); }
   // sneeuw in plekken (geen witte vlakte); de banen zelf zijn geveegd en komen er later overheen
+  // sneeuw als een gelijkmatig waas over het gras (geen losse ovalen); de banen zelf zijn geveegd en komen er later
+  // overheen, langs de randen ligt hij wat dikker
   if (b.sn) {
-    g.fillStyle = b.sn === 2 ? 'rgba(238,241,244,0.78)' : 'rgba(238,241,244,0.5)';
-    for (let i = 0; i < 22 * b.sn; i++) { g.beginPath(); g.ellipse(-1 + r() * 2, -0.5 + r(), 0.05 + r() * 0.13, 0.025 + r() * 0.06, r() * 3, 0, TAU); g.fill(); }
+    g.fillStyle = b.sn === 2 ? 'rgba(238,241,244,0.72)' : 'rgba(238,241,244,0.4)';
+    g.fillRect(-1, -0.5, 2, 1);
+    const gr = g.createLinearGradient(0, -0.5, 0, 0.5);
+    gr.addColorStop(0, 'rgba(244,246,248,0.25)'); gr.addColorStop(0.5, 'rgba(244,246,248,0)'); gr.addColorStop(1, 'rgba(244,246,248,0.25)');
+    g.fillStyle = gr; g.fillRect(-1, -0.5, 2, 1);
   }
   g.strokeStyle = 'rgba(55,58,56,0.75)'; g.lineWidth = 0.004; g.setLineDash([0.014, 0.006]);
   g.strokeRect(-0.98, -0.48, 1.96, 0.96); g.setLineDash([]);
@@ -270,7 +279,8 @@ function bakHaven(g, h, b) {
   // kadeterrein: beton met voegen, kraanbaan, belijning
   g.fillStyle = 'rgba(0,0,0,0.2)'; g.fillRect(-0.45 + sx * 0.01, y0 + sy * 0.01, 0.9, 0.42);
   g.fillStyle = '#9d998f'; g.fillRect(-0.45, y0, 0.9, 0.42);
-  if (b.sn) { g.fillStyle = b.sn === 2 ? 'rgba(236,239,242,0.55)' : 'rgba(236,239,242,0.3)'; for (let i = 0; i < 10 * b.sn; i++) { g.beginPath(); g.ellipse(-0.45 + r() * 0.9, y0 + r() * 0.36, 0.04 + r() * 0.06, 0.02 + r() * 0.03, 0, 0, TAU); g.fill(); } }
+  // sneeuw: een gelijkmatig waas over het terrein, de rijstroken zijn geveegd
+  if (b.sn) { g.fillStyle = b.sn === 2 ? 'rgba(236,239,242,0.5)' : 'rgba(236,239,242,0.28)'; g.fillRect(-0.45, y0, 0.9, 0.42); }
   if (fijn) {
     g.strokeStyle = 'rgba(60,58,52,0.2)'; g.lineWidth = 0.0015; g.beginPath();
     for (let x = -0.45; x < 0.45; x += 0.05) { g.moveTo(x, y0); g.lineTo(x, dq); }
@@ -443,11 +453,16 @@ function bakGloed(cv, [r, g, b]) {
 
 export class InfraLaag {
   constructor() {
-    // Eigen klok zoals de levenslaag: loopt alleen als het spel loopt, staat stil op pauze.
-    this.klok = 0;
+    this.u = 0; // verkeerstijd van dit beeld (s, 0..180): de enige klok voor alles wat rijdt of schakelt
+    this.nu = 0;
+    this.tekentWegdek = true; // dit is de laag die het wegdek van het net tekent (map.js tekent dan geen eenvoudig asfalt)
+    this.net = null; // het wegennet waar wegen, bruggen en overwegen op liggen
+    this.eigenNet = null; // alleen voor een kaartbeeld zonder wegennet (tests): een eigen net
+    this.vzSig = ''; // handtekening van de voorzieningen (station, haven, vliegveld, depot, spoor)
+    this.netSleutel = '';
     this.state = null;
     this.geo = null;
-    this.sig = '';
+    this.sig = ''; // voor andere lagen: verandert als voorzieningen of net veranderen
     this.landSig = [];
     this.wegen = [];
     this.kruisingen = [];
@@ -480,8 +495,9 @@ export class InfraLaag {
   }
 
   nul() {
-    this.n = { sporen: 0, treinen: 0, wagons: 0, masten: 0, lantaarns: 0, haltes: 0, borden: 0, verkeerslichten: 0, kruisingen: 0, vliegtuigen: 0, kranen: 0, lichten: 0, bomen: 0, bruggen: 0, voetbruggen: 0, tunnels: 0, viaducten: 0, wegwerk: 0, hekjes: 0, wegwerkers: 0, spiegels: 0, sporenSneeuw: 0 };
+    this.n = { sporen: 0, treinen: 0, wagons: 0, masten: 0, lantaarns: 0, haltes: 0, borden: 0, verkeerslichten: 0, kruisingen: 0, vliegtuigen: 0, kranen: 0, lichten: 0, bomen: 0, bruggen: 0, voetbruggen: 0, tunnels: 0, viaducten: 0, wegwerk: 0, hekjes: 0, wegwerkers: 0, spiegels: 0, sporenSneeuw: 0, kopperrons: 0, reizigers: 0 };
     this.nLicht = 0; this.nLucht = 0; this.nZw = 0; this.nZr = 0;
+    (this.lampen ??= []).length = 0;
   }
 
   // Na het laden van een spel: alles opnieuw afleiden.
@@ -490,10 +506,9 @@ export class InfraLaag {
     this.geo = view.geo;
     this.eigenaar = view.eigenaar;
     this.terrein = view.terreinLaag ?? null;
-    this.sig = '';
+    this.sig = ''; this.vzSig = ''; this.netSleutel = '';
     this.landSig = [];
     this.perLand = [];
-    this.vorig = [];
     const n = this.geo.tegels.length;
     this.res = new Uint8Array(n);
     this.resLand = new Int16Array(n).fill(-1);
@@ -514,6 +529,13 @@ export class InfraLaag {
     const px = Math.floor(x), py = Math.floor(y);
     if (px < 0 || py < 0 || px >= 1000 || py >= 620) return true;
     return e[py * 1000 + px] === -1;
+  }
+
+  // Water zoals het wegennet het ziet (zee, of rivier en meer uit de terreinlaag): daar komt geen baan en geen poort.
+  natOp(x, y) {
+    if (this.isWater(x, y)) return true;
+    const tl = this.terrein;
+    return !!(tl && tl.basis && tl.isZoetWater(x, y));
   }
 
   // Soort water op een punt: 0 droog, 1 zee, 2 rivier, 3 meer. Rivieren en meren komen uit de terreinlaag; zonder
@@ -684,10 +706,23 @@ export class InfraLaag {
     return this.res[Math.floor(wy / Tw) * this.geo.kol + Math.floor(wx / Tw)] ?? 0;
   }
 
-  // ---------- het netwerk afleiden (alleen als er iets verandert) ----------
+  // ---------- de voorzieningen en het net afleiden (alleen als er iets verandert) ----------
+
+  // Vóór het wegennet en op elke zoom: station, vliegveld, havens, depots, spoorlijnen, hoogspanning, pijpleidingen en
+  // de gereserveerde tegels (res, resLand). Daarna wat van het net afhangt (wegen, bruggen, tunnels, overwegen), zodra
+  // er een nieuwe versie van het net is. Heeft het kaartbeeld geen wegennet (tests), dan bouwt deze laag er zelf een.
+  voorbereid(view) {
+    const s = view.state;
+    if (!s || !view.geo) return;
+    if (this.state !== s || this.geo !== view.geo || this.eigenaar !== view.eigenaar) this.laad(view);
+    if (this.terrein !== (view.terreinLaag ?? null)) { this.terrein = view.terreinLaag ?? null; this.vzSig = ''; this.landSig = []; }
+    this.werkCache(view);
+    this.volgNet(view);
+  }
 
   werkCache(view) {
     const s = this.state;
+    if (!s) return;
     let nP = 0, somT = 0;
     for (let i = 0; i < s.landen.length; i++) {
       const l = s.landen[i];
@@ -697,21 +732,26 @@ export class InfraLaag {
     }
     // zodra de terreinlaag zijn rivieren heeft, komen er bruggen over rivieren en meren bij
     const zoet = this.terrein?.basis ? 1 : 0;
-    const sig = `${s.grensVersie}|${nP}|${somT}|${s.landen.length}|${zoet}`;
-    if (sig === this.sig) return;
-    this.sig = sig;
-    this.bouwSoorten();
-    this.bouwWegen(view);
-    // Per land alleen opnieuw rekenen als dat land zelf iets bouwde (padzoeken is het duurste deel).
-    for (const land of s.landen) {
-      let t = 0;
-      for (const p of land.plaatsingen) t = (t * 31 + p.t + 7) | 0;
-      for (const b of land.bouw) t = (t * 17 + b.tegel + 3) | 0;
-      const ls = `${s.grensVersie}|${land.plaatsingen.length}|${land.bouw.length}|${t}|${s.landen.length}|${zoet}`;
-      if (this.landSig[land.idx] === ls && this.perLand[land.idx]) continue;
-      this.landSig[land.idx] = ls;
-      this.perLand[land.idx] = this.bouwLand(view, land);
+    // de eigenaars per tegel veranderen alleen bij een dagstap of een grenswijziging: niet elk beeld opnieuw hashen
+    if (this.eigDag !== s.dag || this.eigGv !== s.grensVersie || this.eigS !== s) {
+      let h = 0;
+      for (let t = 0; t < s.eigenaar.length; t++) h = (Math.imul(h, 31) + (s.eigenaar[t] ?? -1) + 2) | 0;
+      this.eigHash = h; this.eigDag = s.dag; this.eigGv = s.grensVersie; this.eigS = s;
     }
+    const eig = this.eigHash;
+    // eerst de getallen vergelijken (elk beeld), pas bij een verschil de tekst maken
+    const v = this.vzGetal ??= [];
+    if (v[0] === s.grensVersie && v[1] === nP && v[2] === somT && v[3] === s.landen.length && v[4] === zoet && v[5] === eig && this.vzSig) return;
+    v[0] = s.grensVersie; v[1] = nP; v[2] = somT; v[3] = s.landen.length; v[4] = zoet; v[5] = eig;
+    const sig = `${s.grensVersie}|${nP}|${somT}|${s.landen.length}|${zoet}|${eig}`;
+    if (sig === this.vzSig) return;
+    this.vzSig = sig;
+    this.bouwSoorten();
+    // Elk land rekent puur uit de toestand: geen herinnering aan de vorige plek, zodat laden en doorspelen hetzelfde
+    // geven.
+    // de reserveringen hangen van elkaar af (vrije tegels): alles in vaste volgorde opnieuw
+    this.res.fill(0); this.resLand.fill(-1);
+    for (const land of s.landen) this.perLand[land.idx] = this.bouwLand(view, land);
     const pl = this.perLand.filter(Boolean);
     this.routes = pl.flatMap((x) => x.routes);
     this.stations = pl.flatMap((x) => x.stations);
@@ -720,13 +760,40 @@ export class InfraLaag {
     this.depots = pl.flatMap((x) => x.depots);
     this.lijnen = pl.flatMap((x) => x.lijnen);
     this.pijpen = pl.flatMap((x) => x.pijpen);
-    this.bouwOverwegen();
-    this.bouwVoetbruggen();
-    this.bouwVlakken();
-    this.bouwStops();
+    this.netSleutel = '';
     // De bitmapcache blijft staan: de sleutels beschrijven de bitmap volledig (tegel, stand, seizoen, maat), dus een
     // nieuw gebouw ergens in de wereld hoeft niet alles opnieuw te laten bakken. Wat niet meer gebruikt wordt, valt
     // vanzelf uit de LRU.
+  }
+
+  // Het wegennet van dit kaartbeeld, of null zolang het nog gebouwd wordt.
+  netVan(view) {
+    const n = view.wegennet;
+    if (n) return n.klaar ? n : null;
+    if (!view.geo || !view.state) return null;
+    // geen wegennet in het kaartbeeld (een test): een eigen net op dezelfde toestand
+    const eigen = (this.eigenNet ??= new Wegennet());
+    if (eigen.geo !== view.geo) eigen.laad(view);
+    const tv = { geo: view.geo, state: view.state, eigenaar: view.eigenaar, terreinLaag: view.terreinLaag, infraLaag: this };
+    eigen.werk(tv, Infinity);
+    return eigen.klaar ? eigen : null;
+  }
+
+  // Wat van het net afhangt: de wegen (rechte stukken met bruggen en tunnels), de overwegen met hun dichte vensters,
+  // de voetbruggen en de brugvlakken. Alleen opnieuw als het net of de voorzieningen veranderen.
+  volgNet(view) {
+    const net = this.netVan(view);
+    if (this.vnVz === this.vzSig && this.vnNet === net && this.vnVersie === (net ? net.versie : -1) && this.netSleutel) return;
+    this.vnVz = this.vzSig; this.vnNet = net; this.vnVersie = net ? net.versie : -1;
+    const sleutel = `${this.vzSig}|${net ? net.versie : '-'}|${net === this.eigenNet ? 'e' : 'k'}`;
+    if (sleutel === this.netSleutel) return;
+    this.netSleutel = sleutel;
+    this.net = net;
+    this.bouwNetWegen(net);
+    this.bouwOverwegen();
+    this.bouwVoetbruggen();
+    this.bouwVlakken();
+    this.sig = sleutel;
   }
 
   bouwSoorten() {
@@ -745,29 +812,33 @@ export class InfraLaag {
     for (const land of s.landen) { const h = geo.hoofdstad[land.idx]; if (h != null && h >= 0) this.soort[h] = HOOFD; }
   }
 
-  // Wegen: precies de lijnen van tekenWegen in map.js (gebouw naar knooppunt), met het stuk buiten beide gebouwen.
-  bouwWegen(view) {
-    const s = this.state, geo = this.geo, Tw = geo.T;
+  // Wegen voor deze laag en voor de oude lezers (hemel, kust, werk, stad): de rechte stukken van net.wegen(), elk met
+  // zijn brug (tak over water: tBouw 1 of 2) of tunnel (tBouw 3). Per tak ook waar hij begint en eindigt, voor de
+  // tunnelmonden en het straatmeubilair (niet op het kruisvlak).
+  bouwNetWegen(net) {
     const W = [];
-    for (const land of s.landen) {
-      for (const p of land.plaatsingen) {
-        if (p.t < 0) continue;
-        const nb = view.knooppuntVoor(land, p.t);
-        if (nb < 0) continue;
-        const A = geo.tegels[p.t], B = geo.tegels[nb];
-        const dx = B.x - A.x, dy = B.y - A.y, len = Math.hypot(dx, dy);
-        if (len < Tw * 0.9) continue;
-        const ux = dx / len, uy = dy / len, d = 0.5 * Tw / Math.max(Math.abs(ux), Math.abs(uy));
-        if (len - 2 * d < 0.15 * Tw) continue;
-        const w = { ax: A.x, ay: A.y, bx: B.x, by: B.y, len, ux, uy, s0: d, s1: len - d, stadA: this.soort[p.t] === STAD, stadB: this.soort[nb] === HOOFD, land: land.idx, zaad: (p.t * 4099 + nb) | 0, brug: null };
-        w.x0 = Math.min(A.x, B.x); w.x1 = Math.max(A.x, B.x); w.y0 = Math.min(A.y, B.y); w.y1 = Math.max(A.y, B.y);
-        // bruggen waar het zichtbare stuk over zee, een rivier of een meer loopt; tunnels en viaducten in de bergen
-        w.brug = this.overspanningen(w, w.s0, w.s1, false);
-        this.profiel(w, w.s0, w.s1);
+    this.takStuk = new Map();
+    if (net) {
+      const lijst = net.wegen(), T = this.geo.T, P = net.punten;
+      for (const w0 of lijst) {
+        const i = w0.tak, bouw = net.tBouw[i];
+        const w = { ...w0, brug: null, tunnel: null, viaduct: null, bouw, kA: -1, kB: -1 };
+        const p0 = net.tP0[i], pl = p0 + net.tNP[i] - 1;
+        const isA = (x, y, p) => Math.abs(P[p * 2] - x) + Math.abs(P[p * 2 + 1] - y) < 1e-3;
+        // ligt een eind van dit stuk op een eind van de tak, dan weten we de knoop daar
+        if (isA(w.ax, w.ay, p0)) w.kA = net.tA[i]; else if (isA(w.ax, w.ay, pl)) w.kA = net.tB[i];
+        if (isA(w.bx, w.by, pl)) w.kB = net.tB[i]; else if (isA(w.bx, w.by, p0)) w.kB = net.tA[i];
+        if (bouw === 1 || bouw === 2) w.brug = this.overspanningen(w, 0, w.len, false);
+        if (bouw === 3) w.tunnel = [0, w.len];
+        const k = W.length;
         W.push(w);
+        const st = this.takStuk.get(i);
+        if (st) st[1] = k; else this.takStuk.set(i, [k, k]);
+        void T;
       }
     }
     this.wegen = W;
+    this.kruisingen = []; // de kruispunten zijn knopen van het net (net.lichten, net.zebras)
     // De breedste rivieroversteken van de wereld (een monding telt zwaarder) krijgen een tuibrug, de allerbreedste
     // een hangbrug.
     const kand = [];
@@ -775,46 +846,35 @@ export class InfraLaag {
     const gewicht = (b) => b.breed + (b.monding ? 1 : 0);
     kand.sort((a, b) => gewicht(b) - gewicht(a) || a.zaad - b.zaad);
     for (let i = 0; i < kand.length && i < 3; i++) kand[i].soort = i === 0 && kand[i].breed >= MONDING ? HANG : TUI;
-    // Kruispunten: waar twee wegen elkaar echt snijden, buiten gebouwen. Om en om een rotonde.
-    const K = [];
-    for (let i = 0; i < W.length && K.length < 200; i++) {
-      const a = W[i];
-      for (let j = i + 1; j < W.length && K.length < 200; j++) {
-        const b = W[j];
-        if (a.x1 < b.x0 || b.x1 < a.x0 || a.y1 < b.y0 || b.y1 < a.y0) continue;
-        const den = a.ux * b.uy - a.uy * b.ux;
-        if (Math.abs(den) < 0.3) continue;
-        const ex = b.ax - a.ax, ey = b.ay - a.ay;
-        const t = (ex * b.uy - ey * b.ux) / den, q = (ex * a.uy - ey * a.ux) / den;
-        if (t < a.s0 + 0.12 * Tw || t > a.s1 - 0.12 * Tw || q < b.s0 + 0.12 * Tw || q > b.s1 - 0.12 * Tw) continue;
-        const x = a.ax + a.ux * t, y = a.ay + a.uy * t;
-        const tg = Math.floor(y / Tw) * geo.kol + Math.floor(x / Tw);
-        if (s.bezet[tg] || this.waterSoort(x, y)) continue;
-        if (K.some((k) => Math.abs(k.x - x) + Math.abs(k.y - y) < 0.4 * Tw)) continue;
-        K.push({ x, y, a: i, b: j, rotonde: hash(tg, 41) < 0.5, zaad: tg });
+    // tunnelmonden: aan elk eind van een tunneltak waar een tak zonder tunnel aansluit
+    const M = [];
+    if (net) for (const [i, [k0, k1]] of this.takStuk) {
+      if (net.tBouw[i] !== 3) continue;
+      for (const [knoop, stuk, eind] of [[net.tA[i], k0, 0], [net.tB[i], k1, 1]]) {
+        let open = false;
+        for (let j = net.adj0[knoop]; j < net.adj0[knoop + 1]; j++) { const g = net.adj[j], t = g >= 0 ? g : ~g; if (t !== i && net.tBouw[t] !== 3) open = true; }
+        if (!open) continue;
+        const w = W[stuk];
+        // de mond ligt aan het eind van het stuk dat bij deze knoop hoort
+        const opA = w.kA === knoop;
+        M.push({ w: stuk, q: opA ? 0 : w.len, rich: opA ? 1 : -1, x: opA ? w.ax : w.bx, y: opA ? w.ay : w.by });
+        void eind;
       }
     }
-    // Wegen zijn kort en ontmoeten elkaar meestal in een gebouw; daarom halverwege langere wegen een
-    // T-kruising met een zijweggetje naar het land (een erf, een dorpsstraatje).
-    const tegel = (x, y) => Math.floor(y / Tw) * geo.kol + Math.floor(x / Tw);
-    for (let i = 0; i < W.length && K.length < 260; i++) {
-      const w = W[i];
-      if (w.s1 - w.s0 < 0.95 * Tw || hash(w.zaad, 61) > 0.75) continue;
-      const voorkeur = hash(w.zaad, 62) < 0.5 ? 1 : -1;
-      // zoek langs de weg een plek naast vrij land, eerst aan de voorkeurskant
-      zoek: for (const f of [0.5, 0.3, 0.7, 0.2, 0.8]) {
-        const q = w.s0 + (w.s1 - w.s0) * f, x = w.ax + w.ux * q, y = w.ay + w.uy * q;
-        if (s.bezet[tegel(x, y)] || this.waterSoort(x, y) || this.inTunnel(w, q)) continue;
-        for (const kant of [voorkeur, -voorkeur]) {
-          const ex = x - w.uy * kant * 0.42 * Tw, ey = y + w.ux * kant * 0.42 * Tw, tg = tegel(ex, ey);
-          if (s.bezet[tg] || this.waterSoort(ex, ey) || this.waterSoort((x + ex) / 2, (y + ey) / 2)) continue;
-          if (K.some((k) => Math.abs(k.x - x) + Math.abs(k.y - y) < 0.5 * Tw)) continue;
-          K.push({ x, y, a: i, b: i, rotonde: false, zij: kant, tg, zaad: (w.zaad * 3 + 1) | 0 });
-          break zoek;
-        }
+    this.monden = M;
+    // Een tunneltak tussen de gebouwen (het stadsrooster op een bergvakje) ligt niet in de berg maar in een bak met
+    // een dak: daar tekent tekenWegdek een betonnen overkapping in plaats van kaal terrein tussen de kavels.
+    const dak = (this.dakTak = new Uint8Array(net ? net.nT : 0));
+    if (net) {
+      const o = {}, T = this.geo.T, s = this.state, kol = this.geo.kol, rij = this.geo.rij;
+      const bebouwd = (x, y) => { const k = Math.floor(x / T), r = Math.floor(y / T); if (k < 0 || r < 0 || k >= kol || r >= rij) return false; const t = r * kol + k; return !!s.bezet[t] || !!this.res[t]; };
+      for (let i = 0; i < net.nT; i++) {
+        if (net.tBouw[i] !== 3 || net.tKlasse[i] === KLASSE.OPRIT) continue;
+        net.puntIn(net.D, i, net.tLen[i] / 2, o);
+        const nx = -Math.sin(o.hoek) * 0.3 * T, ny = Math.cos(o.hoek) * 0.3 * T;
+        if (bebouwd(o.x + nx, o.y + ny) || bebouwd(o.x - nx, o.y - ny)) dak[i] = 1;
       }
     }
-    this.kruisingen = K;
   }
 
   vrij(t, land) {
@@ -824,7 +884,8 @@ export class InfraLaag {
 
   reserveer(t, soort, land) { this.res[t] = soort; this.resLand[t] = land; }
 
-  // Station, vliegveld, havens, depot, spoorlijnen, hoogspanning en pijpleidingen van één land.
+  // Station, vliegveld, havens, depot, spoorlijnen, hoogspanning en pijpleidingen van één land. Alles volgt uit de
+  // toestand van nu (geen geschiedenis): dezelfde toestand geeft altijd dezelfde plekken.
   bouwLand(view, land) {
     const s = this.state, geo = this.geo, Tw = geo.T, kol = geo.kol, rij = geo.rij, L = land.idx;
     for (let t = 0; t < this.res.length; t++) if (this.resLand[t] === L) { this.res[t] = 0; this.resLand[t] = -1; }
@@ -843,27 +904,17 @@ export class InfraLaag {
       }
     };
     const terreinKost = (t) => { const x = geo.tegels[t].terrein; return x === 'vlakte' ? 0 : x === 'kust' ? 0.4 : x === 'bos' ? 1.2 : 5; };
-    // Wat dit land de vorige keer kreeg, blijft liggen zolang de plek nog vrij is: bouwt het land ergens anders iets,
-    // dan springen station, vliegveld, haven en depot niet naar een andere tegel.
-    const vorig = this.vorig[L] ?? null;
 
     // 1. station zo dicht mogelijk bij de hoofdstad (in een volgebouwde stad aan de rand)
     let st = -1, best = Infinity;
-    if (vorig && vorig.st >= 0 && this.vrij(vorig.st, L) && cheb(vorig.st, h) <= 3) st = vorig.st;
     for (let d = 1; d <= 3 && st < 0; d++) buren(h, d, (t) => { if (!this.vrij(t, L)) return; const k = cheb(t, h) * 2 + terreinKost(t) + hash(t, 11) * 0.5; if (k < best) { best = k; st = t; } });
     if (st >= 0) this.reserveer(st, 1, L);
 
-    // 2. vliegveld: twee vrije, vlakke tegels op twee tot zes tegels van de hoofdstad, zonder eigen wegen erdoor
-    const eigenWegen = this.wegen.filter((w) => w.land === L);
-    const doorsnijdt = (x0, y0, x1, y1) => {
-      let n = 0;
-      for (const w of eigenWegen) {
-        if (w.x1 < x0 || w.x0 > x1 || w.y1 < y0 || w.y0 > y1) continue;
-        // steekproef langs de weg
-        for (let q = w.s0; q < w.s1; q += 3) { const x = w.ax + w.ux * q, y = w.ay + w.uy * q; if (x > x0 && x < x1 && y > y0 && y < y1) { n++; break; } }
-      }
-      return n;
-    };
+    // 2. vliegveld: twee vrije, vlakke tegels op twee tot zes tegels van de hoofdstad. Het wegennet rijdt om
+    // gereserveerde tegels heen, dus er loopt nooit een weg over de baan. Geen wegtoets, wel water: de baan ligt
+    // niet in een meer of rivier, en de eerste tegel (daar zet het net de poort) heeft een droge halve rand aan een
+    // van zijn drie buitenzijden, anders kan er geen weg naar de poort.
+    const halfDroog = (ax, ay, bx, by) => { for (let i = 0; i <= 10; i++) if (this.natOp(ax + (bx - ax) * i / 10, ay + (by - ay) * i / 10)) return false; return true; };
     const vvKandidaat = (a, staand) => {
       if (cheb(a, h) < 2 || cheb(a, h) > 6 || !this.vrij(a, L) || geo.tegels[a].terrein === 'berg') return null;
       const A = geo.tegels[a], b = staand ? a + kol : a + 1;
@@ -871,42 +922,58 @@ export class InfraLaag {
       if (!this.vrij(b, L) || geo.tegels[b].terrein === 'berg') return null;
       const B = geo.tegels[b];
       const mx = (A.x + B.x) / 2, my = (A.y + B.y) / 2;
-      const half = Tw * 0.5, x0 = Math.min(A.x, B.x) - half, x1 = Math.max(A.x, B.x) + half, y0 = Math.min(A.y, B.y) - half, y1 = Math.max(A.y, B.y) + half;
-      const d = Math.hypot(mx - H.x, my - H.y) / Tw, kruist = doorsnijdt(x0, y0, x1, y1);
-      return { a, b, staand, mx, my, kruist, k: Math.abs(d - 3.5) * 0.6 + terreinKost(a) + terreinKost(b) + kruist * 3 + hash(a, 13, staand) * 0.4 };
+      // de hele baan op het droge (ook geen meer of rivier)
+      const ux = staand ? 0 : 1, uy = staand ? 1 : 0;
+      for (let q = -0.95; q <= 0.95; q += 0.1) for (const w of [-0.45, 0, 0.45]) if (this.natOp(mx + (ux * q - uy * w) * Tw, my + (uy * q + ux * w) * Tw)) return null;
+      // een droge halve rand aan een buitenzijde van tegel a (N, O, Z, W; niet de zijde naar b)
+      const x0 = A.k * Tw, y0 = A.r * Tw, x1 = x0 + Tw, y1 = y0 + Tw, xm = x0 + Tw / 2, ym = y0 + Tw / 2;
+      const zijden = [[x0, y0, xm, y0, x1, y0], [x1, y0, x1, ym, x1, y1], [x0, y1, xm, y1, x1, y1], [x0, y0, x0, ym, x0, y1]];
+      let poort = false;
+      for (let z = 0; z < 4 && !poort; z++) {
+        if ((staand && z === 2) || (!staand && z === 1)) continue;
+        const [p0, q0, p1, q1, p2, q2] = zijden[z];
+        if (halfDroog(p0, q0, p1, q1) || halfDroog(p1, q1, p2, q2)) poort = true;
+      }
+      if (!poort) return null;
+      const d = Math.hypot(mx - H.x, my - H.y) / Tw;
+      return { a, b, staand, mx, my, k: Math.abs(d - 3.5) * 0.6 + terreinKost(a) + terreinKost(b) + hash(a, 13, staand) * 0.4 };
     };
     let vv = null; best = Infinity;
-    // het vorige vliegveld houden, tenzij er sindsdien een eigen weg dwars overheen is gekomen
-    const oudVv = vorig?.vv ? vvKandidaat(vorig.vv.a, vorig.vv.staand) : null;
-    if (oudVv && oudVv.kruist <= vorig.vv.kruist) vv = oudVv;
-    else buren(h, 6, (a) => { for (const staand of [0, 1]) { const k = vvKandidaat(a, staand); if (k && k.k < best) { best = k.k; vv = k; } } });
+    buren(h, 6, (a) => { for (const staand of [0, 1]) { const k = vvKandidaat(a, staand); if (k && k.k < best) { best = k.k; vv = k; } } });
     if (vv) {
       this.reserveer(vv.a, 2, L); this.reserveer(vv.b, 2, L);
       const zaad = (vv.a * 131 + 7) | 0;
       uit.vliegvelden.push({ a: vv.a, b: vv.b, staand: vv.staand, mx: vv.mx, my: vv.my, hoek: vv.staand ? Math.PI / 2 : 0, land: L, zaad, standen: [-0.42, -0.2, 0.02, 0.24], zak: [0.6, -0.36], liv: Math.floor(hash(zaad, 3) * LIVREI.length) });
     }
 
-    // 3. containerhavens: bij een kusthoofdstad en naast elke eigen haven, op een vrije tegel aan het water
-    const waterVan = (t) => {
-      let vx = 0, vy = 0, n = 0;
-      buren(t, 1, (u, dk, dr) => { if (geo.tegels[u].terrein === 'water') { const w = dk && dr ? 0.5 : 1; vx += dk * w; vy += dr * w; n++; } });
-      return n ? [vx, vy] : null;
-    };
-    const havenOp = (t) => {
-      const d = waterVan(t);
-      if (!d) return;
+    // 3. containerhavens: alleen waar echt zee ligt. Vanuit het tegelmidden zoeken we langs zestien richtingen de
+    // eerste zee; daar komt de kade, met droog land erachter en water ervoor over de hele kadelengte. Lukt dat
+    // nergens, dan komt er geen terminal (vroeger viel hij terug op een kade midden in het gras).
+    const havenPlek = (t) => {
       const T0 = geo.tegels[t];
-      let [vx, vy] = d;
-      const l = Math.hypot(vx, vy);
-      if (l < 0.01) return;
-      vx /= l; vy /= l;
-      // afstand van het tegelmidden tot het water langs de waterrichting: daar ligt de kade
-      let dq = 0.45;
-      for (let q = 0.05; q <= 0.6; q += 0.025) if (this.isWater(T0.x + vx * q * Tw, T0.y + vy * q * Tw)) { dq = q - 0.01; break; }
-      dq = clamp(dq, 0.08, 0.45);
-      const hoek = Math.atan2(vy, vx) - Math.PI / 2;
-      const co = Math.cos(hoek), si = Math.sin(hoek);
-      const opWater = (u, v) => this.isWater(T0.x + (u * co - v * si) * Tw, T0.y + (u * si + v * co) * Tw);
+      if (!T0 || T0.terrein === 'water') return null;
+      let beste = null;
+      for (let i = 0; i < 16; i++) {
+        const a = (i / 16) * TAU, vx = Math.cos(a), vy = Math.sin(a);
+        let dq = -1;
+        for (let q = 0.06; q <= 0.6; q += 0.02) if (this.isWater(T0.x + vx * q * Tw, T0.y + vy * q * Tw)) { dq = q - 0.01; break; }
+        if (dq < 0.12) continue;
+        const hoek = a - Math.PI / 2, co = Math.cos(hoek), si = Math.sin(hoek);
+        const opWater = (u, v) => this.isWater(T0.x + (u * co - v * si) * Tw, T0.y + (u * si + v * co) * Tw);
+        // kadeterrein (0.42 diep, 0.9 breed) op het droge; voor de kade water over minstens vier van de vijf punten
+        let droog = true;
+        for (const u of [-0.44, -0.22, 0, 0.22, 0.44]) for (const v of [dq - 0.04, dq - 0.2, dq - 0.4]) if (opWater(u, v)) droog = false;
+        if (!droog) continue;
+        let nat = 0;
+        for (const u of [-0.4, -0.2, 0, 0.2, 0.4]) if (opWater(u, dq + 0.05) && opWater(u, dq + 0.1)) nat++;
+        if (nat < 4 || !opWater(0, dq + 0.04)) continue;
+        const k = nat * 2 - dq + hash(t, i, 29) * 0.1;
+        if (!beste || k > beste.k) beste = { k, hoek, dq, opWater };
+      }
+      return beste;
+    };
+    const havenOp = (t, p) => {
+      const { hoek, dq, opWater } = p, T0 = geo.tegels[t];
       const schip = [-0.3, -0.1, 0.1, 0.28].every((u) => opWater(u, dq + 0.05) && opWater(u, dq + 0.11));
       const sleep = [-0.3, -0.1, 0.1, 0.3].every((u) => opWater(u, dq + 0.17) && opWater(u, dq + 0.23));
       // past er geen groot schip, dan ligt er misschien een vissersboot aan de kade
@@ -915,19 +982,20 @@ export class InfraLaag {
       const zaad = (t * 977 + 5) | 0;
       uit.havens.push({ t, x: T0.x, y: T0.y, hoek, dq, schip, sleep, kotter, zaad, romp: hash(zaad, 2) < 0.5 ? '#2b3440' : '#7a2a24', kraan: KRAAN[Math.floor(hash(zaad, 4) * KRAAN.length)], land: L });
     };
-    let kust = -1; best = Infinity;
-    if (vorig && vorig.kust >= 0 && this.vrij(vorig.kust, L) && waterVan(vorig.kust) && cheb(vorig.kust, h) <= 5) kust = vorig.kust;
-    else buren(h, 2, (t) => { if (!this.vrij(t, L) || !waterVan(t)) return; const k = cheb(t, h) + hash(t, 17) * 0.5; if (k < best) { best = k; kust = t; } });
-    if (kust < 0) {
-      // geen plek aan het water bij de hoofdstad: dan een havenstadje verderop aan de eigen kust
-      buren(h, 5, (t) => { if (!this.vrij(t, L) || !waterVan(t)) return; const k = cheb(t, h) + hash(t, 17) * 0.5; if (k < best) { best = k; kust = t; } });
-    }
-    if (kust >= 0) havenOp(kust);
+    const kiesHaven = (rond, d, sl) => {
+      let t0 = -1, p0 = null, bk = Infinity;
+      buren(rond, d, (t) => { if (!this.vrij(t, L)) return; const k = cheb(t, rond) + hash(t, sl) * 0.5; if (k >= bk) return; const p = havenPlek(t); if (p) { bk = k; t0 = t; p0 = p; } });
+      if (t0 >= 0) havenOp(t0, p0);
+      return t0;
+    };
+    // een terminal bij de hoofdstad als die aan zee ligt, anders een havenstadje verderop aan de eigen kust
+    if (kiesHaven(h, 2, 17) < 0) kiesHaven(h, 5, 17);
+    // naast elk eigen havengebouw hooguit één terminal
     for (const p of land.plaatsingen) {
       if (p.t < 0 || this.soort[p.t] !== HAVEN || uit.havens.length >= 3) continue;
-      let t0 = -1; best = Infinity;
-      buren(p.t, 1, (t) => { if (!this.vrij(t, L) || !waterVan(t)) return; const k = hash(t, 19); if (k < best) { best = k; t0 = t; } });
-      if (t0 >= 0) havenOp(t0);
+      let al = false;
+      for (const hv of uit.havens) if (cheb(hv.t, p.t) <= 1) al = true;
+      if (!al) kiesHaven(p.t, 1, 19);
     }
 
     // 4. brandstofdepot naast de eerste haven, anders naast een knooppunt of de hoofdstad; alleen als er centrales zijn
@@ -936,28 +1004,63 @@ export class InfraLaag {
     if (centrales.length) {
       const bij = uit.havens[0]?.t ?? land.plaatsingen.find((p) => p.t >= 0 && this.soort[p.t] === KNOOP)?.t ?? h;
       best = Infinity;
-      if (vorig && vorig.dp >= 0 && vorig.dp !== bij && this.vrij(vorig.dp, L) && cheb(vorig.dp, bij) <= 2) dp = vorig.dp;
-      else buren(bij, 2, (t) => { if (!this.vrij(t, L)) return; const k = cheb(t, bij) + terreinKost(t) * 0.5 + hash(t, 23) * 0.3; if (k < best) { best = k; dp = t; } });
+      buren(bij, 2, (t) => { if (!this.vrij(t, L)) return; const k = cheb(t, bij) + terreinKost(t) * 0.5 + hash(t, 23) * 0.3; if (k < best) { best = k; dp = t; } });
       if (dp >= 0) {
         this.reserveer(dp, 4, L);
         const D = geo.tegels[dp], zaad = (dp * 733 + 9) | 0;
         uit.depots.push({ t: dp, x: D.x, y: D.y, zaad, kleur: hash(zaad, 1) < 0.5 ? '#c9c6be' : '#b9bdc1', land: L });
-        // pijpleidingen naar centrales en olievelden binnen tien tegels (hooguit vier)
+        // pijpleidingen naar centrales en olievelden binnen tien tegels (hooguit vier); niet over zee en niet
+        // dwars door een ander gebouw
         const doelen = centrales.filter((p) => cheb(p.t, dp) <= 10 && cheb(p.t, dp) >= 2).slice(0, 4);
+        // De leiding loopt over vrije landtegels (geen gebouw, bouwplaats of bouwwerk van deze laag, geen water) van
+        // tegelmidden naar tegelmidden, met haakse bochten: de kortste weg in breedte-eerst over de vier buren, hooguit
+        // zestien tegels. Lukt dat niet, dan komt er geen leiding.
+        const vrijT = (t) => !s.bezet[t] && !this.res[t] && this.soort[t] === LEEG && geo.tegels[t].terrein !== 'water';
+        const vorig = new Int32Array(geo.tegels.length);
+        const pad = (a, b) => {
+          vorig.fill(-2);
+          const rij = [a];
+          vorig[a] = -1;
+          for (let k = 0; k < rij.length; k++) {
+            const t = rij[k];
+            if (t === b) break;
+            const tk = t % kol, tr = (t - tk) / kol;
+            for (const [dk, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+              const nk = tk + dk, nr = tr + dr;
+              if (nk < 0 || nr < 0 || nk >= kol || nr >= geo.rij) continue;
+              const n = nr * kol + nk;
+              if (vorig[n] !== -2 || cheb(n, a) > 12) continue;
+              if (n !== b && !vrijT(n)) continue;
+              vorig[n] = t;
+              rij.push(n);
+            }
+          }
+          if (vorig[b] === -2) return null;
+          const uitP = [];
+          for (let t = b; t !== -1; t = vorig[t]) uitP.push(t);
+          return uitP.length <= 17 ? uitP.reverse() : null;
+        };
         for (const p of doelen) {
-          const C = geo.tegels[p.t];
-          const dx = C.x - D.x, dy = C.y - D.y, len = Math.hypot(dx, dy), ux = dx / len, uy = dy / len;
-          const d = 0.48 * Tw / Math.max(Math.abs(ux), Math.abs(uy));
-          // een pijpleiding ligt op het land: een stukje kust mag, een baai of zee oversteken niet
-          let nat = 0, maxNat = 0;
-          for (let q = d; q <= len - d; q += 1) { nat = this.isWater(D.x + ux * q, D.y + uy * q) ? nat + 1 : 0; if (nat > maxNat) maxNat = nat; }
-          if (maxNat > 0.5 * Tw) continue;
-          uit.pijpen.push({ ax: D.x + ux * d, ay: D.y + uy * d, bx: C.x - ux * d, by: C.y - uy * d, ux, uy, olie: !!this.olie[p.t], zaad: (p.t * 31 + dp) | 0 });
+          const P = pad(dp, p.t);
+          if (!P || P.length < 3) continue;
+          const olie = !!this.olie[p.t];
+          // hoekpunten: begin, elke bocht, eind; begin en eind op de rand van depot en centrale
+          const hoeken = [P[0]];
+          for (let k = 1; k + 1 < P.length; k++) if (P[k] - P[k - 1] !== P[k + 1] - P[k]) hoeken.push(P[k]);
+          hoeken.push(P[P.length - 1]);
+          for (let k = 0; k + 1 < hoeken.length; k++) {
+            const A = geo.tegels[hoeken[k]], B = geo.tegels[hoeken[k + 1]];
+            const len = Math.hypot(B.x - A.x, B.y - A.y), ux = (B.x - A.x) / len, uy = (B.y - A.y) / len;
+            const a0 = k === 0 ? 0.48 * Tw : 0, b0 = k + 2 === hoeken.length ? 0.48 * Tw : 0;
+            uit.pijpen.push({ ax: A.x + ux * a0, ay: A.y + uy * a0, bx: B.x - ux * b0, by: B.y - uy * b0, ux, uy, olie, kopA: k === 0, kopB: k + 2 === hoeken.length, zaad: (p.t * 31 + dp + k * 7) | 0 });
+          }
         }
       }
     }
 
-    // 5. spoorlijnen van het station naar de verste steden en industrie (hooguit vier, verspreid gekozen)
+    // 5. spoorlijnen van het station naar de verste steden en industrie (hooguit vier, verspreid gekozen). Spoor
+    // gaat nooit over zee: zeetegels zijn verboden en een lijn die na het afronden toch de zee raakt, zoekt opnieuw
+    // met die tegels erbij verboden; lukt dat niet, dan vervalt hij.
     const start = st >= 0 ? st : h;
     const kand = [];
     for (const p of land.plaatsingen) if (p.t >= 0 && (this.soort[p.t] === STAD || this.soort[p.t] === IND) && cheb(p.t, h) >= 3) kand.push(p.t);
@@ -974,23 +1077,33 @@ export class InfraLaag {
       doelen.push(kand[bi]);
       kand.splice(bi, 1);
     }
-    // de stand van het station (richting van de perrons) blijft ook gelijk zolang het station op dezelfde tegel ligt
-    let as = vorig && st >= 0 && vorig.st === st ? vorig.as : null;
+    let as = null;
     if (doelen.length) {
-      this.dijkstra(start, L);
+      const verboden = new Set();
       let eerste = null;
       for (let di = 0; di < doelen.length; di++) {
-        const pad = [];
-        for (let t = doelen[di]; t >= 0 && pad.length < 400; t = this.prev[t]) pad.push(t);
-        pad.reverse();
-        if (pad[0] !== start || pad.length < 3) continue;
-        let nat = 0, maxNat = 0;
-        for (const t of pad) { nat = geo.tegels[t].terrein === 'water' ? nat + 1 : 0; maxNat = Math.max(maxNat, nat); }
-        if (maxNat > 3) continue;
-        const S = geo.tegels[start], N1 = geo.tegels[pad[1]];
-        if (!as) { const l = Math.hypot(N1.x - S.x, N1.y - S.y) || 1; as = [(N1.x - S.x) / l, (N1.y - S.y) / l]; }
+        let r = null;
+        for (let poging = 0; poging < 4 && !r; poging++) {
+          this.verboden = verboden;
+          this.dijkstra(start, L);
+          this.verboden = null;
+          const pad = [];
+          for (let t = doelen[di]; t >= 0 && pad.length < 400; t = this.prev[t]) pad.push(t);
+          pad.reverse();
+          if (pad[0] !== start || pad.length < 3) break;
+          const S = geo.tegels[start], N1 = geo.tegels[pad[1]];
+          let a = as;
+          if (!a) { const l = Math.hypot(N1.x - S.x, N1.y - S.y) || 1; a = [(N1.x - S.x) / l, (N1.y - S.y) / l]; }
+          const kand2 = this.maakRoute(pad, st >= 0, a, uit.routes.length, L, this.soort[doelen[di]] === IND);
+          const nat = this.zeeTegels(kand2);
+          if (!nat.length) { r = kand2; as = a; break; }
+          let nieuw = 0;
+          for (const t of nat) if (t !== start && t !== doelen[di] && !verboden.has(t)) { verboden.add(t); nieuw++; }
+          if (!nieuw) break;
+        }
+        if (!r) continue;
         eerste ??= as;
-        uit.routes.push(this.maakRoute(pad, st >= 0, as, uit.routes.length, L, this.soort[doelen[di]] === IND));
+        uit.routes.push(r);
       }
       if (st >= 0 && eerste) {
         const S = geo.tegels[st];
@@ -999,7 +1112,6 @@ export class InfraLaag {
     }
     // geen spoorlijn, dan ook geen station: de tegel weer vrijgeven (anders blijft hij leeg en zonder bomen)
     if (st >= 0 && !uit.stations.length) { this.res[st] = 0; this.resLand[st] = -1; }
-    this.vorig[L] = { st, as: uit.stations.length ? as : null, vv: vv ? { a: vv.a, staand: vv.staand, kruist: vv.kruist } : null, kust, dp };
 
     // 6. hoogspanning van elke centrale naar de dichtstbijzijnde stad of de hoofdstad (hooguit zes lijnen)
     const steden = [h, ...land.plaatsingen.filter((p) => p.t >= 0 && this.soort[p.t] === STAD).map((p) => p.t)];
@@ -1028,9 +1140,22 @@ export class InfraLaag {
     return uit;
   }
 
+  // Tegels waar een spoorlijn (na het afronden) de zee raakt, in volgorde langs de lijn.
+  zeeTegels(r) {
+    const Tw = this.geo.T, kol = this.geo.kol, uit = [];
+    for (let i = 0; i + 1 < r.n; i++) for (let q = 0; q < 4; q++) {
+      const x = r.x[i] + (r.x[i + 1] - r.x[i]) * q / 4, y = r.y[i] + (r.y[i + 1] - r.y[i]) * q / 4;
+      if (!this.isWater(x, y)) continue;
+      const t = Math.floor(y / Tw) * kol + Math.floor(x / Tw);
+      if (uit[uit.length - 1] !== t) uit.push(t);
+    }
+    return uit;
+  }
+
   kost(u, land, start) {
     const t = this.geo.tegels[u], s = this.state;
-    let c = t.terrein === 'water' ? 7 : t.terrein === 'berg' ? 3.2 : t.terrein === 'bos' ? 1.5 : 1;
+    if (t.terrein === 'water' || this.verboden?.has(u)) return Infinity;
+    let c = t.terrein === 'berg' ? 3.2 : t.terrein === 'bos' ? 1.5 : t.terrein === 'kust' ? 1.6 : 1;
     if (s.bezet[u]) c += 30;
     if (this.res[u] && this.resLand[u] === land && u !== start) c += 40;
     if (s.eigenaar[u] !== land) c += 3;
@@ -1073,7 +1198,11 @@ export class InfraLaag {
         const k = tk + dk, r = tr + dr;
         if (k < 0 || r < 0 || k >= kol || r >= rij) continue;
         const u = r * kol + k;
-        const nd = D[t] + this.kost(u, land, start) * (dr && dk ? 1.414 : 1);
+        // schuin alleen als beide hoektegels droog zijn (anders snijdt de lijn de zee)
+        if (dr && dk && (geo.tegels[tr * kol + k].terrein === 'water' || geo.tegels[r * kol + tk].terrein === 'water')) continue;
+        const c = this.kost(u, land, start);
+        if (c === Infinity) continue;
+        const nd = D[t] + c * (dr && dk ? 1.414 : 1);
         if (nd < D[u]) { D[u] = nd; PR[u] = t; if (hn < MAXH) push(u, nd); }
       }
     }
@@ -1084,14 +1213,26 @@ export class InfraLaag {
     const geo = this.geo, Tw = geo.T;
     const pts = [];
     const S = geo.tegels[pad[0]];
+    let perron = null;
     if (station) {
       const baan = [-0.15, 0.05, 0.15, -0.05][nr % 4] * Tw, nx = -as[1], ny = as[0];
       const N1 = geo.tegels[pad[1]];
       const sg = (N1.x - S.x) * as[0] + (N1.y - S.y) * as[1] >= 0 ? 1 : -1;
+      // voor de reizigers: het perron naast deze baan (dwars op het spoor, in de richting van de route gemeten) en waar
+      // ze het perron af gaan: aan de kant van het stationsgebouw recht het gebouw in, aan de overkant via de loopbrug
+      const pv = (baan > 0 ? 0.1 : -0.1) * Tw;
+      perron = { dw: sg * (pv - baan), uitDw: pv > 0 ? sg * (0.21 * Tw - baan) : sg * (pv - baan), uitS: pv > 0 ? -1 : (0.42 + 0.3 * sg) * Tw };
       pts.push(S.x - as[0] * 0.42 * Tw * sg + nx * baan, S.y - as[1] * 0.42 * Tw * sg + ny * baan);
       pts.push(S.x + as[0] * 0.48 * Tw * sg + nx * baan, S.y + as[1] * 0.48 * Tw * sg + ny * baan);
     } else pts.push(S.x, S.y);
     for (let i = 1; i < pad.length; i++) { const t = geo.tegels[pad[i]]; pts.push(t.x, t.y); }
+    // aan de verre kant houdt het spoor op aan de rand van het doelgebouw, bij een kopperron met een stootblok (zie
+    // tekenKopperrons): daar staat de trein naast het gebouw en niet eronder
+    {
+      const k = pts.length, ex = pts[k - 2], ey = pts[k - 1], dx = ex - pts[k - 4], dy = ey - pts[k - 3], l = Math.hypot(dx, dy) || 1;
+      const d = (0.4 * Tw) / Math.max(Math.abs(dx / l), Math.abs(dy / l));
+      if (l > d + 0.2 * Tw) { pts[k - 2] = ex - (dx / l) * d; pts[k - 1] = ey - (dy / l) * d; }
+    }
     // Chaikin twee keer, met vaste uiteinden: lokaal, dus gedeelde stukken van twee lijnen vallen precies samen
     let p = pts;
     for (let it = 0; it < 2; it++) {
@@ -1115,7 +1256,7 @@ export class InfraLaag {
     for (let i = 0; i < n; i++) { x0 = Math.min(x0, X[i]); x1 = Math.max(x1, X[i]); y0 = Math.min(y0, Y[i]); y1 = Math.max(y1, Y[i]); }
     const L = Sd[n - 1];
     const zaad = (pad[pad.length - 1] * 613 + land * 7) | 0;
-    const r = { x: X, y: Y, nx: NX, ny: NY, s: Sd, n, L, x0, y0, x1, y1, land, zaad, goederen, brug: null, beton: hash(zaad, 5) < 0.5, elektrisch: !goederen || hash(zaad, 6) < 0.6 };
+    const r = { x: X, y: Y, nx: NX, ny: NY, s: Sd, n, L, x0, y0, x1, y1, land, zaad, goederen, brug: null, beton: hash(zaad, 5) < 0.5, elektrisch: !goederen || hash(zaad, 6) < 0.6, perron, kopKant: hash(zaad, 15) < 0.5 ? 1 : -1 };
     // bruggen, tunnels en viaducten (zie bouwWegen)
     r.brug = this.overspanningen(r, 0, L, true);
     this.profiel(r, 0, L);
@@ -1134,31 +1275,90 @@ export class InfraLaag {
     return r;
   }
 
-  // Overwegen: waar een spoorlijn een weg kruist.
+  // Overwegen: waar een spoorlijn een tak van het net gelijkvloers kruist (niet in een tunnel, niet waar het spoor
+  // over een brug of door een tunnel gaat, niet op een oprit). Per overweg de vensters in u (s binnen [0, 180))
+  // waarin hij dicht is: elke passage van elke trein op die lijn, met VENSTER_MARGE ervoor en erna.
   bouwOverwegen() {
-    const Tw = this.geo.T, O = [];
+    const Tw = this.geo.T, O = [], net = this.net, W = this.wegen;
     for (let ri = 0; ri < this.routes.length && O.length < 150; ri++) {
       const r = this.routes[ri];
-      const ws = this.wegen.filter((w) => !(w.x1 < r.x0 || w.x0 > r.x1 || w.y1 < r.y0 || w.y0 > r.y1));
-      if (!ws.length) continue;
-      for (let i = 0; i + 1 < r.n && O.length < 150; i++) {
-        const ax = r.x[i], ay = r.y[i], dx = r.x[i + 1] - ax, dy = r.y[i + 1] - ay;
-        const sl = Math.hypot(dx, dy);
-        if (sl < 1e-6) continue;
-        const hx = dx / sl, hy = dy / sl;
-        for (const w of ws) {
+      for (let wi = 0; wi < W.length && O.length < 150; wi++) {
+        const w = W[wi];
+        if (w.tunnel || w.x1 < r.x0 || w.x0 > r.x1 || w.y1 < r.y0 || w.y0 > r.y1) continue;
+        for (let i = 0; i + 1 < r.n; i++) {
+          const ax = r.x[i], ay = r.y[i], dx = r.x[i + 1] - ax, dy = r.y[i + 1] - ay;
+          const sl = Math.hypot(dx, dy);
+          if (sl < 1e-6) continue;
+          const hx = dx / sl, hy = dy / sl;
           const den = hx * w.uy - hy * w.ux;
-          if (Math.abs(den) < 0.35) continue;
+          if (Math.abs(den) < 0.2) continue;
           const ex = w.ax - ax, ey = w.ay - ay;
           const t = (ex * w.uy - ey * w.ux) / den, q = (ex * hy - ey * hx) / den;
-          if (t < 0 || t >= sl || q < w.s0 + 0.08 * Tw || q > w.s1 - 0.08 * Tw) continue;
-          const x = ax + hx * t, y = ay + hy * t;
-          if (this.isWater(x, y) || O.some((o) => o.r === ri && Math.abs(o.x - x) + Math.abs(o.y - y) < 0.4 * Tw)) continue;
-          O.push({ x, y, r: ri, sr: r.s[i] + t, ux: w.ux, uy: w.uy, hx, hy });
+          if (t < 0 || t >= sl || q < 0 || q > w.len) continue;
+          const x = ax + hx * t, y = ay + hy * t, sr = r.s[i] + t;
+          if (this.isWater(x, y) || this.opBrug(r, sr) || this.inTunnel(r, sr) || this.opBrug(w, q)) continue;
+          if (O.some((o) => o.route === ri && Math.abs(o.x - x) + Math.abs(o.y - y) < 0.3 * Tw)) continue;
+          const tak = w.tak, s = net ? net.projecteer(net.D, tak, x, y) : q;
+          O.push({ tak, s, x, y, route: ri, r: ri, sr, ux: w.ux, uy: w.uy, hx, hy, w: wi, q, klasse: w.klasse, dicht: this.vensters(r, sr) });
         }
       }
     }
     this.overwegen = O;
+  }
+
+  // Dicht-vensters van een overweg op afstand sr langs route r: [van, tot, ...] in u, oplopend, binnen [0, 180).
+  // Bemonsterd per 0,1 s (de treinen zijn periodiek binnen 180 s): dicht zodra een deel van een trein binnen 0,3 tegel
+  // van de overweg is, plus VENSTER_MARGE aan beide kanten.
+  vensters(r, sr) {
+    const Tw = this.geo.T, N = 1800, st = DAG / N, aan = new Uint8Array(N);
+    for (let j = 0; j < r.treinen.length; j++) for (let k = 0; k < N; k++) {
+      this.treinStand(r, j, k * st);
+      const lo = Math.min(this.kop, this.staart) - 0.3 * Tw, hi = Math.max(this.kop, this.staart) + 0.3 * Tw;
+      if (sr >= lo && sr <= hi) aan[k] = 1;
+    }
+    // uitzetten met de marge (rond: het venster van een passage vlak voor 180 loopt door na 0)
+    const m = Math.ceil(VENSTER_MARGE / st), uit = new Uint8Array(N);
+    for (let k = 0; k < N; k++) if (aan[k]) for (let d = -m; d <= m; d++) uit[(k + d + N) % N] = 1;
+    const v = [];
+    for (let k = 0; k < N; k++) if (uit[k] && !uit[(k - 1 + N) % N]) {
+      let e = k;
+      while (uit[(e + 1) % N] && e - k < N) e++;
+      const a = k * st, b = (e + 1) * st;
+      if (b <= DAG) v.push(a, b); else v.push(a, DAG, 0, b - DAG);
+    }
+    if (!v.length && uit[0]) v.push(0, DAG);
+    // oplopend op begin
+    const paren = [];
+    for (let i = 0; i < v.length; i += 2) paren.push([v[i], v[i + 1]]);
+    paren.sort((p, q) => p[0] - q[0]);
+    return Float32Array.from(paren.flat());
+  }
+
+  // Slagboom van overweg o op u: 1 dicht, 0 open. Precies binnen een venster dicht; ervoor zakt hij in BOOM_TIJD, erna
+  // gaat hij in BOOM_TIJD omhoog. Tussen twee vensters die minder dan twee keer BOOM_TIJD uit elkaar liggen gaat hij niet
+  // helemaal open.
+  boomStand(o, u) {
+    const v = o.dicht;
+    if (!v || !v.length) return 0;
+    let tot = Infinity;
+    for (let i = 0; i < v.length; i += 2) {
+      if (u >= v[i] && u < v[i + 1]) return 1;
+      tot = Math.min(tot, ((v[i] - u) % DAG + DAG) % DAG, ((u - v[i + 1]) % DAG + DAG) % DAG);
+    }
+    // net buiten het venster (ook precies op het eind) is hij al aan het opengaan: nooit 1
+    return tot < BOOM_TIJD ? Math.min(0.999, 1 - tot / BOOM_TIJD) : 0;
+  }
+
+  // Knipperen de rode lichten op u? Vanaf KNIPPER_VOOR voor het venster tot het eind ervan.
+  knippert(o, u) {
+    const v = o.dicht;
+    if (!v) return false;
+    for (let i = 0; i < v.length; i += 2) {
+      if (u >= v[i] && u < v[i + 1]) return true;
+      const voor = ((v[i] - u) % DAG + DAG) % DAG;
+      if (voor < KNIPPER_VOOR) return true;
+    }
+    return false;
   }
 
   // Voetgangersbruggetjes waar een rivier langs een woonwijk of de hoofdstad loopt: hooguit één per stadstegel,
@@ -1227,76 +1427,8 @@ export class InfraLaag {
   // Bruggen als rechthoeken (ax, ay, bx, by, halve breedte; wereldeenheden), alleen-lezen voor andere lagen.
   brugVlakken() { return { data: this.vlak, n: this.nVlak }; }
 
-  // Stopstrepen en oversteekplekken per weg (w.stops en w.zebras, zie STOP en ZEBRA) voor de wachtende auto's en de
-  // overstekers van leven.js, plus één kandidaat-vak voor wegwerk (w.werk). Na bouwLand: een T-splitsing naar een
-  // gereserveerde tegel heeft geen zebra (tekenKruisingen slaat hem over), dus daar stopt ook niemand.
-  bouwStops() {
-    const Tw = this.geo.T, W = this.wegen, [Pi, gi, oi] = CYCLUS.ingang, [Pk, gk, ok] = CYCLUS.kruispunt;
-    const st = [], zb = [];
-    for (let i = 0; i < W.length; i++) {
-      const w = W[i];
-      st.length = 0; zb.length = 0;
-      for (let kant = 0; kant <= 1; kant++) {
-        if (kant ? !w.stadB : !w.stadA) continue;
-        const o = hash(w.zaad, kant, 7), z = kant ? w.s1 - 0.045 * Tw : w.s0 + 0.045 * Tw, r = kant ? -1 : 1;
-        // naar binnen voor de stopstreep, naar buiten net voor de zebra; beide richtingen volgen hetzelfde licht
-        st.push(z + r * 0.04 * Tw, -r, Pi, o, gi, oi, 0, z - r * 0.029 * Tw, r, Pi, o, gi, oi, 0);
-        zb.push(z, Pi, o, 0.58, 0.95);
-      }
-      for (const k of this.kruisingen) {
-        if (k.a !== i && k.b !== i) continue;
-        const q = (k.x - w.ax) * w.ux + (k.y - w.ay) * w.uy;
-        if (k.zij) {
-          if (this.res[k.tg]) continue;
-          // de zebra ligt 0,09 tegel voorbij de splitsing (zie tekenKruisingen)
-          const P = 20000 + Math.floor(hash(k.zaad, 71) * 8) * 1000, o = hash(k.zaad, 72), z = q + 0.09 * Tw;
-          st.push(z - 0.035 * Tw, 1, P, o, ZEBRA_VRIJ, ZEBRA_VRIJ, 2, z + 0.035 * Tw, -1, P, o, ZEBRA_VRIJ, ZEBRA_VRIJ, 2);
-          zb.push(z, P, o, ZEBRA_VRIJ + 0.02, 0.985);
-        } else if (!k.rotonde) {
-          const oA = hash(k.zaad, 3), o = frac(oA + (k.b === i ? 0.5 : 0));
-          st.push(q - 0.14 * Tw, 1, Pk, o, gk, ok, 1, q + 0.14 * Tw, -1, Pk, o, gk, ok, 1);
-          // voetgangers lopen terwijl deze arm rood heeft: de vensters van stad.js, in de fase van arm A
-          const van = k.b === i ? 0.04 : 0.54, tot = k.b === i ? 0.46 : 0.96;
-          zb.push(q - 0.11 * Tw, Pk, oA, van, tot, q + 0.11 * Tw, Pk, oA, van, tot);
-        }
-      }
-      w.stops = st.length ? Float32Array.from(st) : null;
-      w.zebras = zb.length ? Float32Array.from(zb) : null;
-      // wegwerk: een vak van 0,32 tegel op een kwart, op tweederde of net voor het midden van de weg, vrij van
-      // stopstrepen, kruisingen, de bushalte van deze laag en die van leven.js (op een derde en twee derde van het stuk
-      // dat de bus rijdt, zie verzamelAutos daar), bruggen, tunnels, water en bouwwerken; de pionnen en het bord
-      // staan tot 0,3 tegel voor het vak, dus ook die stukken moeten droog en vrij zijn
-      w.werk = null;
-      const L = w.s1 - w.s0;
-      if (L < 1.1 * Tw) continue;
-      const bus = w.len >= 2 * Tw && hash(w.zaad, 71) < 0.55, rb = Math.min(0.45, (Tw * 0.42) / w.len) * w.len;
-      const eerst = hash(w.zaad, 142) < 0.5 ? 0.22 : 0.64;
-      for (const fr of [eerst, 0.86 - eerst, 0.4]) {
-        const q0 = w.s0 + L * fr, q1 = q0 + 0.32 * Tw;
-        let vrij = q1 < w.s1 - 0.25 * Tw;
-        const bij = (q, m) => q > q0 - m && q < q1 + m;
-        for (let j = 0; vrij && j < st.length; j += STOP) if (bij(st[j], 0.3 * Tw)) vrij = false;
-        for (const k of this.kruisingen) if (vrij && (k.a === i || k.b === i) && bij((k.x - w.ax) * w.ux + (k.y - w.ay) * w.uy, 0.3 * Tw)) vrij = false;
-        if (vrij && hash(w.zaad, 21) <= 0.35 && L >= 1.2 * Tw && bij((w.s0 + w.s1) / 2, 0.12 * Tw)) vrij = false;
-        for (let h = 1; vrij && bus && h <= 2; h++) if (bij(rb + (h / 3) * (w.len - 2 * rb), 0.2 * Tw)) vrij = false;
-        for (let f = 0; vrij && f <= 6; f++) {
-          const q = q0 - 0.3 * Tw + (q1 - q0 + 0.6 * Tw) * f / 6, x = w.ax + w.ux * q, y = w.ay + w.uy * q;
-          if (this.waterSoort(x, y) || this.opBouwwerk(x, y) || this.inTunnel(w, q) || this.opBrug(w, q)) vrij = false;
-        }
-        if (vrij) { w.werk = [q0, q1, hash(w.zaad, 143) < 0.5 ? 1 : -1]; break; }
-      }
-    }
-  }
-
-  // Ligt er op deze weg op deze speldag wegwerk? Zo ja: this.werk0 en this.werk1 (afstand vanaf A, wereld) en
-  // this.werkKant (de afgesloten rijstrook is die van het verkeer in die richting). Elke 24 dagen verhuist het werk.
-  // Voor leven.js, dat er het verkeer omheen laat slingeren.
-  werkOp(w, dag) {
-    const k = w.werk;
-    if (!k || hash(w.zaad, Math.floor(dag / WERK_DAGEN), 141) >= WERK_KANS) return false;
-    this.werk0 = k[0]; this.werk1 = k[1]; this.werkKant = k[2];
-    return true;
-  }
+  // Wegwerk hoort bij het net en de ritten; deze laag zet er geen meer. Blijft bestaan voor oude lezers (leven.js).
+  werkOp() { return false; }
 
   // Punt op afstand q langs een route (wereld): this.px, this.py en de richting this.hx, this.hy.
   punt(r, q) {
@@ -1345,17 +1477,21 @@ export class InfraLaag {
 
   // Tussen de wegen en de gebouwen: alles wat op de grond ligt of rijdt.
   teken(c, view, sc, nu, dt = 0, tempo = 0) {
-    if (tempo > 0) this.klok += dt;
+    void dt; void tempo;
     this.nul();
     const s = view.state;
     if (!s || !view.geo || !view.w) return;
     if (this.state !== s || this.geo !== view.geo || this.eigenaar !== view.eigenaar) this.laad(view);
-    if (this.terrein !== (view.terreinLaag ?? null)) { this.terrein = view.terreinLaag ?? null; this.sig = ''; this.landSig = []; }
+    if (this.terrein !== (view.terreinLaag ?? null)) { this.terrein = view.terreinLaag ?? null; this.vzSig = ''; }
     this.view = view;
+    // één klok voor treinen, lichten, slagbomen en havens: u = verkeersTijd(nu), periodiek in 180 s
+    this.nu = nu;
+    this.u = verkeersTijd(this.nu);
     const z = view.zoom;
     this.zoom = z;
-    if (z < DREMPEL.spoor - 0.4) return;
-    this.werkCache(view);
+    // station, haven, vliegveld en depot verschijnen al vanaf zoom 2,5, net als de verkleinde gebouwen van map.js
+    if (z < 2.5) return;
+    this.voorbereid(view);
     this.kader(view, sc);
     this.sz = seizoen(s.dag);
     this.wr = weer(s.dag, view.cx, view.cy);
@@ -1363,7 +1499,8 @@ export class InfraLaag {
     this.sn = this.sz.sneeuw > 0.66 ? 2 : this.sz.sneeuw > 0.25 ? 1 : 0;
     this.gs = this.sz.winter > 0.5 ? 2 : this.sz.herfst > 0.5 ? 1 : 0;
     this.nacht = view.nacht ?? 0;
-    this.nu = nu;
+    const aS = smooth(2.5, 3, z);
+    if (z < DREMPEL.spoor - 0.4) { this.nZw = 0; this.nZr = 0; this.n.sporen = 0; c.save(); this.tekenSprites(c, aS); c.restore(); return; }
     // natte weg: hoe sterk lichten erin spiegelen (alleen dichtbij, waar je de lampen ziet)
     this.nat = z >= DREMPEL.markering ? smooth(0.2, 0.45, this.wr.regen) : 0;
     this.bakTeller = 0;
@@ -1381,19 +1518,20 @@ export class InfraLaag {
     c.save();
     c.lineCap = 'butt';
     c.lineJoin = 'round';
-    this.tekenBruggen(c, a);
+    this.lampen.length = 0;
+    // pijpleidingen eerst: waar een leiding een weg kruist, gaat hij eronderdoor (het wegdek dekt hem af)
     if (z >= DREMPEL.pijp) this.tekenPijpen(c, smooth(4.5, 5.5, z));
+    if (this.net) this.tekenWegdek(c, smooth(DREMPEL.wegdek, DREMPEL.wegdek + 0.8, z));
+    this.tekenBruggen(c, a);
     this.tekenSporen(c, a);
-    if (z >= DREMPEL.stoeprand) this.tekenWegdetail(c, nu);
-    if (z >= DREMPEL.stoeprand) this.tekenKruisingen(c, nu);
-    if (z >= DREMPEL.halte - 0.5) this.tekenWegwerk(c);
-    if (z >= 6) this.tekenOverwegen(c, nu);
-    if (z >= 6.5) this.tekenLaanbomen(c, smooth(6.5, 7.5, z));
-    if (z >= DREMPEL.lantaarn - 0.5) this.tekenStraatmeubilair(c, nu);
+    if (z >= 6) this.tekenOverwegen(c);
+    if (this.net && z >= 6) this.tekenWegmeubilair(c, smooth(6, 6.8, z));
     // Station, haven, vliegveld en depot pas na het wegdetail: loopt een weg van tekenWegen onder zo'n bouwwerk
     // door, dan dekt de bitmap de weg al af en moeten stoepranden, strepen en lantaarns daar ook verdwijnen.
-    this.tekenSprites(c, a);
+    this.tekenSprites(c, Math.max(a, aS));
+    if (z >= DREMPEL.halte - 0.5) this.tekenKopperrons(c, smooth(DREMPEL.halte - 0.5, DREMPEL.halte + 0.5, z));
     this.tekenTreinen(c, a);
+    if (z >= DREMPEL.halte) this.tekenReizigers(c, smooth(DREMPEL.halte, DREMPEL.halte + 1, z));
     this.tekenHavenLeven(c, a);
     this.tekenVliegvelden(c, a, nu);
     if (z >= DREMPEL.bovenleiding - 0.5) this.tekenBovenleiding(c, nu);
@@ -1516,7 +1654,7 @@ export class InfraLaag {
     this.zetHoeken(d, w0 + 0.1, q0, q1); this.zetQ(w0 + 0.1, q0, q1);
     this.zetHoeken(d, w0 + 0.7, q0, q1); this.zetQ(w0 + 0.7, q0, q1);
     const m0 = w0 + 0.7, m1 = w1 - 0.7;
-    if (!S && m1 > m0 + 1) { const k = Math.ceil((m1 - m0) / Math.max(2.5, (m1 - m0) / 8)); for (let i = 1; i < k; i++) this.zetQ(m0 + ((m1 - m0) * i) / k, q0, q1); }
+    // een wegstuk is recht en het dek ligt tussen m0 en m1 op volle hoogte: daar zijn geen tussenpunten nodig
     this.zetHoeken(d, w1 - 0.7, q0, q1); this.zetQ(w1 - 0.7, q0, q1);
     this.zetHoeken(d, w1 - 0.1, q0, q1); this.zetQ(w1 - 0.1, q0, q1);
     this.zetHoeken(d, q1, q0, q1);
@@ -1655,8 +1793,8 @@ export class InfraLaag {
     else if (soort === TUI) this.tuiBrug(c, d, b, H, hb, zuid);
     else if (soort === HANG) this.hangBrug(c, d, b, H, hb, zuid, staal);
     else if (soort === STAALBOOG) this.staalBoog(c, d, b, H, hb, zuid, staal);
-    else if (soort === BOOG && z >= DREMPEL.markering) {
-      // voegen in de borstwering en een sluitsteen boven elke boog
+    else if (soort === BOOG && z >= DREMPEL.markering + 2) {
+      // voegen in de borstwering (pas van dichtbij: het net heeft veel bruggetjes over beken)
       c.strokeStyle = 'rgba(60,50,40,0.35)'; c.lineWidth = Math.max(0.4, T * 0.0015); c.beginPath();
       for (let q = b.q0 + 0.3; q < b.q1; q += 0.6) for (let o = -hb; o <= hb; o += 2 * hb) { this.dek(d, q, o * 0.92); const x = this.ex, y = this.ey; if (!this.opScherm(x, y, 4)) continue; this.dek(d, q, o * 1.08); c.moveTo(x, y); c.lineTo(this.ex, this.ey); }
       c.stroke();
@@ -1979,9 +2117,15 @@ export class InfraLaag {
       const r = this.routes[this.zr[i]];
       if (r.tunnel) for (let k = 0; k < r.tunnel.length && n < PLAFOND.tunnels; k += 2) if (this.brugInBeeld(r, r.tunnel[k], r.tunnel[k + 1], Tw * 0.4)) { this.tunnel(c, r, r.tunnel[k], r.tunnel[k + 1], true); n++; }
     }
-    for (let i = 0; i < this.nZw; i++) {
-      const w = this.wegen[this.zw[i]];
-      if (w.tunnel) for (let k = 0; k < w.tunnel.length && n < PLAFOND.tunnels; k += 2) if (this.brugInBeeld(w, w.tunnel[k], w.tunnel[k + 1], Tw * 0.4)) { this.tunnel(c, w, w.tunnel[k], w.tunnel[k + 1], false); n++; }
+    // wegen: de tunneltak tekent het wegdek niet; alleen een mond waar hij op een gewone tak aansluit
+    if (aMond > 0) {
+      c.globalAlpha = aMond;
+      for (const m of this.monden ?? []) {
+        if (n >= PLAFOND.tunnels) break;
+        const x = m.x * this.sc + this.ox, y = m.y * this.sc + this.oy;
+        if (!this.opScherm(x, y, this.T * 0.4)) continue;
+        this.tunnelMond(c, this.wegen[m.w], m.q, m.rich, false); n++;
+      }
     }
     this.n.tunnels = n;
     c.globalAlpha = 1;
@@ -2030,10 +2174,12 @@ export class InfraLaag {
     const w = (spoor ? 0.1 : 0.115) * T, Hm = T * (spoor ? 0.06 : 0.055), ingang = T * 0.16;
     const naarKijker = -hy > -0.15; // de mond kijkt naar buiten (-h); naar het zuiden is naar de kijker toe
     // keermuren langs de inrit, aflopend naar het open land
-    c.fillStyle = 'rgba(0,0,0,0.25)'; c.beginPath();
-    c.moveTo(x + nx * w, y + ny * w); c.lineTo(x + nx * w + Hm * S, y + ny * w + Hm * S); c.lineTo(x - hx * ingang + nx * w, y - hy * ingang + ny * w); c.closePath();
-    c.moveTo(x - nx * w, y - ny * w); c.lineTo(x - nx * w + Hm * S, y - ny * w + Hm * S); c.lineTo(x - hx * ingang - nx * w, y - hy * ingang - ny * w); c.closePath();
-    c.fill();
+    if (z >= DREMPEL.markering) {
+      c.fillStyle = 'rgba(0,0,0,0.25)'; c.beginPath();
+      c.moveTo(x + nx * w, y + ny * w); c.lineTo(x + nx * w + Hm * S, y + ny * w + Hm * S); c.lineTo(x - hx * ingang + nx * w, y - hy * ingang + ny * w); c.closePath();
+      c.moveTo(x - nx * w, y - ny * w); c.lineTo(x - nx * w + Hm * S, y - ny * w + Hm * S); c.lineTo(x - hx * ingang - nx * w, y - hy * ingang - ny * w); c.closePath();
+      c.fill();
+    }
     c.strokeStyle = '#b3aea3'; c.lineWidth = Math.max(0.6, T * 0.009); c.beginPath();
     for (const o of [w, -w]) { c.moveTo(x + nx * o, y + ny * o); c.lineTo(x - hx * ingang + nx * o * 1.15, y - hy * ingang + ny * o * 1.15); }
     c.stroke();
@@ -2057,42 +2203,49 @@ export class InfraLaag {
     if (this.nacht > 0.05 && naarKijker) this.zetLicht(x, y - Hm * 0.3, Math.max(2, T * 0.05), AMBER, 0.6);
   }
 
+  // Pijpleidingen liggen ondergronds (plan §3.2): boven de grond zie je alleen het tracé (een lichte strook gemaaid
+  // gras of een gekapte strook door het bos), gele markeringspaaltjes, een afsluiterstation halverwege en aan elk eind
+  // een kort stuk buis met een afsluiter waar de leiding bij het depot en de centrale de grond uit komt.
   tekenPijpen(c, a) {
-    const T = this.T, sc = this.sc, z = this.zoom;
+    const T = this.T, sc = this.sc, z = this.zoom, sn = this.sn;
     c.globalAlpha = a;
     for (const p of this.pijpen) {
       if (!this.inBeeld(Math.min(p.ax, p.bx), Math.min(p.ay, p.by), Math.max(p.ax, p.bx), Math.max(p.ay, p.by), 8)) continue;
       const ax = p.ax * sc + this.ox, ay = p.ay * sc + this.oy, bx = p.bx * sc + this.ox, by = p.by * sc + this.oy;
-      const nx = -p.uy, ny = p.ux;
-      // schaduw, steunen, dan twee buizen (de oliebuis donker, de gasbuis zilver)
-      c.strokeStyle = 'rgba(0,0,0,0.28)'; c.lineWidth = T * 0.03;
-      c.beginPath(); c.moveTo(ax + T * 0.012, ay + T * 0.014); c.lineTo(bx + T * 0.012, by + T * 0.014); c.stroke();
-      if (z >= 6) {
-        c.strokeStyle = '#55524c'; c.lineWidth = T * 0.036; c.setLineDash([T * 0.006, T * 0.07]);
-        c.beginPath(); c.moveTo(ax, ay); c.lineTo(bx, by); c.stroke(); c.setLineDash([]);
-      }
-      for (const [o, k] of [[-0.009, p.olie ? '#3b3a38' : '#9aa0a6'], [0.009, '#b9bec3']]) {
-        c.strokeStyle = k; c.lineWidth = Math.max(0.8, T * 0.012);
-        c.beginPath(); c.moveTo(ax + nx * o * T, ay + ny * o * T); c.lineTo(bx + nx * o * T, by + ny * o * T); c.stroke();
-      }
+      const nx = -p.uy, ny = p.ux, len = Math.hypot(bx - ax, by - ay);
+      // het tracé: in de sneeuw nauwelijks te zien
+      c.strokeStyle = sn === 2 ? 'rgba(236,238,240,0.18)' : 'rgba(206,196,150,0.30)'; c.lineWidth = T * 0.075;
+      c.beginPath(); c.moveTo(ax, ay); c.lineTo(bx, by); c.stroke();
+      c.strokeStyle = sn === 2 ? 'rgba(255,255,255,0.12)' : 'rgba(226,218,178,0.28)'; c.lineWidth = T * 0.03;
+      c.beginPath(); c.moveTo(ax, ay); c.lineTo(bx, by); c.stroke();
+      if (z < 7) continue;
+      // markeringspaaltjes om de 0,8 tegel, net naast het tracé (vaste plekken langs de leiding)
       if (z >= DREMPEL.markering) {
-        c.strokeStyle = 'rgba(255,255,255,0.35)'; c.lineWidth = Math.max(0.4, T * 0.003);
-        c.beginPath(); c.moveTo(ax + nx * 0.006 * T, ay + ny * 0.006 * T - T * 0.003); c.lineTo(bx + nx * 0.006 * T, by + ny * 0.006 * T - T * 0.003); c.stroke();
-        // pompstation halverwege
+        c.fillStyle = '#e0b52a';
+        c.beginPath();
+        for (let q = T * 0.4; q < len - T * 0.2; q += T * 0.8) {
+          const x = ax + p.ux * q + nx * T * 0.05, y = ay + p.uy * q + ny * T * 0.05;
+          c.rect(x - T * 0.005, y - T * 0.018, T * 0.01, T * 0.018);
+        }
+        c.fill();
+      }
+      // afsluiterstation halverwege: een omheind vakje met een kastje
+      if (len > T * 1.6) {
         const mx = (ax + bx) / 2, my = (ay + by) / 2;
-        if (Math.hypot(bx - ax, by - ay) > T * 1.6) {
-          c.fillStyle = 'rgba(0,0,0,0.3)'; c.beginPath(); rechthoek(c, mx + nx * T * 0.06 + T * 0.02, my + ny * T * 0.06 + T * 0.022, p.ux, p.uy, T * 0.05, T * 0.03); c.fill();
-          c.fillStyle = '#b9b4a8'; c.beginPath(); rechthoek(c, mx + nx * T * 0.06, my + ny * T * 0.06, p.ux, p.uy, T * 0.05, T * 0.03); c.fill();
-          c.fillStyle = '#7d8187'; c.beginPath(); rechthoek(c, mx + nx * T * 0.06, my + ny * T * 0.06, p.ux, p.uy, T * 0.05, T * 0.01); c.fill();
-          c.fillStyle = '#4b4f54'; c.beginPath(); rechthoek(c, mx + nx * T * 0.03, my + ny * T * 0.03, p.ux, p.uy, T * 0.01, T * 0.004); c.fill();
-        }
-        // afsluiters met rode handwielen
-        const len = Math.hypot(bx - ax, by - ay);
-        for (let q = T * 0.7; q < len - T * 0.3; q += T * 1.6) {
-          const x = ax + p.ux * q, y = ay + p.uy * q;
-          c.fillStyle = '#6b6f74'; c.beginPath(); rechthoek(c, x, y, p.ux, p.uy, T * 0.012, T * 0.022); c.fill();
-          c.fillStyle = '#c43c32'; c.beginPath(); stip(c, x, y - T * 0.012, T * 0.007); c.fill();
-        }
+        c.fillStyle = 'rgba(0,0,0,0.25)'; c.beginPath(); rechthoek(c, mx + T * 0.01, my + T * 0.012, p.ux, p.uy, T * 0.06, T * 0.045); c.fill();
+        c.fillStyle = '#a9a69c'; c.beginPath(); rechthoek(c, mx, my, p.ux, p.uy, T * 0.06, T * 0.045); c.fill();
+        c.fillStyle = '#7d8187'; c.beginPath(); rechthoek(c, mx + nx * T * 0.012, my + ny * T * 0.012, p.ux, p.uy, T * 0.022, T * 0.012); c.fill();
+        if (z >= DREMPEL.markering) { c.fillStyle = '#c43c32'; c.beginPath(); stip(c, mx - nx * T * 0.012, my - ny * T * 0.012, T * 0.006); c.fill(); }
+      }
+      // bij het depot en de centrale komt de buis boven de grond: een kort stuk met een afsluiter
+      for (const [x0, y0, r, kop] of [[ax, ay, 1, p.kopA], [bx, by, -1, p.kopB]]) {
+        if (!kop) continue;
+        const x1 = x0 + p.ux * T * 0.12 * r, y1 = y0 + p.uy * T * 0.12 * r;
+        c.strokeStyle = 'rgba(0,0,0,0.28)'; c.lineWidth = T * 0.024;
+        c.beginPath(); c.moveTo(x0 + T * 0.01, y0 + T * 0.012); c.lineTo(x1 + T * 0.01, y1 + T * 0.012); c.stroke();
+        c.strokeStyle = p.olie ? '#3b3a38' : '#9aa0a6'; c.lineWidth = Math.max(0.8, T * 0.016);
+        c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke();
+        if (z >= DREMPEL.markering) { c.fillStyle = '#c43c32'; c.beginPath(); stip(c, x0 + (x1 - x0) * 0.6, y0 + (y1 - y0) * 0.6 - T * 0.01, T * 0.007); c.fill(); }
       }
     }
     c.globalAlpha = 1;
@@ -2171,510 +2324,526 @@ export class InfraLaag {
     c.globalAlpha = 1;
   }
 
-  // ---------- wegdetail ----------
+  // ---------- het wegdek van het net ----------
+  //
+  // Elke tak van het net als polylijn, per klasse met de breedte uit PROFIEL: eerst de berm van de stamwegen en de
+  // stoepen van straten en hoofdwegen, dan de opritten (die de stoep doorsnijden), de stoeprand en het asfalt. Waar
+  // twee armen van een knoop een hoek maken, rondt een boog de stoeprand af (straal 0,06 T, dezelfde binnenstraal als
+  // net.bocht). Daarna de markering, stopstrepen, zebra's (net.zebras), haaientanden en parkeervakken. Tunneltakken
+  // (tBouw 3) liggen in de berg: daar alleen de monden. Bruggen komen er in tekenBruggen onder.
 
-  tekenWegdetail(c, nu) {
-    const T = this.T, Tw = this.geo.T, sc = this.sc, z = this.zoom, W = this.wegen, nz = this.nZw;
-    if (!nz) return;
-    const evenwijdig = (off, kleur, breedte, alleenStad = false) => {
-      c.strokeStyle = kleur; c.lineWidth = breedte; c.beginPath();
-      for (let i = 0; i < nz; i++) {
-        const w = W[this.zw[i]];
-        if (alleenStad && !w.stadA && !w.stadB) continue;
-        const nx = -w.uy * off, ny = w.ux * off;
-        for (const sgn of [-1, 1]) {
-          c.moveTo((w.ax + w.ux * w.s0 + nx * sgn) * sc + this.ox, (w.ay + w.uy * w.s0 + ny * sgn) * sc + this.oy);
-          c.lineTo((w.ax + w.ux * w.s1 + nx * sgn) * sc + this.ox, (w.ay + w.uy * w.s1 + ny * sgn) * sc + this.oy);
-        }
-      }
-      c.stroke();
+  // Zichtbare takken (this.zt) en knopen (this.zk) van het net.
+  zichtNet() {
+    const net = this.net, B = net.tBox, m = this.geo.T * 0.4;
+    const zt = this.zt ??= [], zk = this.zk ??= [];
+    zt.length = 0; zk.length = 0;
+    const x0 = this.wx0 - m, x1 = this.wx1 + m, y0 = this.wy0 - m, y1 = this.wy1 + m;
+    if (!this.ztIn || this.ztIn.length < net.nT) this.ztIn = new Uint8Array(net.nT);
+    this.ztIn.fill(0);
+    const ztK = this.ztK ??= [[], [], [], [], []];
+    for (const l of ztK) l.length = 0;
+    for (let i = 0; i < net.nT; i++) if (B[i * 4 + 2] >= x0 && B[i * 4] <= x1 && B[i * 4 + 3] >= y0 && B[i * 4 + 1] <= y1) { zt.push(i); this.ztIn[i] = 1; ztK[net.tKlasse[i]]?.push(i); }
+    for (let k = 0; k < net.nK; k++) { const x = net.kx[k], y = net.ky[k]; if (x >= x0 && x <= x1 && y >= y0 && y <= y1) zk.push(k); }
+  }
+
+  // Voegt het stuk [s0, s1] van tak i toe aan het pad, off wereldeenheden rechts van de richting A→B (schermcoördinaten:
+  // rechts is (-uy, ux)). Op de hoekpunten verspringt de verschoven lijn niet: daar staat hij op de bissectrice.
+  takPad(c, i, s0, s1, off) {
+    const net = this.net, P = net.punten, cum = net.cum, p0 = net.tP0[i], np = net.tNP[i], sc = this.sc, ox = this.ox, oy = this.oy;
+    if (!(s1 > s0)) return;
+    let eerst = true;
+    const zet = (x, y, nx, ny) => {
+      const X = (x + nx * off) * sc + ox, Y = (y + ny * off) * sc + oy;
+      if (eerst) { c.moveTo(X, Y); eerst = false; } else c.lineTo(X, Y);
     };
-    // stoepranden (licht beton) met een schaduwlijntje aan de asfaltkant
-    c.globalAlpha = smooth(5.5, 6.5, z);
-    evenwijdig(0.062 * Tw, '#97938a', Math.max(0.6, T * 0.01));
-    if (z >= 7) evenwijdig(0.054 * Tw, 'rgba(25,25,24,0.45)', Math.max(0.4, T * 0.004));
-    // sneeuwhopen langs de stoep als het hartje winter is (de rijbaan is geveegd)
-    if (this.sz.sneeuw > 0.3) {
-      c.globalAlpha = smooth(5.5, 6.5, z) * clamp(this.sz.sneeuw, 0, 1) * 0.85;
-      c.setLineDash([T * 0.05, T * 0.012, T * 0.02, T * 0.008]);
-      evenwijdig(0.073 * Tw, '#eef1f3', T * 0.014);
-      c.setLineDash([]);
+    for (let j = 0; j + 1 < np; j++) {
+      const a = cum[p0 + j], b = cum[p0 + j + 1];
+      if (b <= s0 || b - a < 1e-9) continue;
+      const ax = P[(p0 + j) * 2], ay = P[(p0 + j) * 2 + 1], bx = P[(p0 + j) * 2 + 2], by = P[(p0 + j) * 2 + 3], l = b - a;
+      const ux = (bx - ax) / l, uy = (by - ay) / l, nx = -uy, ny = ux;
+      if (eerst) { const f = Math.max(0, s0 - a); zet(ax + ux * f, ay + uy * f, nx, ny); }
+      if (s1 < b) { const f = s1 - a; zet(ax + ux * f, ay + uy * f, nx, ny); return; }
+      if (j + 2 < np && off) {
+        const cx = P[(p0 + j) * 2 + 4], cy = P[(p0 + j) * 2 + 5], l2 = Math.hypot(cx - bx, cy - by) || 1;
+        const mx = -(cy - by) / l2, my = (cx - bx) / l2;
+        let qx = nx + mx, qy = ny + my;
+        const ql = Math.hypot(qx, qy) || 1;
+        qx /= ql; qy /= ql;
+        const k = 1 / Math.max(0.35, qx * nx + qy * ny);
+        zet(bx, by, qx * k, qy * k);
+      } else zet(bx, by, nx, ny);
     }
-    // terwijl het sneeuwt (of als er hartje winter veel ligt) blijft er een laagje op de rijbaan, met in elke strook twee
-    // bandensporen waar het asfalt doorkomt; de strepen en zebra's eronder zie je dan nog maar half
-    const vers = clamp(Math.max(this.wr.sneeuw * 1.8, (this.sz.sneeuw - 0.6) * 2.5), 0, 1);
-    if (vers > 0.04) {
-      c.globalAlpha = smooth(5.5, 6.5, z) * vers * 0.8;
-      c.strokeStyle = '#e9edf0'; c.lineWidth = T * 0.104; c.beginPath();
-      for (let i = 0; i < nz; i++) { const w = W[this.zw[i]]; c.moveTo((w.ax + w.ux * w.s0) * sc + this.ox, (w.ay + w.uy * w.s0) * sc + this.oy); c.lineTo((w.ax + w.ux * w.s1) * sc + this.ox, (w.ay + w.uy * w.s1) * sc + this.oy); }
-      c.stroke();
-      if (z >= 7) {
-        // sporen: de wielen lopen 0,02 tegel naast het hart van elke strook (zie BAAN in leven.js); ze slingeren licht
-        c.globalAlpha = smooth(7, 8, z) * vers * 0.75;
-        c.setLineDash([T * 0.3, T * 0.004, T * 0.12, T * 0.006]);
-        evenwijdig(0.011 * Tw, 'rgba(92,94,96,0.75)', T * 0.009);
-        evenwijdig(0.049 * Tw, 'rgba(92,94,96,0.75)', T * 0.009);
-        c.setLineDash([]);
-        this.n.sporenSneeuw = nz;
+  }
+
+  // Armen van knoop k (zonder opritten): hoek, klasse en gerichte tak naar buiten.
+  armenVan(k) {
+    const net = this.net, o = this.po ??= {};
+    // per versie van het net één keer uitgerekend (de armen veranderen alleen met het net)
+    if (this.armNet !== net || this.armVersie !== net.versie) { this.armNet = net; this.armVersie = net.versie; this.armC = new Array(net.nK); }
+    if (this.armC[k]) return this.armC[k];
+    const uit = (this.armC[k] = []);
+    for (let j = net.adj0[k]; j < net.adj0[k + 1]; j++) {
+      const g = net.adj[j], i = g >= 0 ? g : ~g, kl = net.tKlasse[i];
+      if (kl === KLASSE.OPRIT || net.tLen[i] < 1e-6) continue;
+      net.punt(g, Math.min(net.tLen[i], 0.02 * this.geo.T), o);
+      uit.push({ g, i, kl, h: Math.atan2(o.y - net.ky[k], o.x - net.kx[k]), tunnel: net.tBouw[i] === 3 });
+    }
+    uit.sort((a, b) => a.h - b.h);
+    return uit;
+  }
+
+  // Afgeronde hoek tussen twee armen (hoeken h1 < h2 in de draairichting, opening h2 - h1): het stuk tussen de twee
+  // randen (op e1 en e2 van de as) en een boog met straal r, in wereldcoördinaten achter aan uit (12 getallen, zie
+  // hoekBogen); false als de hoek te scherp is.
+  hoekBoog(uit, x, y, h1, h2, e1, e2, r) {
+    const gap = h2 - h1;
+    if (gap < 0.35 || gap > 2.8 || r <= 0) return false;
+    const d1x = Math.cos(h1), d1y = Math.sin(h1), d2x = Math.cos(h2), d2y = Math.sin(h2);
+    const n1x = -d1y, n1y = d1x, n2x = d2y, n2y = -d2x; // normalen naar de opening toe
+    const det = -d1x * d2y + d1y * d2x;
+    if (Math.abs(det) < 1e-6) return false;
+    const los = (a1, a2) => {
+      const vx = n2x * a2 - n1x * a1, vy = n2y * a2 - n1y * a1;
+      return [(-vx * d2y + vy * d2x) / det, (d1x * vy - d1y * vx) / det];
+    };
+    const [t1, t2] = los(e1 + r, e2 + r), [p1] = los(e1, e2);
+    const Tw = this.geo.T;
+    if (t1 <= 0 || t2 <= 0 || t1 > 0.5 * Tw || t2 > 0.5 * Tw) return false;
+    const cx = x + n1x * (e1 + r) + d1x * t1, cy = y + n1y * (e1 + r) + d1y * t1;
+    const ax = x + n1x * e1 + d1x * t1, ay = y + n1y * e1 + d1y * t1;
+    const bx = x + n2x * e2 + d2x * t2, by = y + n2y * e2 + d2y * t2;
+    const px = x + n1x * e1 + d1x * p1, py = y + n1y * e1 + d1y * p1;
+    const aA = Math.atan2(ay - cy, ax - cx), aB = Math.atan2(by - cy, bx - cx);
+    let d = aA - aB;
+    while (d > Math.PI) d -= TAU;
+    while (d < -Math.PI) d += TAU;
+    uit.push(ax, ay, px, py, bx, by, cx, cy, r, aB, aA, d < 0 ? 1 : 0);
+    return true;
+  }
+
+  // Alle hoekbogen van de zichtbare knopen voor één laag van het profiel: rand(kl) is de afstand van de as tot de rand
+  // van die laag (of < 0 als die klasse de laag niet heeft), krimp hoeveel kleiner de straal is.
+  hoekBogen(c, rand, krimp, laag) {
+    const net = this.net, Tw = this.geo.T;
+    if (this.hbNet !== net || this.hbVersie !== net.versie) { this.hbNet = net; this.hbVersie = net.versie; this.hbC = [[], [], []]; }
+    const C = this.hbC[laag];
+    const sc = this.sc, ox = this.ox, oy = this.oy;
+    c.beginPath();
+    let n = 0;
+    for (const k of this.zk) {
+      let B = C[k];
+      if (B === undefined) {
+        // de bogen van deze knoop in wereldcoördinaten: per boog ax, ay, px, py, bx, by, cx, cy, r, hoekB, hoekA, tegen
+        const L = [];
+        if (net.kSoort[k] !== NK.ROTONDE && net.kSoort[k] !== NK.DOCK) {
+          const A = this.armenVan(k);
+          for (let a = 0; A.length >= 2 && a < A.length; a++) {
+            const p = A[a], q = A[(a + 1) % A.length];
+            if (p.tunnel || q.tunnel) continue;
+            const e1 = rand(p.kl), e2 = rand(q.kl);
+            if (e1 < 0 || e2 < 0) continue;
+            const h2 = a + 1 < A.length ? q.h : q.h + TAU;
+            this.hoekBoog(L, net.kx[k], net.ky[k], p.h, h2, e1, e2, 0.06 * Tw - krimp);
+          }
+        }
+        B = C[k] = L.length ? Float32Array.from(L) : null;
+      }
+      if (!B) continue;
+      for (let j = 0; j < B.length; j += 12) {
+        c.moveTo(B[j] * sc + ox, B[j + 1] * sc + oy);
+        c.lineTo(B[j + 2] * sc + ox, B[j + 3] * sc + oy);
+        c.lineTo(B[j + 4] * sc + ox, B[j + 5] * sc + oy);
+        c.arc(B[j + 6] * sc + ox, B[j + 7] * sc + oy, B[j + 8] * sc, B[j + 9], B[j + 10], B[j + 11] > 0);
+        c.closePath();
+        n++;
       }
     }
-    if (z < DREMPEL.markering - 0.5) { c.globalAlpha = 1; return; }
-    const aM = smooth(7.5, 8.5, z) * (1 - 0.6 * vers);
-    c.globalAlpha = aM;
-    // kantstrepen
-    evenwijdig(0.046 * Tw, '#e4e2d8', Math.max(0.5, T * 0.0035));
-    // rode fietspaden langs de wegen naar woonwijken en hoofdstad, met een berm ertussen
-    evenwijdig(0.13 * Tw, this.sn === 2 ? '#b98a80' : '#9a4a3a', T * 0.024, true);
-    if (z >= DREMPEL.bord) { c.setLineDash([T * 0.02, T * 0.02]); evenwijdig(0.13 * Tw, 'rgba(240,236,226,0.7)', Math.max(0.4, T * 0.002), true); c.setLineDash([]); }
-    // plassen in de regen, met druppels die erin slaan
-    if (this.wr.regen > 0.3 && z >= DREMPEL.bord) {
-      for (let i = 0; i < nz; i++) {
-        const w = W[this.zw[i]];
-        for (let q = w.s0, j = 0; q < w.s1; q += Tw * 0.23, j++) {
-          if (hash(w.zaad, j, 91) > 0.3) continue;
-          const o = (hash(w.zaad, j, 92) - 0.5) * 0.09 * Tw;
-          const x = (w.ax + w.ux * q - w.uy * o) * sc + this.ox, y = (w.ay + w.uy * q + w.ux * o) * sc + this.oy;
-          if (!this.opScherm(x, y, T * 0.05)) continue;
-          const hk = Math.atan2(w.uy, w.ux);
-          c.fillStyle = 'rgba(120,140,160,0.45)'; c.beginPath(); c.ellipse(x, y, T * 0.018, T * 0.009, hk, 0, TAU); c.fill();
-          c.fillStyle = 'rgba(230,240,250,0.35)'; c.beginPath(); c.ellipse(x - T * 0.004, y - T * 0.003, T * 0.007, T * 0.002, hk, 0, TAU); c.fill();
-          const r = frac(this.nu / 600 + hash(w.zaad, j, 93));
-          c.strokeStyle = `rgba(230,240,250,${(0.6 * (1 - r)).toFixed(2)})`; c.lineWidth = Math.max(0.4, T * 0.0015);
-          c.beginPath(); c.ellipse(x, y, T * 0.012 * r + 0.5, T * 0.006 * r + 0.3, hk, 0, TAU); c.stroke();
-        }
+    if (n) c.fill();
+  }
+
+  // Strook van de zichtbare takken van klasse kl (of alle klassen met fn(kl) > 0) met breedte fn(kl) wereldeenheden.
+  strook(c, filter, breedte, kleur, rond = true) {
+    const net = this.net, sc = this.sc;
+    for (const kl of [KLASSE.ERF, KLASSE.STRAAT, KLASSE.HOOFD, KLASSE.STAM, KLASSE.OPRIT]) {
+      const b = breedte(kl);
+      if (!(b > 0)) continue;
+      c.beginPath();
+      let n = 0;
+      for (const i of this.ztK[kl]) {
+        if (!filter(i)) continue;
+        this.takPad(c, i, 0, net.tLen[i], 0);
+        n++;
+      }
+      if (!n) continue;
+      c.lineCap = rond ? 'round' : 'butt';
+      c.strokeStyle = typeof kleur === 'function' ? kleur(kl) : kleur;
+      c.lineWidth = b * sc;
+      c.stroke();
+    }
+    c.lineCap = 'butt';
+  }
+
+  tekenWegdek(c, a) {
+    const net = this.net;
+    if (!net?.klaar || !net.nT || a <= 0.01) return;
+    this.zichtNet();
+    if (!this.zt.length) return;
+    const Tw = this.geo.T, z = this.zoom, sc = this.sc, T = this.T;
+    const pr = PROFIEL, RAND = 0.007 * Tw;
+    const nietTunnel = (i) => net.tBouw[i] !== 3;
+    const grond = (i) => net.tBouw[i] === 0;
+    const winter = this.sn;
+    c.save();
+    c.globalAlpha = a;
+    c.lineJoin = 'round';
+    // berm langs de stamwegen (niet op bruggen)
+    this.strook(c, grond, (kl) => (kl === KLASSE.STAM ? (pr[kl].asfalt + 0.07) * Tw : 0), winter === 2 ? 'rgba(214,218,214,0.7)' : 'rgba(146,140,112,0.55)');
+    // stoep: straat en hoofdweg, met afgeronde hoeken
+    const stoepKleur = winter === 2 ? '#c9cccd' : '#a9a59b';
+    this.strook(c, nietTunnel, (kl) => (pr[kl].stoep && kl !== KLASSE.OPRIT ? (pr[kl].asfalt + 2 * pr[kl].stoep) * Tw : 0), stoepKleur);
+    c.fillStyle = stoepKleur;
+    this.hoekBogen(c, (kl) => (pr[kl].stoep ? (pr[kl].asfalt / 2 + pr[kl].stoep) * Tw : -1), pr[KLASSE.STRAAT].stoep * Tw, 0);
+    // opritten: beton tot het dock, over de stoep heen
+    if (z >= 4) this.strook(c, nietTunnel, (kl) => (kl === KLASSE.OPRIT ? pr[kl].asfalt * Tw : 0), winter === 2 ? '#c4c4c0' : BETON_D, false);
+    // stoeprand (bij de stamweg: de donkere asfaltrand)
+    const randKleur = (kl) => (kl === KLASSE.STAM ? '#34363a' : kl === KLASSE.ERF ? '#6b625a' : '#8f8b82');
+    this.strook(c, nietTunnel, (kl) => (kl === KLASSE.OPRIT ? 0 : pr[kl].asfalt * Tw + 2 * RAND), randKleur);
+    // de stoeprand in de hoeken pas van dichtbij (verder weg is hij smaller dan een pixel)
+    c.fillStyle = '#8f8b82';
+    if (z >= 9) this.hoekBogen(c, (kl) => pr[kl].asfalt / 2 * Tw + RAND, RAND, 1);
+    // asfalt; het woonerf in klinkers
+    const dek = (kl) => (kl === KLASSE.ERF ? '#5d5650' : ASFALT);
+    this.strook(c, nietTunnel, (kl) => (kl === KLASSE.OPRIT ? 0 : pr[kl].asfalt * Tw), dek);
+    c.fillStyle = ASFALT;
+    this.hoekBogen(c, (kl) => pr[kl].asfalt / 2 * Tw, 0, 2);
+    // overkapte tunnelbak tussen de gebouwen: een betonnen dak met lichtstraten (wat erin rijdt, is niet te zien)
+    const dakTak = this.dakTak;
+    if (dakTak && dakTak.length === net.nT && z >= 4) {
+      const inDak = (i) => dakTak[i] === 1;
+      this.strook(c, inDak, (kl) => (pr[kl].asfalt + 2 * Math.max(pr[kl].stoep, 0.012)) * Tw, winter === 2 ? '#b9bbb9' : '#7f7b73', false);
+      this.strook(c, inDak, (kl) => pr[kl].asfalt * Tw, winter === 2 ? '#d5d8d8' : BETON, false);
+      if (z >= 8) { c.setLineDash([T * 0.03, T * 0.05]); this.strook(c, inDak, (kl) => pr[kl].asfalt * Tw * 0.3, 'rgba(96,120,134,0.75)', false); c.setLineDash([]); }
+    }
+    // rotondes: een ring om een groen eiland
+    for (const k of this.zk) {
+      if (net.kSoort[k] !== NK.ROTONDE) continue;
+      const x = net.kx[k] * sc + this.ox, y = net.ky[k] * sc + this.oy, R = ROTONDE_STRAAL * T, b = pr[KLASSE.HOOFD].asfalt * T / 2;
+      c.fillStyle = '#8f8b82'; c.beginPath(); c.arc(x, y, R + b + RAND * sc, 0, TAU); c.fill();
+      c.fillStyle = ASFALT; c.beginPath(); c.arc(x, y, R + b, 0, TAU); c.fill();
+      c.fillStyle = '#8f8b82'; c.beginPath(); c.arc(x, y, R - b + RAND * sc, 0, TAU); c.fill();
+      c.fillStyle = winter === 2 ? '#dfe3e4' : this.gs === 1 ? '#7f8450' : '#5f7f3e'; c.beginPath(); c.arc(x, y, R - b, 0, TAU); c.fill();
+      if (z >= 8) { c.fillStyle = 'rgba(40,60,30,0.6)'; c.beginPath(); stip(c, x - T * 0.008, y - T * 0.006, T * 0.014); stip(c, x + T * 0.01, y + T * 0.007, T * 0.011); c.fill(); }
+    }
+    // sneeuw: hopen langs de stoeprand; terwijl het sneeuwt een laagje op de rijbaan met bandensporen
+    if (this.sz.sneeuw > 0.3 && z >= 5.5) {
+      c.globalAlpha = a * smooth(5.5, 6.5, z) * clamp(this.sz.sneeuw, 0, 1) * 0.85;
+      c.setLineDash([T * 0.05, T * 0.012, T * 0.02, T * 0.008]);
+      c.strokeStyle = '#eef1f3'; c.lineWidth = T * 0.012;
+      c.beginPath();
+      for (const i of this.zt) { const kl = net.tKlasse[i]; if (kl === KLASSE.OPRIT || !nietTunnel(i)) continue; const e = pr[kl].asfalt / 2 * Tw; this.takPad(c, i, 0.1 * Tw, net.tLen[i] - 0.1 * Tw, e); this.takPad(c, i, 0.1 * Tw, net.tLen[i] - 0.1 * Tw, -e); }
+      c.stroke(); c.setLineDash([]);
+    }
+    const vers = clamp(Math.max(this.wr.sneeuw * 1.8, (this.sz.sneeuw - 0.6) * 2.5), 0, 1);
+    if (vers > 0.04 && z >= 5.5) {
+      // het laagje ligt tot over de stoeprand (anders lijkt de donkere rand tussen de sneeuwhopen op dwarsliggers);
+      // de rijsporen zijn brede, zachte banen waar het asfalt doorheen schemert
+      c.globalAlpha = a * smooth(5.5, 6.5, z) * vers * 0.62;
+      this.strook(c, nietTunnel, (kl) => (kl === KLASSE.OPRIT ? 0 : pr[kl].asfalt * Tw + 2 * RAND), '#e9edf0');
+      if (z >= 7) {
+        c.globalAlpha = a * smooth(7, 8, z) * vers * 0.5;
+        c.strokeStyle = 'rgba(74,74,71,0.8)'; c.lineWidth = T * 0.013; c.beginPath();
+        for (const i of this.zt) { const kl = net.tKlasse[i]; if (kl === KLASSE.OPRIT || !nietTunnel(i)) continue; const b = pr[kl].baan * Tw; for (const o of b ? [b - 0.012 * Tw, b + 0.012 * Tw, -b - 0.012 * Tw, -b + 0.012 * Tw] : [-0.012 * Tw, 0.012 * Tw]) this.takPad(c, i, 0, net.tLen[i], o); }
+        c.stroke();
+        this.n.sporenSneeuw = this.zt.length;
       }
     }
     // natte weg: glans in de regen
-    if (this.wr.regen > 0.25) {
-      c.globalAlpha = aM * clamp((this.wr.regen - 0.25) * 2, 0, 1) * 0.5;
-      c.strokeStyle = 'rgba(190,205,220,0.35)'; c.lineWidth = T * 0.07;
+    if (this.wr.regen > 0.25 && z >= 6) {
+      c.globalAlpha = a * clamp((this.wr.regen - 0.25) * 2, 0, 1) * 0.35;
       c.setLineDash([T * 0.05, T * 0.13, T * 0.02, T * 0.09]);
-      c.beginPath();
-      for (let i = 0; i < nz; i++) { const w = W[this.zw[i]]; c.moveTo((w.ax + w.ux * w.s0) * sc + this.ox, (w.ay + w.uy * w.s0) * sc + this.oy); c.lineTo((w.ax + w.ux * w.s1) * sc + this.ox, (w.ay + w.uy * w.s1) * sc + this.oy); }
-      c.stroke(); c.setLineDash([]);
-      c.globalAlpha = aM;
+      this.strook(c, nietTunnel, (kl) => (kl === KLASSE.OPRIT ? 0 : pr[kl].asfalt * Tw * 0.5), 'rgba(190,205,220,0.5)', false);
+      c.setLineDash([]);
     }
-    // zebrapaden en stopstrepen waar de weg een woonwijk of de hoofdstad in gaat
+    c.globalAlpha = a;
+    if (z >= 5) this.tekenMarkering(c, a * smooth(5, 6, z) * (1 - 0.6 * vers));
+    c.restore();
+  }
+
+  // Hoe ver de markering van tak i bij knoop k wegblijft: bij een kruising, rotonde of licht tot voorbij het kruisvlak.
+  markeerVrij(k, i) {
+    const net = this.net;
+    if (this.mvNet !== net || this.mvVersie !== net.versie) { this.mvNet = net; this.mvVersie = net.versie; this.mvC = new Float32Array(net.nT * 2).fill(-1); }
+    const j = i * 2 + (net.tB[i] === k ? 1 : 0);
+    if (this.mvC[j] < 0) this.mvC[j] = this.markeerVrijReken(k, i);
+    return this.mvC[j];
+  }
+
+  markeerVrijReken(k, i) {
+    const net = this.net, Tw = this.geo.T;
+    if (net.kSoort[k] === NK.ROTONDE) return (ROTONDE_STRAAL + 0.09) * Tw;
+    let n = 0, b = 0;
+    for (let j = net.adj0[k]; j < net.adj0[k + 1]; j++) { const g = net.adj[j], t = g >= 0 ? g : ~g; if (net.tKlasse[t] === KLASSE.OPRIT) continue; n++; b = Math.max(b, PROFIEL[net.tKlasse[t]].asfalt); }
+    void i;
+    return n >= 3 ? (b / 2 + 0.07) * Tw : 0;
+  }
+
+  // Afstand vanaf knoop k waarop de stopstreep van tak i ligt (voor de zebra als die er is).
+  stopAfstand(k, i) {
+    const net = this.net, Tw = this.geo.T;
+    const zb = this.zebraVan?.get(i * 2 + (net.tB[i] === k ? 1 : 0));
+    if (zb) return (net.tB[i] === k ? net.tLen[i] - zb.s : zb.s) + 0.045 * Tw;
+    return this.markeerVrij(k, i) + 0.01 * Tw;
+  }
+
+  tekenMarkering(c, a) {
+    const net = this.net, Tw = this.geo.T, T = this.T, sc = this.sc, z = this.zoom, pr = PROFIEL;
+    if (a <= 0.01) return;
+    c.globalAlpha = a;
+    // zebra's per tak en kant (voor de stopstrepen)
+    if (!this.zebraVan || this.zebraNet !== net.versie) {
+      this.zebraVan = new Map();
+      for (const zb of net.zebras) this.zebraVan.set(zb.tak * 2 + (net.tB[zb.tak] === zb.knoop ? 1 : 0), zb);
+      this.zebraNet = net.versie;
+    }
+    // hartlijnen: onderbroken op hoofdwegen, op stamwegen ook doorgetrokken kantstrepen
+    c.strokeStyle = 'rgba(236,235,228,0.85)';
+    c.lineWidth = Math.max(0.5, 0.006 * T);
+    c.setLineDash([0.06 * T, 0.08 * T]);
+    c.beginPath();
+    for (const i of this.zt) {
+      const kl = net.tKlasse[i];
+      if ((kl !== KLASSE.HOOFD && kl !== KLASSE.STAM) || net.tBouw[i] === 3) continue;
+      const v0 = this.markeerVrij(net.tA[i], i), v1 = this.markeerVrij(net.tB[i], i);
+      this.takPad(c, i, v0, net.tLen[i] - v1, 0);
+    }
+    c.stroke();
+    c.setLineDash([]);
+    c.lineWidth = Math.max(0.5, 0.004 * T);
+    c.beginPath();
+    for (const i of this.zt) {
+      if (net.tKlasse[i] !== KLASSE.STAM || net.tBouw[i] === 3) continue;
+      const v0 = this.markeerVrij(net.tA[i], i), v1 = this.markeerVrij(net.tB[i], i), e = (pr[KLASSE.STAM].asfalt / 2 - 0.009) * Tw;
+      this.takPad(c, i, v0, net.tLen[i] - v1, e);
+      this.takPad(c, i, v0, net.tLen[i] - v1, -e);
+    }
+    c.stroke();
+    if (z < DREMPEL.zebra - 0.5) return;
+    c.globalAlpha = a * smooth(DREMPEL.zebra - 0.5, DREMPEL.zebra + 0.3, z);
+    const o = this.po ??= {};
     c.fillStyle = WIT;
     c.beginPath();
-    for (let i = 0; i < nz; i++) {
-      const w = W[this.zw[i]];
-      for (const kant of [0, 1]) {
-        if (kant ? !w.stadB : !w.stadA) continue;
-        const q = kant ? w.s1 - 0.045 * Tw : w.s0 + 0.045 * Tw, rich = kant ? -1 : 1;
-        const x = (w.ax + w.ux * q) * sc + this.ox, y = (w.ay + w.uy * q) * sc + this.oy;
-        if (!this.opScherm(x, y, T * 0.2)) continue;
-        for (let k = -2; k <= 2; k++) rechthoek(c, x - w.uy * k * T * 0.021, y + w.ux * k * T * 0.021, w.ux, w.uy, T * 0.017, T * 0.0065);
-        // stopstreep op de inkomende rijstrook
-        const sx = x + w.ux * rich * T * 0.035, sy = y + w.uy * rich * T * 0.035;
-        rechthoek(c, sx + w.uy * rich * T * 0.025, sy - w.ux * rich * T * 0.025, -w.uy, w.ux, T * 0.024, T * 0.003);
+    // zebra's: strepen langs de weg, over de hele breedte van het asfalt
+    for (const zb of net.zebras) {
+      const x = zb.x * sc + this.ox, y = zb.y * sc + this.oy;
+      if (!this.opScherm(x, y, T * 0.2)) continue;
+      net.puntIn(net.D, zb.tak, zb.s, o);
+      const hx = Math.cos(o.hoek), hy = Math.sin(o.hoek), b = pr[net.tKlasse[zb.tak]].asfalt * T / 2;
+      for (let k = -b + T * 0.012; k <= b - T * 0.008; k += T * 0.021) rechthoek(c, x - hy * k, y + hx * k, hx, hy, T * 0.017, T * 0.0065);
+    }
+    // stopstrepen op de inkomende strook bij elk licht
+    for (const L of net.lichten) {
+      const k = L.knoop, kx = net.kx[k] * sc + this.ox, ky = net.ky[k] * sc + this.oy;
+      if (!this.opScherm(kx, ky, T * 0.5)) continue;
+      for (const gIn of L.armen) {
+        const i = gIn >= 0 ? gIn : ~gIn, kl = net.tKlasse[i], d = this.stopAfstand(k, i);
+        if (d > net.tLen[i] * 0.6) continue;
+        const naarB = gIn >= 0, s = naarB ? net.tLen[i] - d : d;
+        net.puntIn(net.D, i, s, o);
+        const hx = Math.cos(o.hoek), hy = Math.sin(o.hoek), b = pr[kl].asfalt / 2 * T, sg = naarB ? 1 : -1;
+        const x = o.x * sc + this.ox, y = o.y * sc + this.oy, m = (b * 0.5 + T * 0.001) * sg;
+        rechthoek(c, x - hy * m, y + hx * m, -hy, hx, b * 0.46, T * 0.003);
+      }
+    }
+    // haaientanden waar een lagere klasse op een hogere uitkomt (kruisingen zonder licht)
+    for (const k of this.zk) {
+      if (net.kSoort[k] !== KRUISING && net.kSoort[k] !== NK.ROTONDE) continue;
+      const A = this.armenVan(k);
+      if (A.length < 3 && net.kSoort[k] !== NK.ROTONDE) continue;
+      let hoog = -1;
+      for (const p of A) hoog = Math.max(hoog, p.kl);
+      for (const p of A) {
+        if (net.kSoort[k] !== NK.ROTONDE && (p.kl >= hoog || p.kl === KLASSE.ERF)) continue;
+        if (p.tunnel) continue;
+        const i = p.i, d = this.markeerVrij(k, i) + 0.012 * Tw;
+        if (d > net.tLen[i] * 0.6) continue;
+        const naarB = net.tB[i] === k, s = naarB ? net.tLen[i] - d : d;
+        net.puntIn(net.D, i, s, o);
+        const hx = Math.cos(o.hoek) * (naarB ? 1 : -1), hy = Math.sin(o.hoek) * (naarB ? 1 : -1), b = pr[p.kl].asfalt / 2 * T;
+        const x = o.x * sc + this.ox, y = o.y * sc + this.oy;
+        // de punten wijzen naar de naderende bestuurder (van de knoop af)
+        for (let q = T * 0.006; q < b - T * 0.004; q += T * 0.013) {
+          const cx = x - hy * q, cy = y + hx * q;
+          c.moveTo(cx - hy * T * 0.0045, cy + hx * T * 0.0045); c.lineTo(cx + hy * T * 0.0045, cy - hx * T * 0.0045); c.lineTo(cx - hx * T * 0.012, cy - hy * T * 0.012); c.closePath();
+        }
       }
     }
     c.fill();
-    if (z >= DREMPEL.bord) {
-      // rijstrookpijlen voor de stopstreep
-      c.fillStyle = WIT; c.beginPath();
-      for (let i = 0; i < nz; i++) {
-        const w = W[this.zw[i]];
-        for (let kant = 0; kant <= 1; kant++) {
-          if (kant ? !w.stadB : !w.stadA) continue;
-          const rich = kant ? 1 : -1, q = kant ? w.s1 - 0.16 * Tw : w.s0 + 0.16 * Tw;
-          const hx = w.ux * rich, hy = w.uy * rich;
-          const x = (w.ax + w.ux * q + w.uy * rich * 0.026 * Tw) * sc + this.ox, y = (w.ay + w.uy * q - w.ux * rich * 0.026 * Tw) * sc + this.oy;
-          if (!this.opScherm(x, y, T * 0.05)) continue;
-          rechthoek(c, x - hx * T * 0.01, y - hy * T * 0.01, hx, hy, T * 0.014, T * 0.0025);
-          c.moveTo(x + hx * T * 0.016, y + hy * T * 0.016); c.lineTo(x + hx * T * 0.002 - hy * T * 0.008, y + hy * T * 0.002 + hx * T * 0.008); c.lineTo(x + hx * T * 0.002 + hy * T * 0.008, y + hy * T * 0.002 - hx * T * 0.008); c.closePath();
+    // parkeervakken: korte witte streepjes langs de stoeprand
+    if (z >= 7.5) {
+      c.strokeStyle = 'rgba(236,235,228,0.7)'; c.lineWidth = Math.max(0.4, T * 0.0025); c.beginPath();
+      for (const p of net.parkeerstroken) {
+        const i = p.tak;
+        if (!this.ztIn[i]) continue;
+        const b = pr[net.tKlasse[i]].asfalt / 2 * Tw, stap = (p.s1 - p.s0) / p.plekken;
+        for (let j = 0; j <= p.plekken; j++) {
+          net.puntIn(net.D, i, p.s0 + j * stap, o);
+          const hx = Math.cos(o.hoek), hy = Math.sin(o.hoek), nx = -hy * p.kant, ny = hx * p.kant;
+          const x0 = o.x + nx * (b - 0.028 * Tw), y0 = o.y + ny * (b - 0.028 * Tw), x1 = o.x + nx * (b - 0.002 * Tw), y1 = o.y + ny * (b - 0.002 * Tw);
+          c.moveTo(x0 * sc + this.ox, y0 * sc + this.oy); c.lineTo(x1 * sc + this.ox, y1 * sc + this.oy);
         }
-      }
-      c.fill();
-    }
-    if (z >= DREMPEL.klein) this.tekenWegKlein(c);
-    c.globalAlpha = 1;
-    void nu;
-  }
-
-  // Op het kleinste niveau: putdeksels, kolken, reparatieplekken, olievlekken en scheurtjes. Eerst de plekken
-  // verzamelen, dan per soort één pad: een paar vullingen per beeld in plaats van een paar per plek.
-  tekenWegKlein(c) {
-    const T = this.T, Tw = this.geo.T, sc = this.sc, W = this.wegen;
-    const buf = this.kleinPos ??= new Float32Array(MAX_KLEIN * 6);
-    let n = 0;
-    for (let i = 0; i < this.nZw && n < MAX_KLEIN; i++) {
-      const w = W[this.zw[i]];
-      for (let q = w.s0 + Tw * 0.15, j = 0; q < w.s1 - Tw * 0.1 && n < MAX_KLEIN; q += Tw * 0.3, j++) {
-        const x = (w.ax + w.ux * q) * sc + this.ox, y = (w.ay + w.uy * q) * sc + this.oy;
-        if (!this.opScherm(x, y, T * 0.1)) continue;
-        const o = n++ * 6;
-        buf[o] = x; buf[o + 1] = y; buf[o + 2] = w.ux; buf[o + 3] = w.uy; buf[o + 4] = hash(w.zaad, j, 81); buf[o + 5] = j & 1 ? 1 : -1;
-      }
-    }
-    c.globalAlpha = smooth(13, 13.6, this.zoom);
-    if (n) {
-      // putdeksels in de rijstrook (h < 0.4), met een lichtere rand
-      const rd = T * 0.0065;
-      c.fillStyle = '#2f302f'; c.beginPath();
-      for (let k = 0; k < n; k++) { const o = k * 6; if (buf[o + 4] >= 0.4) continue; const d = buf[o + 5] * 0.028 * T; stip(c, buf[o] - buf[o + 3] * d, buf[o + 1] + buf[o + 2] * d, T * 0.008); }
-      c.fill();
-      c.strokeStyle = '#6a6a66'; c.lineWidth = Math.max(0.5, T * 0.0015); c.beginPath();
-      for (let k = 0; k < n; k++) { const o = k * 6; if (buf[o + 4] >= 0.4) continue; const d = buf[o + 5] * 0.028 * T, px = buf[o] - buf[o + 3] * d, py = buf[o + 1] + buf[o + 2] * d; c.moveTo(px + rd, py); c.arc(px, py, rd, 0, TAU); }
-      c.stroke();
-      // reparatieplekken: donkerder asfalt (0.4 ≤ h < 0.55)
-      c.fillStyle = 'rgba(30,30,29,0.35)'; c.beginPath();
-      for (let k = 0; k < n; k++) { const o = k * 6, h = buf[o + 4]; if (h < 0.4 || h >= 0.55) continue; const ux = buf[o + 2], uy = buf[o + 3]; rechthoek(c, buf[o] - uy * T * 0.01, buf[o + 1] + ux * T * 0.01, ux, uy, T * 0.03, T * 0.018); }
-      c.fill();
-      // olievlekken (0.55 ≤ h < 0.7): de ellips ligt langs de weg, dus zijn beginpunt is het midden plus rx · richting
-      const rx = T * 0.012;
-      c.fillStyle = 'rgba(20,20,25,0.3)'; c.beginPath();
-      for (let k = 0; k < n; k++) {
-        const o = k * 6, h = buf[o + 4];
-        if (h < 0.55 || h >= 0.7) continue;
-        const ux = buf[o + 2], uy = buf[o + 3], ex = buf[o] - uy * T * 0.025, ey = buf[o + 1] + ux * T * 0.025;
-        c.moveTo(ex + ux * rx, ey + uy * rx); c.ellipse(ex, ey, rx, T * 0.007, Math.atan2(uy, ux), 0, TAU);
-      }
-      c.fill();
-      // scheurtjes (h ≥ 0.7)
-      c.strokeStyle = 'rgba(25,25,24,0.55)'; c.lineWidth = Math.max(0.4, T * 0.0012); c.beginPath();
-      for (let k = 0; k < n; k++) {
-        const o = k * 6;
-        if (buf[o + 4] < 0.7) continue;
-        const x = buf[o], y = buf[o + 1], ux = buf[o + 2], uy = buf[o + 3], nx = -uy, ny = ux;
-        c.moveTo(x - nx * T * 0.03, y - ny * T * 0.03); c.lineTo(x + ux * T * 0.01, y + uy * T * 0.01); c.lineTo(x + nx * T * 0.02 + ux * T * 0.025, y + ny * T * 0.02 + uy * T * 0.025);
       }
       c.stroke();
-      // kolken bij de stoeprand, bij elke plek
-      c.fillStyle = '#1e1f1f'; c.beginPath();
-      for (let k = 0; k < n; k++) { const o = k * 6, ux = buf[o + 2], uy = buf[o + 3]; rechthoek(c, buf[o] - uy * T * 0.052, buf[o + 1] + ux * T * 0.052, ux, uy, T * 0.006, T * 0.003); }
-      c.fill();
     }
-    // reflectorpaaltjes (kattenogen) langs de kantstreep
-    c.fillStyle = '#f4f2ea'; c.beginPath();
-    for (let i = 0; i < this.nZw; i++) {
-      const w = W[this.zw[i]];
-      for (let q = w.s0; q < w.s1; q += Tw * 0.1) for (const o of [-0.046, 0.046]) {
-        const x = (w.ax + w.ux * q - w.uy * o * Tw) * sc + this.ox, y = (w.ay + w.uy * q + w.ux * o * Tw) * sc + this.oy;
-        if (this.opScherm(x, y, 2)) stip(c, x, y, T * 0.0018);
+    // haltes: een gele zigzag langs de stoeprand
+    c.strokeStyle = GEEL; c.lineWidth = Math.max(0.5, T * 0.003); c.beginPath();
+    for (const hl of net.haltes) {
+      const x = hl.x * sc + this.ox, y = hl.y * sc + this.oy;
+      if (!this.opScherm(x, y, T * 0.3)) continue;
+      const i = hl.tak, b = pr[net.tKlasse[i]].asfalt / 2 * Tw - 0.008 * Tw;
+      for (let j = 0; j <= 8; j++) {
+        const s = clamp(hl.s - 0.09 * Tw + j * 0.0225 * Tw, 0, net.tLen[i]);
+        net.puntIn(net.D, i, s, o);
+        const nx = -Math.sin(o.hoek) * hl.kant, ny = Math.cos(o.hoek) * hl.kant, e = b - (j & 1 ? 0.012 * Tw : 0);
+        const X = (o.x + nx * e) * sc + this.ox, Y = (o.y + ny * e) * sc + this.oy;
+        if (j) c.lineTo(X, Y); else c.moveTo(X, Y);
       }
     }
-    c.fill();
+    c.stroke();
   }
 
-  tekenKruisingen(c, nu) {
-    const T = this.T, Tw = this.geo.T, sc = this.sc, z = this.zoom;
-    let n = 0;
-    c.globalAlpha = smooth(5.5, 6.5, z);
-    for (const k of this.kruisingen) {
-      if (n >= PLAFOND.kruisingen) break;
-      const x = k.x * sc + this.ox, y = k.y * sc + this.oy;
-      if (!this.opScherm(x, y, T * 0.3) || (k.zij && this.res[k.tg])) continue;
-      n++;
-      const A = this.wegen[k.a], B = this.wegen[k.b];
-      if (k.rotonde) {
-        c.fillStyle = '#2a2b2a'; c.beginPath(); c.arc(x, y, T * 0.15, 0, TAU); c.fill();
-        c.fillStyle = ASFALT; c.beginPath(); c.arc(x, y, T * 0.135, 0, TAU); c.fill();
-        c.fillStyle = '#97938a'; c.beginPath(); c.arc(x, y, T * 0.07, 0, TAU); c.fill();
-        c.fillStyle = this.gs === 2 && this.sn ? '#dfe3e2' : GRAS[this.gs]; c.beginPath(); c.arc(x, y, T * 0.062, 0, TAU); c.fill();
-        if (z >= DREMPEL.markering) {
-          c.strokeStyle = WIT; c.lineWidth = Math.max(0.5, T * 0.003); c.setLineDash([T * 0.02, T * 0.02]);
-          c.beginPath(); c.arc(x, y, T * 0.1, 0, TAU); c.stroke(); c.setLineDash([]);
-          // boom op het middeneiland
-          c.fillStyle = 'rgba(0,0,0,0.3)'; c.beginPath(); c.arc(x + T * 0.02, y + T * 0.02, T * 0.035, 0, TAU); c.fill();
-          c.fillStyle = this.gs === 1 ? '#b0773a' : this.gs === 2 ? '#6b5a44' : '#3f6a34'; c.beginPath(); c.arc(x, y, T * 0.035, 0, TAU); c.fill();
-          c.fillStyle = 'rgba(255,255,220,0.2)'; c.beginPath(); c.arc(x - T * 0.01, y - T * 0.01, T * 0.016, 0, TAU); c.fill();
-        }
-        if (z >= DREMPEL.verkeerslicht) {
-          // haaientanden bij elke ingang
-          c.fillStyle = WIT; c.beginPath();
-          for (const w of [A, B]) for (const sg of [-1, 1]) {
-            const ex = x + w.ux * sg * T * 0.16, ey = y + w.uy * sg * T * 0.16;
-            for (let j = 0; j < 3; j++) {
-              const o = (0.012 + j * 0.016) * T * sg, px = ex - w.uy * o, py = ey + w.ux * o;
-              c.moveTo(px - w.uy * T * 0.006, py + w.ux * T * 0.006); c.lineTo(px + w.uy * T * 0.006, py - w.ux * T * 0.006); c.lineTo(px - w.ux * sg * T * 0.012, py - w.uy * sg * T * 0.012); c.closePath();
-            }
-          }
-          c.fill();
-        }
-      } else {
-        if (k.zij) {
-          // T-kruising: zijweg met stoepranden, zebra op de hoofdweg en haaientanden op de zijweg
-          const nx = -A.uy * k.zij, ny = A.ux * k.zij, ex = x + nx * T * 0.42, ey = y + ny * T * 0.42;
-          c.strokeStyle = '#97938a'; c.lineWidth = T * 0.1; c.beginPath(); c.moveTo(x + nx * T * 0.05, y + ny * T * 0.05); c.lineTo(ex, ey); c.stroke();
-          c.strokeStyle = ASFALT; c.lineWidth = T * 0.08; c.beginPath(); c.moveTo(x, y); c.lineTo(ex, ey); c.stroke();
-          c.fillStyle = ASFALT; c.beginPath(); c.arc(ex, ey, T * 0.04, 0, TAU); c.fill();
-          if (z >= DREMPEL.zebra) {
-            c.fillStyle = WIT; c.beginPath();
-            for (let j = -2; j <= 2; j++) rechthoek(c, x + A.ux * T * 0.09 - A.uy * j * T * 0.021, y + A.uy * T * 0.09 + A.ux * j * T * 0.021, A.ux, A.uy, T * 0.016, T * 0.0065);
-            for (let j = 0; j < 4; j++) { const o = (j - 1.5) * T * 0.016, px = x + nx * T * 0.075 + A.ux * o, py = y + ny * T * 0.075 + A.uy * o; c.moveTo(px - A.ux * T * 0.006, py - A.uy * T * 0.006); c.lineTo(px + A.ux * T * 0.006, py + A.uy * T * 0.006); c.lineTo(px - nx * T * 0.012, py - ny * T * 0.012); c.closePath(); }
-            c.fill();
-          }
-          if (z >= DREMPEL.bord) {
-            // brievenbus en een hekje aan het eind van het zijweggetje
-            c.fillStyle = '#c43c32'; c.fillRect(ex + A.ux * T * 0.06 - T * 0.006, ey + A.uy * T * 0.06 - T * 0.02, T * 0.012, T * 0.012);
-            c.strokeStyle = '#d8d4c8'; c.lineWidth = Math.max(0.5, T * 0.004); c.beginPath(); c.moveTo(ex - A.ux * T * 0.045 + nx * T * 0.04, ey - A.uy * T * 0.045 + ny * T * 0.04); c.lineTo(ex + A.ux * T * 0.045 + nx * T * 0.04, ey + A.uy * T * 0.045 + ny * T * 0.04); c.stroke();
-          }
-          continue;
-        }
-        // gewoon kruispunt: vlak asfalt, zebra's op elke arm, verkeerslichten op de hoeken
-        c.fillStyle = ASFALT; c.beginPath(); c.arc(x, y, T * 0.07, 0, TAU); c.fill();
-        if (z >= DREMPEL.zebra) {
-          c.fillStyle = WIT; c.beginPath();
-          for (const w of [A, B]) for (const sg of [-1, 1]) {
-            const ex = x + w.ux * sg * T * 0.11, ey = y + w.uy * sg * T * 0.11;
-            for (let j = -2; j <= 2; j++) rechthoek(c, ex - w.uy * j * T * 0.021, ey + w.ux * j * T * 0.021, w.ux, w.uy, T * 0.016, T * 0.0065);
-          }
-          c.fill();
-        }
-        if (z >= DREMPEL.zebra) {
-          // stopstrepen op de inkomende rijstrook van elke arm, waar de auto's van leven.js wachten
-          c.fillStyle = WIT; c.beginPath();
-          for (const w of [A, B]) for (const sg of [-1, 1]) {
-            const ex = x + w.ux * sg * T * 0.14, ey = y + w.uy * sg * T * 0.14;
-            rechthoek(c, ex + w.uy * sg * T * 0.03, ey - w.ux * sg * T * 0.03, -w.uy, w.ux, T * 0.028, T * 0.003);
-          }
-          c.fill();
-        }
-        if (z >= DREMPEL.verkeerslicht) {
-          // groen, oranje en dan rood, met een kort moment waarop beide armen rood hebben (zie CYCLUS)
-          const [P, g, o] = CYCLUS.kruispunt, fA = frac(nu / P + hash(k.zaad, 3));
-          for (const [w, f] of [[A, fA], [B, frac(fA + 0.5)]]) for (const sg of [-1, 1]) {
-            const px = x + w.ux * sg * T * 0.15 - w.uy * sg * T * 0.08, py = y + w.uy * sg * T * 0.15 + w.ux * sg * T * 0.08;
-            this.verkeerslicht(c, px, py, lichtStand(f, g, o));
-          }
-        }
-      }
-    }
-    this.n.kruisingen = n;
-    c.globalAlpha = 1;
-  }
-
-  // Wegwerk op een enkel wegvak (zie werkOp): vers asfalt op de afgesloten strook, rood-witte hekjes met oranje
-  // lampjes die als een looplicht knipperen, pionnen in een schuine lijn ervoor, een waarschuwingsbord voor het
-  // naderende verkeer en overdag een wals die heen en weer rijdt met twee werkers in oranje erbij.
-  tekenWegwerk(c) {
-    const T = this.T, Tw = this.geo.T, sc = this.sc, z = this.zoom, W = this.wegen, dag = this.state.dag, nu = this.nu;
-    let n = 0, nh = 0, nw = 0;
-    const a = smooth(8.5, 9.3, z);
+  // Verkeerslichten (per arm, op de stoep rechts van de stopstreep), bushokjes bij de haltes en lantaarns langs de
+  // stamwegen. Wat getekend is, staat in this.lampen (knoop, arm, stand) voor de test.
+  tekenWegmeubilair(c, a) {
+    const net = this.net, Tw = this.geo.T, T = this.T, sc = this.sc, z = this.zoom, pr = PROFIEL, u = this.u, o = this.po ??= {};
+    if (!this.zk) return;
     c.globalAlpha = a;
-    for (let i = 0; i < this.nZw && n < PLAFOND.wegwerk; i++) {
-      const w = W[this.zw[i]];
-      if (!this.werkOp(w, dag)) continue;
-      const q0 = this.werk0, q1 = this.werk1, kant = this.werkKant, ux = w.ux, uy = w.uy, nx = -uy * kant, ny = ux * kant;
-      // schermpunt op afstand q langs de weg en d tegels dwars (positief: de afgesloten strook in)
-      const P = (q, d) => { this.qx = (w.ax + ux * q + nx * d * Tw) * sc + this.ox; this.qy = (w.ay + uy * q + ny * d * Tw) * sc + this.oy; };
-      // dicht is de buitenste helft van de strook (0,032 tot 0,058 tegel uit het hart); de rest blijft open, zodat
-      // het verkeer er met wat slingeren langs kan (zie leven.js)
-      P((q0 + q1) / 2, 0.045);
-      if (!this.opScherm(this.qx, this.qy, T * 0.45)) continue;
-      n++;
-      const mx = this.qx, my = this.qy, L = ((q1 - q0) * sc) / 2;
-      // het verkeer van deze strook komt van de kant qa; rq wijst van het vak naar dat verkeer toe
-      const qa = kant > 0 ? q0 : q1, rq = kant > 0 ? -1 : 1;
-      c.fillStyle = '#2b2c2b'; c.beginPath(); rechthoek(c, mx, my, ux, uy, L, T * 0.013); c.fill();
-      if (z >= DREMPEL.verkeerslicht) {
-        // naad van het verse asfalt en het glimmende bitumen erlangs
-        c.strokeStyle = 'rgba(170,170,160,0.4)'; c.lineWidth = Math.max(0.5, T * 0.0018); c.beginPath();
-        for (const d of [0.033, 0.057]) { P(q0, d); c.moveTo(this.qx, this.qy); P(q1, d); c.lineTo(this.qx, this.qy); }
-        c.stroke();
-      }
-      // pionnen: dichtbij het vak op de middenlijn, verder weg naar de buitenkant (het verkeer slingert erlangs)
-      const R = Math.max(0.8, T * 0.0055);
-      c.fillStyle = 'rgba(0,0,0,0.3)'; c.beginPath();
-      for (let k = 0; k < 5; k++) { P(qa + rq * (0.03 + k * 0.045) * Tw, 0.034 + k * 0.0055); stip(c, this.qx + R * 0.7, this.qy + R * 0.9, R); }
-      c.fill();
-      c.fillStyle = '#e8641e'; c.beginPath();
-      for (let k = 0; k < 5; k++) { P(qa + rq * (0.03 + k * 0.045) * Tw, 0.034 + k * 0.0055); stip(c, this.qx, this.qy, R); }
-      c.fill();
-      if (z >= DREMPEL.verkeerslicht) {
-        c.fillStyle = '#f4f2ea'; c.beginPath();
-        for (let k = 0; k < 5; k++) { P(qa + rq * (0.03 + k * 0.045) * Tw, 0.034 + k * 0.0055); stip(c, this.qx - R * 0.15, this.qy - R * 0.15, R * 0.5); }
-        c.fill();
-      }
-      // hekjes langs de binnenkant en dwars over beide koppen: wit met rode vakken
-      const hb = Math.max(0.7, T * 0.005);
-      c.lineCap = 'butt';
-      for (let laag = 0; laag < 3; laag++) {
-        c.strokeStyle = laag === 0 ? 'rgba(0,0,0,0.28)' : laag === 1 ? '#f2f0ea' : '#c8322b';
-        c.lineWidth = hb;
-        if (laag === 2) c.setLineDash([T * 0.012, T * 0.012]);
-        const dx = laag === 0 ? T * 0.004 : 0, dy = laag === 0 ? T * 0.005 : 0;
-        c.beginPath();
-        P(q0, 0.058); c.moveTo(this.qx + dx, this.qy + dy); P(q0, 0.032); c.lineTo(this.qx + dx, this.qy + dy);
-        P(q1, 0.032); c.lineTo(this.qx + dx, this.qy + dy); P(q1, 0.058); c.lineTo(this.qx + dx, this.qy + dy);
-        c.stroke();
-      }
-      c.setLineDash([]);
-      nh += Math.ceil((q1 - q0) / (0.04 * Tw)) + 2;
-      // lampjes op de hekjes: een looplicht naar de kant waar je omheen moet; 's nachts met gloed
-      const nL = Math.max(2, Math.round((q1 - q0) / (0.06 * Tw)));
-      c.fillStyle = '#ffb02e'; c.beginPath();
-      for (let k = 0; k <= nL; k++) {
-        const t = kant > 0 ? k / nL : 1 - k / nL;
-        if (frac(nu / 1400 - t * 0.6) > 0.22) continue;
-        P(q0 + (q1 - q0) * (k / nL), 0.032);
-        stip(c, this.qx, this.qy - T * 0.006, Math.max(0.7, T * 0.003));
-        if (this.nacht > 0.05) this.zetLicht(this.qx, this.qy - T * 0.006, Math.max(2, T * 0.02), AMBER, 0.9);
-      }
-      c.fill();
-      // waarschuwingsbord op de berm voor het naderende verkeer: paal schuin omhoog, witte driehoek met rode rand
-      if (z >= DREMPEL.verkeerslicht) {
-        P(qa + rq * 0.3 * Tw, 0.085);
-        const bx = this.qx, by = this.qy, H = T * 0.04, s = T * 0.012;
-        c.strokeStyle = 'rgba(0,0,0,0.28)'; c.lineWidth = Math.max(0.5, T * 0.003); c.beginPath(); c.moveTo(bx, by); c.lineTo(bx + H * SCHUIN, by + H * SCHUIN); c.stroke();
-        c.strokeStyle = PAAL; c.beginPath(); c.moveTo(bx, by); c.lineTo(bx, by - H); c.stroke();
-        c.fillStyle = '#c8322b'; c.beginPath(); c.moveTo(bx, by - H - s); c.lineTo(bx + s, by - H + s * 0.7); c.lineTo(bx - s, by - H + s * 0.7); c.closePath(); c.fill();
-        c.fillStyle = '#f4f2ea'; c.beginPath(); c.moveTo(bx, by - H - s * 0.55); c.lineTo(bx + s * 0.62, by - H + s * 0.42); c.lineTo(bx - s * 0.62, by - H + s * 0.42); c.closePath(); c.fill();
-        if (z >= DREMPEL.klein) { c.fillStyle = '#1d1f21'; c.beginPath(); stip(c, bx - s * 0.08, by - H - s * 0.05, s * 0.12); rechthoek(c, bx + s * 0.05, by - H + s * 0.2, 0.6, 0.8, s * 0.22, s * 0.06); c.fill(); }
-      }
-      // overdag: tandemwals en twee werkers
-      if (this.nacht < 0.45 && z >= DREMPEL.verkeerslicht - 1) {
-        const f = tri(this.klok / 18 + hash(w.zaad, 144));
-        P(q0 + 0.06 * Tw + (q1 - q0 - 0.12 * Tw) * f, 0.045);
-        const x = this.qx, y = this.qy, l = T * 0.026, b = T * 0.012;
-        c.fillStyle = 'rgba(0,0,0,0.3)'; c.beginPath(); rechthoek(c, x + T * 0.008, y + T * 0.01, ux, uy, l * 1.1, b * 1.1); c.fill();
-        c.fillStyle = '#d9a63a'; c.beginPath(); rechthoek(c, x, y, ux, uy, l * 0.7, b * 0.85); c.fill();
-        // trommels voor en achter, met een lichte rand aan de noordwestkant
-        c.fillStyle = '#6d7175'; c.beginPath();
-        for (const e of [-1, 1]) rechthoek(c, x + ux * e * l * 0.82, y + uy * e * l * 0.82, ux, uy, l * 0.2, b);
-        c.fill();
-        c.fillStyle = 'rgba(255,255,255,0.25)'; c.beginPath();
-        for (const e of [-1, 1]) rechthoek(c, x + ux * e * l * 0.82 - T * 0.002, y + uy * e * l * 0.82 - T * 0.002, ux, uy, l * 0.08, b * 0.9);
-        c.fill();
-        c.fillStyle = '#2f3336'; c.beginPath(); rechthoek(c, x - ux * l * 0.15, y - uy * l * 0.15, ux, uy, l * 0.28, b * 0.55); c.fill();
-        if (frac(nu / 600) < 0.5) { c.fillStyle = '#ffb02e'; c.beginPath(); stip(c, x - ux * l * 0.15, y - uy * l * 0.15, Math.max(0.7, T * 0.0035)); c.fill(); }
-        // werkers: oranje hesje met een gele streep, witte helm; de een leunt op een schop
-        for (let k = 0; k < 2 && nw < PLAFOND.wegwerkers; k++, nw++) {
-          P(k ? q1 - 0.04 * Tw : q0 + 0.05 * Tw, 0.043 + 0.008 * k);
-          const wx = this.qx + Math.sin(this.klok * 1.3 + k * 2) * T * 0.002, wy = this.qy, r = Math.max(0.8, T * 0.0095);
-          c.fillStyle = 'rgba(0,0,0,0.3)'; c.beginPath(); stip(c, wx + r * 0.5, wy + r * 0.6, r); c.fill();
-          if (k === 0 && z >= DREMPEL.verkeerslicht) { c.strokeStyle = '#6b5236'; c.lineWidth = Math.max(0.5, T * 0.0022); c.beginPath(); c.moveTo(wx + ux * r, wy + uy * r); c.lineTo(wx + ux * r * 2.6, wy + uy * r * 2.6 + r * 0.4); c.stroke(); }
-          c.fillStyle = '#f07a1f'; c.beginPath(); stip(c, wx, wy, r); c.fill();
-          c.fillStyle = '#e8e23a'; c.beginPath(); rechthoek(c, wx, wy, -uy, ux, r * 0.95, r * 0.18); c.fill();
-          c.fillStyle = '#f4f4ef'; c.beginPath(); stip(c, wx - r * 0.1, wy - r * 0.25, r * 0.55); c.fill();
-        }
+    for (const L of net.lichten) {
+      const k = L.knoop, kx = net.kx[k] * sc + this.ox, ky = net.ky[k] * sc + this.oy;
+      if (!this.opScherm(kx, ky, T * 0.5)) continue;
+      for (let arm = 0; arm < L.armen.length; arm++) {
+        const gIn = L.armen[arm], i = gIn >= 0 ? gIn : ~gIn, kl = net.tKlasse[i], d = this.stopAfstand(k, i);
+        if (d > net.tLen[i] * 0.6) continue;
+        const naarB = gIn >= 0, s = naarB ? net.tLen[i] - d : d, sg = naarB ? 1 : -1;
+        net.puntIn(net.D, i, s, o);
+        const hx = Math.cos(o.hoek) * sg, hy = Math.sin(o.hoek) * sg;
+        const e = (pr[kl].asfalt / 2 + Math.max(0.012, pr[kl].stoep * 0.55)) * Tw;
+        const x = (o.x - hy * e) * sc + this.ox, y = (o.y + hx * e) * sc + this.oy;
+        const stand = lichtStand(net, k, arm, u);
+        this.lampen.push(k, arm, stand);
+        this.verkeerslicht(c, x, y, stand, hx, hy);
       }
     }
-    this.n.wegwerk = n; this.n.hekjes = nh; this.n.wegwerkers = nw;
-    c.globalAlpha = 1;
-  }
-
-  // Laanbomen langs de wegen (in de stad voorbij het fietspad), in de kleur van het seizoen (kaal in de winter, bloesem in het voorjaar).
-  tekenLaanbomen(c, a) {
-    const T = this.T, Tw = this.geo.T, sc = this.sc, W = this.wegen, s = this.state, kol = this.geo.kol;
-    const buf = this.boomPos ??= new Float32Array(PLAFOND.bomen * 4);
-    let n = 0;
-    for (let i = 0; i < this.nZw && n < PLAFOND.bomen; i++) {
-      const w = W[this.zw[i]];
-      if (hash(w.zaad, 51) > 0.85) continue;
-      const af = (w.stadA || w.stadB ? 0.2 : 0.16) * Tw; // in de stad voorbij het fietspad
-      for (let q = w.s0 + Tw * 0.14, j = 0; q < w.s1 - Tw * 0.1 && n < PLAFOND.bomen; q += Tw * 0.28, j++) {
-        for (let kant = -1; kant <= 1 && n < PLAFOND.bomen; kant += 2) {
-          const wx = w.ax + w.ux * q - w.uy * kant * af, wy = w.ay + w.uy * q + w.ux * kant * af;
+    // bushokjes
+    if (z >= DREMPEL.halte - 1.5) {
+      c.globalAlpha = a * smooth(DREMPEL.halte - 1.5, DREMPEL.halte - 0.5, z);
+      for (const hl of net.haltes) {
+        if (this.n.haltes >= PLAFOND.haltes) break;
+        const i = hl.tak, kl = net.tKlasse[i];
+        net.puntIn(net.D, i, hl.s, o);
+        const hx = Math.cos(o.hoek), hy = Math.sin(o.hoek), nx = -hy * hl.kant, ny = hx * hl.kant;
+        const e = (pr[kl].asfalt / 2 + pr[kl].stoep * 0.6) * Tw;
+        const x = (o.x + nx * e) * sc + this.ox, y = (o.y + ny * e) * sc + this.oy;
+        if (!this.opScherm(x, y, T * 0.1)) continue;
+        this.n.haltes++;
+        // schaduw, dak met een lichte rand, glazen achterwand aan de stoepkant
+        c.fillStyle = 'rgba(0,0,0,0.28)'; c.beginPath(); rechthoek(c, x + T * 0.008, y + T * 0.009, hx, hy, T * 0.03, T * 0.009); c.fill();
+        c.fillStyle = '#3d4a52'; c.beginPath(); rechthoek(c, x, y, hx, hy, T * 0.03, T * 0.009); c.fill();
+        c.fillStyle = 'rgba(190,215,230,0.55)'; c.beginPath(); rechthoek(c, x + nx * T * 0.004, y + ny * T * 0.004, hx, hy, T * 0.027, T * 0.003); c.fill();
+        if (z >= DREMPEL.halte) { c.fillStyle = '#d9a63a'; c.beginPath(); stip(c, x + hx * T * 0.036, y + hy * T * 0.036, Math.max(0.7, T * 0.004)); c.fill(); }
+        if (this.nacht > 0.05) this.zetLicht(x, y, Math.max(2, T * 0.04), KOEL, 0.55 * this.nacht);
+      }
+    }
+    // lantaarns langs de stamwegen, om en om op de berm (in de stad zet stad.js ze op de stoep)
+    if (z >= DREMPEL.lantaarn - 0.5) {
+      c.globalAlpha = a * smooth(DREMPEL.lantaarn - 0.5, DREMPEL.lantaarn + 0.3, z);
+      const S = SCHUIN;
+      for (const i of this.zt) {
+        if (net.tKlasse[i] !== KLASSE.STAM || net.tBouw[i] === 3) continue;
+        const len = net.tLen[i], e = (pr[KLASSE.STAM].asfalt / 2 + 0.025) * Tw;
+        for (let s = 0.25 * Tw, j = 0; s < len - 0.15 * Tw; s += 0.5 * Tw, j++) {
+          if (this.n.lantaarns >= PLAFOND.lantaarns) break;
+          net.puntIn(net.D, i, s, o);
+          const kant = (j + net.tZaad[i]) & 1 ? 1 : -1, nx = -Math.sin(o.hoek) * kant, ny = Math.cos(o.hoek) * kant;
+          const wx = o.x + nx * e, wy = o.y + ny * e;
+          if (net.tBouw[i] === 0 && this.isWater(wx, wy)) continue;
           const x = wx * sc + this.ox, y = wy * sc + this.oy;
           if (!this.opScherm(x, y, T * 0.1)) continue;
-          const tg = Math.floor(wy / Tw) * kol + Math.floor(wx / Tw);
-          if (s.bezet[tg] || this.res[tg] || this.isWater(wx, wy) || this.isZoet(wx, wy) || this.inTunnel(w, q)) continue;
-          const o = n * 4, h = hash(w.zaad, j * 2 + (kant > 0 ? 1 : 0), 52);
-          buf[o] = x; buf[o + 1] = y; buf[o + 2] = T * 0.034 * (0.75 + 0.5 * h); buf[o + 3] = h;
-          n++;
+          this.n.lantaarns++;
+          const hgt = T * 0.06, kx = x - nx * T * 0.022, ky = y - ny * T * 0.022 - hgt;
+          c.strokeStyle = 'rgba(0,0,0,0.25)'; c.lineWidth = Math.max(0.5, T * 0.004);
+          c.beginPath(); c.moveTo(x, y); c.lineTo(x + hgt * S, y + hgt * S); c.stroke();
+          c.strokeStyle = PAAL; c.beginPath(); c.moveTo(x, y); c.lineTo(x, y - hgt); c.lineTo(kx, ky); c.stroke();
+          c.fillStyle = '#d8d6cc'; c.beginPath(); stip(c, kx, ky, Math.max(0.6, T * 0.004)); c.fill();
+          if (this.nacht > 0.05) { this.zetLicht(kx, ky + hgt * 0.9, Math.max(3, T * 0.09), WARM, 0.55 * this.nacht); this.zetSpiegel(kx, ky + hgt, Math.max(2, T * 0.03), WARM, 0.5); }
         }
-      }
-    }
-    this.n.bomen = n;
-    if (!n) return;
-    const sz = this.sz, kaal = sz.winter > 0.55;
-    c.globalAlpha = a;
-    // schaduw naar het zuidoosten, dan de stam, dan de kruin (opgetild: de boom staat schuin omhoog)
-    c.fillStyle = 'rgba(0,0,0,0.26)'; c.beginPath();
-    // (moveTo naar het beginpunt van de gedraaide ellips, anders trekt het pad een puntje naar buiten)
-    for (let k = 0; k < n; k++) { const o = k * 4, r = buf[o + 2]; c.moveTo(buf[o] + r * (0.6 + COS06), buf[o + 1] + r * (0.9 + SIN06)); c.ellipse(buf[o] + r * 0.6, buf[o + 1] + r * 0.9, r, r * 0.7, 0.6, 0, TAU); }
-    c.fill();
-    c.strokeStyle = '#4a3a2c'; c.lineWidth = Math.max(0.6, T * 0.005); c.beginPath();
-    for (let k = 0; k < n; k++) { const o = k * 4; c.moveTo(buf[o], buf[o + 1]); c.lineTo(buf[o], buf[o + 1] - buf[o + 2] * 0.8); }
-    c.stroke();
-    if (kaal) {
-      // kale takken, met wat sneeuw erop
-      c.strokeStyle = '#6b5a4a'; c.lineWidth = Math.max(0.5, T * 0.0025); c.beginPath();
-      for (let k = 0; k < n; k++) {
-        const o = k * 4, x = buf[o], y = buf[o + 1] - buf[o + 2] * 0.8, r = buf[o + 2];
-        for (let t = 0; t < 5; t++) { const hk = -Math.PI / 2 + (t - 2) * 0.55; c.moveTo(x, y); c.lineTo(x + Math.cos(hk) * r, y + Math.sin(hk) * r * 0.9); }
-      }
-      c.stroke();
-      if (this.sn) { c.fillStyle = 'rgba(244,246,248,0.7)'; c.beginPath(); for (let k = 0; k < n; k++) { const o = k * 4; stip(c, buf[o] - buf[o + 2] * 0.2, buf[o + 1] - buf[o + 2] * 1.4, buf[o + 2] * 0.35); } c.fill(); }
-    } else {
-      for (let groep = 0; groep < 2; groep++) {
-        c.fillStyle = sz.herfst > 0.5 ? (groep ? '#c9902f' : '#a0602e') : sz.lente > 0.5 ? (groep ? '#6f9a48' : '#5d8a3f') : (groep ? '#4a7a3a' : '#3f6a34');
-        c.beginPath();
-        for (let k = 0; k < n; k++) { const o = k * 4; if ((buf[o + 3] < 0.5 ? 0 : 1) !== groep) continue; stip(c, buf[o], buf[o + 1] - buf[o + 2] * 1.1, buf[o + 2]); }
-        c.fill();
-      }
-      c.fillStyle = 'rgba(255,255,215,0.2)'; c.beginPath();
-      for (let k = 0; k < n; k++) { const o = k * 4, r = buf[o + 2]; stip(c, buf[o] - r * 0.3, buf[o + 1] - r * 1.4, r * 0.45); }
-      c.fill();
-      if (sz.bloei > 0.25 && this.zoom >= DREMPEL.halte) {
-        c.fillStyle = '#f3c8d4'; c.beginPath();
-        for (let k = 0; k < n; k++) { if (buf[k * 4 + 3] > 0.45) continue; const o = k * 4, r = buf[o + 2]; for (let t = 0; t < 4; t++) stip(c, buf[o] + Math.cos(t * 1.9 + k) * r * 0.6, buf[o + 1] - r * 1.1 + Math.sin(t * 1.9 + k) * r * 0.6, Math.max(0.6, r * 0.12)); }
-        c.fill();
       }
     }
     c.globalAlpha = 1;
   }
 
-  // Paal met lichtkast, schuin omhoog; stand 0 rood, 1 oranje, 2 groen. Rood zit bovenaan (verst van de grond),
-  // groen onderaan, zoals bij een echt verkeerslicht.
-  verkeerslicht(c, x, y, stand) {
+  // Een verkeerslicht op (x, y) dat naar de weggebruiker kijkt die in richting (hx, hy) rijdt. stand: 0 rood, 1 groen,
+  // 2 oranje (lichtStand).
+  verkeerslicht(c, x, y, stand, hx = 0, hy = 1) {
     if (this.n.verkeerslichten >= PLAFOND.verkeerslichten || !this.opScherm(x, y, this.T * 0.1)) return;
     this.n.verkeerslichten++;
-    const T = this.T, hgt = T * 0.05;
-    c.strokeStyle = 'rgba(0,0,0,0.28)'; c.lineWidth = Math.max(0.6, T * 0.005);
+    const T = this.T, hgt = T * 0.045, z = this.zoom;
+    const kleur = stand === 0 ? '#ff4a3a' : stand === 1 ? '#4dff7a' : '#ffb02e';
+    const soort = stand === 0 ? ROOD : stand === 1 ? GROEN : AMBER;
+    if (z < DREMPEL.verkeerslicht) {
+      // van verder weg: een gekleurde stip op de stoep
+      c.fillStyle = '#1d1f21'; c.beginPath(); stip(c, x, y, Math.max(0.8, T * 0.006)); c.fill();
+      c.fillStyle = kleur; c.beginPath(); stip(c, x, y, Math.max(0.6, T * 0.0042)); c.fill();
+      this.zetLicht(x, y, Math.max(2, T * 0.02), soort, 0.9);
+      return;
+    }
+    c.strokeStyle = 'rgba(0,0,0,0.28)'; c.lineWidth = Math.max(0.6, T * 0.004);
     c.beginPath(); c.moveTo(x, y); c.lineTo(x + hgt * SCHUIN, y + hgt * SCHUIN); c.stroke();
     c.strokeStyle = PAAL; c.beginPath(); c.moveTo(x, y); c.lineTo(x, y - hgt); c.stroke();
-    c.fillStyle = '#1d1f21'; c.fillRect(x - T * 0.006, y - hgt - T * 0.016, T * 0.012, T * 0.03);
-    const kleur = ['#ff4a3a', '#ffb02e', '#4dff7a'][stand], ly = y - hgt - T * 0.01 + stand * T * 0.009;
-    c.fillStyle = 'rgba(80,80,80,0.9)';
-    c.beginPath();
-    for (let j = 0; j < 3; j++) if (j !== stand) stip(c, x, y - hgt - T * 0.01 + j * T * 0.009, T * 0.0035);
+    // de kast staat dwars op de rijrichting; de lampen boven elkaar (rood boven, groen onder)
+    const bx = x, by = y - hgt;
+    c.fillStyle = '#1d1f21'; c.fillRect(bx - T * 0.006, by - T * 0.016, T * 0.012, T * 0.03);
+    const pos = [0, 2, 1]; // rij van rood, groen, oranje in de kast
+    c.fillStyle = 'rgba(80,80,80,0.9)'; c.beginPath();
+    for (let j = 0; j < 3; j++) if (j !== pos[stand]) stip(c, bx, by - T * 0.01 + j * T * 0.009, T * 0.0033);
     c.fill();
-    c.fillStyle = kleur; c.beginPath(); stip(c, x, ly, T * 0.004); c.fill();
-    const soort = stand === 0 ? ROOD : stand === 1 ? AMBER : GROEN;
-    this.zetLicht(x, ly, Math.max(2, T * 0.02), soort, 0.9);
-    // op een natte weg spiegelt het licht als een lange streep onder de paal
-    this.zetSpiegel(x + T * 0.004, y + T * 0.004, Math.max(2, T * 0.016), soort, 0.7);
+    const ly = by - T * 0.01 + pos[stand] * T * 0.009;
+    c.fillStyle = kleur; c.beginPath(); stip(c, bx, ly, T * 0.004); c.fill();
+    this.zetLicht(bx, ly, Math.max(2, T * 0.02), soort, 0.9);
+    this.zetSpiegel(bx + T * 0.004, y + T * 0.004, Math.max(2, T * 0.016), soort, 0.7);
+    void hx; void hy;
   }
 
-  tekenOverwegen(c, nu) {
-    const T = this.T, Tw = this.geo.T, sc = this.sc, z = this.zoom;
+  tekenOverwegen(c) {
+    const T = this.T, sc = this.sc, z = this.zoom, u = this.u;
     c.globalAlpha = smooth(6, 7, z);
     for (const o of this.overwegen) {
       const x = o.x * sc + this.ox, y = o.y * sc + this.oy;
       if (!this.opScherm(x, y, T * 0.2)) continue;
-      // betonplaten over de hele breedte van de weg (stoeprand tot stoeprand, langs het spoor gemeten dus breder
-      // naarmate de weg schuiner kruist) en dwars over de grindbaan; de rails er weer overheen
+      // betonplaten over de hele breedte van de weg (langs het spoor gemeten dus breder naarmate de weg schuiner
+      // kruist) en dwars over de grindbaan; de rails er weer overheen
       const kr = o.hx * o.uy - o.hy * o.ux, ak = Math.max(0.35, Math.abs(kr)), cosk = o.hx * o.ux + o.hy * o.uy;
-      const lp = T * 0.068 / ak;
+      const b = PROFIEL[o.klasse ?? KLASSE.STRAAT].asfalt / 2, lp = T * (b + 0.008) / ak;
       c.fillStyle = '#8e8a80'; c.beginPath(); rechthoek(c, x, y, o.hx, o.hy, lp, T * 0.058); c.fill();
       c.strokeStyle = STAAL; c.lineWidth = Math.max(0.6, T * 0.0055); c.beginPath();
       for (const g of [-0.0175, 0.0175]) { const px = x - o.hy * g * T, py = y + o.hx * g * T; c.moveTo(px - o.hx * lp, py - o.hy * lp); c.lineTo(px + o.hx * lp, py + o.hy * lp); }
       c.stroke();
-      if (z < DREMPEL.overweg) continue;
-      // slagbomen: dicht als er een trein binnen anderhalve tegel is
-      const r = this.routes[o.r];
-      let d = Infinity;
-      for (let j = 0; j < r.treinen.length; j++) { this.treinStand(r, j); const lo = Math.min(this.kop, this.staart), hi = Math.max(this.kop, this.staart); d = Math.min(d, o.sr < lo ? lo - o.sr : o.sr > hi ? o.sr - hi : 0); }
-      const dicht = clamp((1.6 * Tw - d) / (0.4 * Tw), 0, 1);
-      const knip = dicht > 0 && frac(nu / 700) < 0.5;
-      // palen naast de weg en net buiten de grindbaan, ook als de weg schuin over het spoor gaat
-      const dp = (T * 0.075 - T * 0.07 * cosk * (kr < 0 ? -1 : 1)) / ak;
+      if (z < DREMPEL.overweg - 1) continue;
+      // slagbomen volgen de dicht-vensters; de rode lichten knipperen om en om op u
+      const dicht = this.boomStand(o, u), knip = this.knippert(o, u) && frac(u / 0.7) < 0.5;
+      const dp = (T * (b + 0.008) - T * 0.07 * cosk * (kr < 0 ? -1 : 1)) / ak;
       for (const k of [-1, 1]) {
         const nx = -o.uy * k, ny = o.ux * k;
-        const px = x + o.ux * k * dp + nx * T * 0.07, py = y + o.uy * k * dp + ny * T * 0.07;
-        const ex = px - nx * T * 0.065 * dicht, ey = py - ny * T * 0.065 * dicht - T * 0.06 * (1 - dicht);
+        const px = x + o.ux * k * dp + nx * T * (b + 0.004), py = y + o.uy * k * dp + ny * T * (b + 0.004);
+        const L = T * (b * 0.95);
+        const ex = px - nx * L * dicht, ey = py - ny * L * dicht - T * 0.06 * (1 - dicht);
         c.strokeStyle = 'rgba(0,0,0,0.25)'; c.lineWidth = Math.max(0.6, T * 0.006);
         c.beginPath(); c.moveTo(px + T * 0.01, py + T * 0.01); c.lineTo(ex + T * 0.01 + T * 0.03 * (1 - dicht), ey + T * 0.01 + T * 0.06 * (1 - dicht)); c.stroke();
         c.strokeStyle = WIT; c.lineWidth = Math.max(0.8, T * 0.007); c.beginPath(); c.moveTo(px, py); c.lineTo(ex, ey); c.stroke();
         c.strokeStyle = '#c43c32'; c.setLineDash([T * 0.01, T * 0.01]); c.beginPath(); c.moveTo(px, py); c.lineTo(ex, ey); c.stroke(); c.setLineDash([]);
         c.fillStyle = '#222'; c.fillRect(px - T * 0.006, py - T * 0.006, T * 0.012, T * 0.012);
-        // waarschuwingslichten knipperen om en om
-        c.fillStyle = knip === (k > 0) ? '#ff4a3a' : '#5a2a28'; c.beginPath(); stip(c, px, py - T * 0.02, T * 0.004); c.fill();
-        if (knip === (k > 0)) this.zetLicht(px, py - T * 0.02, Math.max(2, T * 0.025), ROOD, 1);
+        const aan = knip === (k > 0) && this.knippert(o, u);
+        c.fillStyle = aan ? '#ff4a3a' : '#5a2a28'; c.beginPath(); stip(c, px, py - T * 0.02, T * 0.004); c.fill();
+        if (aan) this.zetLicht(px, py - T * 0.02, Math.max(2, T * 0.025), ROOD, 1);
       }
     }
     c.globalAlpha = 1;
@@ -2682,20 +2851,123 @@ export class InfraLaag {
 
   // ---------- treinen ----------
 
-  // Waar trein j op route r nu rijdt: this.kop (voorkant in de rijrichting), this.staart en this.rich (+1 heen, -1 terug).
-  treinStand(r, j) {
+  // Aan de verre kant van elke lijn (zie maakRoute): een kort perron naast het spoor, met een witte rand, een lamp
+  // en een rood-wit stootblok voorbij het eind van de rails.
+  tekenKopperrons(c, a) {
+    const T = this.T, sc = this.sc, R = this.routes;
+    c.globalAlpha = a;
+    for (let i = 0; i < this.nZr && this.n.kopperrons < PLAFOND.kopperrons; i++) {
+      const r = R[this.zr[i]], L = r.L, Ltr = this.lengteTrein(r);
+      const ex = r.x[r.n - 1] * sc + this.ox, ey = r.y[r.n - 1] * sc + this.oy;
+      if (!this.opScherm(ex, ey, T * 0.8)) continue;
+      this.n.kopperrons++;
+      const lp = Math.min(L * 0.5, Ltr + 0.06 * this.geo.T), k = r.kopKant;
+      this.punt(r, L - lp / 2);
+      const mx = this.px * sc + this.ox, my = this.py * sc + this.oy, hx = this.hx, hy = this.hy, nx = -hy * k, ny = hx * k;
+      const px = mx + nx * T * 0.078, py = my + ny * T * 0.078, hl = (lp / this.geo.T / 2) * T;
+      c.fillStyle = 'rgba(0,0,0,0.25)'; c.beginPath(); rechthoek(c, px + T * 0.006, py + T * 0.006, hx, hy, hl, T * 0.024); c.fill();
+      c.fillStyle = '#a9a59b'; c.beginPath(); rechthoek(c, px, py, hx, hy, hl, T * 0.024); c.fill();
+      c.fillStyle = WIT; c.beginPath(); rechthoek(c, px - nx * T * 0.021, py - ny * T * 0.021, hx, hy, hl, T * 0.0018); c.fill();
+      // stootblok
+      this.punt(r, L);
+      const sx = this.px * sc + this.ox + this.hx * T * 0.012, sy = this.py * sc + this.oy + this.hy * T * 0.012;
+      c.fillStyle = '#2b2b2b'; c.beginPath(); rechthoek(c, sx, sy, this.hx, this.hy, T * 0.006, T * 0.03); c.fill();
+      c.fillStyle = '#c43c32'; c.beginPath(); rechthoek(c, sx, sy, this.hx, this.hy, T * 0.004, T * 0.026); c.fill();
+      c.fillStyle = WIT; c.beginPath(); rechthoek(c, sx, sy, this.hx, this.hy, T * 0.0042, T * 0.008); c.fill();
+      // lamp op het perron
+      const lx = px + hx * hl * 0.6, ly = py + hy * hl * 0.6;
+      c.fillStyle = PAAL; c.beginPath(); stip(c, lx, ly, Math.max(0.8, T * 0.005)); c.fill();
+      if (this.nacht > 0.05) this.zetLicht(lx, ly - T * 0.03, Math.max(2, T * 0.05), 0, 0.7 * this.nacht);
+    }
+    c.globalAlpha = 1;
+  }
+
+  lengteTrein(r) { return r.treinen.length ? Math.min(r.treinen[0].totaal, r.L * 0.5) : 0; }
+
+  // Reizigers die uitstappen: zodra een personentrein stilstaat (aan het perron van het station of aan het kopperron
+  // aan de verre kant), stappen er uit elke wagon een paar mensen uit. Ze lopen naar het perron en dan naar de
+  // uitgang: het stationsgebouw, de loopbrug of het gebouw aan het eind van de lijn, waar ze naar binnen gaan.
+  // Alles volgt uit de tijd sinds de trein aankwam, dus ook als hij al weer vertrekt lopen ze gewoon door.
+  tekenReizigers(c, a) {
+    const T = this.T, Tw = this.geo.T, sc = this.sc, R = this.routes, K = ['#c0392b', '#2e86c1', '#f0b429', '#ecefe9', '#34495e', '#2f9e5b', '#8e5a9b', '#d9822b'];
+    c.globalAlpha = a;
+    for (let i = 0; i < this.nZr; i++) {
+      const r = R[this.zr[i]];
+      if (r.goederen) continue;
+      for (let j = 0; j < r.treinen.length; j++) {
+        const tr = r.treinen[j];
+        this.treinStand(r, j);
+        const per = this.per, Ltr = this.ltr, L = r.L, rit = this.rit, wacht = this.wacht, t = this.tTrein;
+        for (let kant = 0; kant <= 1; kant++) {
+          // aankomst: aan de verre kant op wacht + rit, terug bij het station op 2 · (wacht + rit) = per
+          const ta = kant ? t - (wacht + rit) : t < wacht + rit ? t : t - per;
+          if (ta < 0 || ta > 14) continue;
+          if (!kant && !r.perron) continue;
+          const nW = tr.lengtes.length, mensen = Math.min(nW * 2, 8);
+          for (let m = 0; m < mensen && this.n.reizigers < PLAFOND.reizigers; m++) {
+            const h1 = hash(r.zaad, j * 64 + m, 31 + kant), h2 = hash(r.zaad, j * 64 + m, 33 + kant);
+            const tt = ta - 0.6 - 2.2 * h1;
+            if (tt < 0) continue;
+            // deur: ergens in de trein (de trein staat op [0, Ltr] bij het station en op [L - Ltr, L] aan de verre kant)
+            const sd = (0.12 + 0.82 * ((m + 0.5 * h2) / mensen)) * Ltr, s0 = kant ? L - sd : sd;
+            const stap = 0.25, loopV = 0.11 * Tw;
+            // eerst de stap naar het perron, dan langs en (bij het station) dwars naar de uitgang
+            let s = s0, dw, alfa = 1;
+            const dwP = kant ? 0.078 * Tw * r.kopKant : r.perron.dw;
+            if (tt < stap) dw = dwP * (0.4 + 0.6 * (tt / stap));
+            else {
+              const w = (tt - stap) * loopV;
+              if (kant) {
+                const lang = L + 0.05 * Tw - s0;
+                if (w < lang) { s = s0 + w; dw = dwP; }
+                else { s = L + 0.05 * Tw + (w - lang); dw = dwP * Math.max(0, 1 - (w - lang) / (0.1 * Tw)); alfa = clamp(1 - (w - lang) / (0.12 * Tw), 0, 1); }
+              } else if (r.perron.uitS < 0) {
+                const dwars = Math.abs(r.perron.uitDw - dwP);
+                if (w < dwars) dw = dwP + Math.sign(r.perron.uitDw - dwP) * w;
+                else { dw = r.perron.uitDw; alfa = clamp(1 - (w - dwars) / (0.04 * Tw), 0, 1); }
+              } else {
+                const lang = Math.abs(r.perron.uitS - s0);
+                dw = dwP;
+                if (w < lang) s = s0 + Math.sign(r.perron.uitS - s0) * w;
+                else { s = r.perron.uitS; alfa = clamp(1 - (w - lang) / (0.05 * Tw), 0, 1); }
+              }
+            }
+            if (alfa <= 0.02) continue;
+            this.punt(r, Math.min(s, L));
+            const over = s > L ? s - L : 0;
+            const x = (this.px + this.hx * over - this.hy * dw) * sc + this.ox, y = (this.py + this.hy * over + this.hx * dw) * sc + this.oy;
+            if (!this.opScherm(x, y, T * 0.02)) continue;
+            this.n.reizigers++;
+            const rr = Math.max(0.7, T * 0.008), zw = tt > stap && alfa >= 1 ? Math.sin(tt * 9 + m) * rr * 0.25 : 0;
+            c.globalAlpha = a * alfa * 0.35; c.fillStyle = '#000'; c.beginPath(); stip(c, x + rr * 0.6, y + rr * 0.6, rr); c.fill();
+            c.globalAlpha = a * alfa; c.fillStyle = K[Math.floor(h2 * K.length)]; c.beginPath(); stip(c, x, y + zw, rr); c.fill();
+            c.fillStyle = '#e0b48f'; c.beginPath(); stip(c, x, y - rr * 0.9 + zw, rr * 0.55); c.fill();
+          }
+        }
+      }
+    }
+    c.globalAlpha = 1;
+  }
+
+  // Waar trein j op route r op tijdstip u rijdt: this.kop (voorkant in de rijrichting), this.staart en this.rich (+1
+  // heen, -1 terug). De dienstregeling is periodiek: this.per deelt 180, dus de stand op u is die op u + 180.
+  treinStand(r, j, u = this.u) {
     const tr = r.treinen[j], Tw = this.geo.T, L = r.L, Ltr = Math.min(tr.totaal, L * 0.5);
-    const v = Tw * (r.goederen ? 0.45 : 0.65), rit = Math.max(1, (L - Ltr) / v), wacht = r.goederen ? 10 : 6;
-    const per = 2 * (rit + wacht);
-    const t = frac(this.klok / per + tr.fase) * per;
+    const v = Tw * (r.goederen ? 0.45 : 0.65), wacht = r.goederen ? 10 : 6;
+    // de natuurlijke omloop afgerond naar boven op een deler van 180; de rit wordt iets sneller, nooit langzamer
+    const nat = 2 * (Math.max(1, (L - Ltr) / v) + wacht);
+    const per = DAG / Math.max(1, Math.floor(DAG / nat)), rit = per / 2 - wacht;
+    this.per = per; this.rit = rit; this.wacht = wacht;
+    const t = frac(u / per + tr.fase) * per;
     // cycloïde: optrekken en afremmen zonder schok
-    const glad = (u) => u - Math.sin(TAU * u) / TAU;
+    const glad = (q) => q - Math.sin(TAU * q) / TAU;
     if (t < wacht) { this.rich = 1; this.kop = Ltr; }
     else if (t < wacht + rit) { this.rich = 1; this.kop = Ltr + (L - Ltr) * glad((t - wacht) / rit); }
     else if (t < 2 * wacht + rit) { this.rich = -1; this.kop = L - Ltr; }
     else { this.rich = -1; this.kop = (L - Ltr) - (L - Ltr) * glad((t - 2 * wacht - rit) / rit); }
     this.staart = this.kop - this.rich * Ltr;
     this.ltr = Ltr;
+    this.tTrein = t;
   }
 
   tekenTreinen(c, a) {
@@ -2844,164 +3116,6 @@ export class InfraLaag {
     void nu;
   }
 
-  // ---------- straatmeubilair ----------
-
-  tekenStraatmeubilair(c, nu) {
-    const T = this.T, Tw = this.geo.T, sc = this.sc, z = this.zoom, W = this.wegen, nz = this.nZw;
-    if (!nz) return;
-    const aL = smooth(7.5, 8.5, z);
-    // lantaarnpalen: om de 0.4 tegel, om en om links en rechts, net buiten de stoeprand
-    const buf = this.lantaarnPos ??= new Float32Array(PLAFOND.lantaarns * 4);
-    let n = 0;
-    for (let i = 0; i < nz && n < PLAFOND.lantaarns; i++) {
-      const w = W[this.zw[i]];
-      for (let q = w.s0 + Tw * 0.2, j = 0; q < w.s1 - Tw * 0.1 && n < PLAFOND.lantaarns; q += Tw * 0.4, j++) {
-        const kant = j & 1 ? 1 : -1, nx = -w.uy * kant, ny = w.ux * kant;
-        const wx = w.ax + w.ux * q + nx * 0.095 * Tw, wy = w.ay + w.uy * q + ny * 0.095 * Tw;
-        const x = wx * sc + this.ox, y = wy * sc + this.oy;
-        if (!this.opScherm(x, y, T * 0.1) || this.opBouwwerk(wx, wy) || this.inTunnel(w, q)) continue;
-        const o = n * 4;
-        buf[o] = x; buf[o + 1] = y; buf[o + 2] = nx; buf[o + 3] = ny;
-        n++;
-      }
-    }
-    this.n.lantaarns = n;
-    const H = T * 0.065, arm = T * 0.03;
-    c.globalAlpha = aL;
-    c.lineCap = 'round';
-    c.strokeStyle = 'rgba(0,0,0,0.25)'; c.lineWidth = Math.max(0.5, T * 0.005); c.beginPath();
-    for (let k = 0; k < n; k++) { const o = k * 4, x = buf[o], y = buf[o + 1]; c.moveTo(x, y); c.lineTo(x + H * SCHUIN, y + H * SCHUIN); c.lineTo(x + H * SCHUIN - buf[o + 2] * arm, y + H * SCHUIN - buf[o + 3] * arm); }
-    c.stroke();
-    c.strokeStyle = PAAL; c.lineWidth = Math.max(0.6, T * 0.006); c.beginPath();
-    for (let k = 0; k < n; k++) { const o = k * 4, x = buf[o], y = buf[o + 1]; c.moveTo(x, y); c.lineTo(x, y - H); c.lineTo(x - buf[o + 2] * arm, y - H - buf[o + 3] * arm); }
-    c.stroke();
-    c.fillStyle = this.nacht > 0.3 ? '#fff2c4' : '#d8d6cc'; c.beginPath();
-    for (let k = 0; k < n; k++) { const o = k * 4; stip(c, buf[o] - buf[o + 2] * arm, buf[o + 1] - H - buf[o + 3] * arm, T * 0.008); }
-    c.fill();
-    c.lineCap = 'butt';
-    if (this.nacht > 0.05) for (let k = 0; k < n; k++) {
-      const o = k * 4, hx = buf[o] - buf[o + 2] * arm, hy = buf[o + 1] - H - buf[o + 3] * arm;
-      this.zetLicht(hx, hy, Math.max(2, T * 0.03), WARM, 0.9);
-      // lichtplas op het asfalt onder de lamp, en in de regen een spiegeling in de natte weg
-      this.zetLicht(buf[o] - buf[o + 2] * arm * 1.5, buf[o + 1] - buf[o + 3] * arm * 1.5, T * 0.09, WARM, 0.22);
-      this.zetSpiegel(buf[o] - buf[o + 2] * arm * 1.2, buf[o + 1] - buf[o + 3] * arm * 1.2, T * 0.028, WARM, 0.55);
-    }
-    // afvalbakken (elke derde lantaarn) en brandkranen op het kleinste niveau, per kleur één pad
-    if (z >= DREMPEL.klein && n) {
-      const laag = (kleur, wie, dx, dy, r) => {
-        c.fillStyle = kleur; c.beginPath();
-        for (let k = 0; k < n; k++) { if (wie(k)) { const o = k * 4; stip(c, buf[o] + buf[o + 3] * T * 0.03 + dx, buf[o + 1] - buf[o + 2] * T * 0.03 + dy, r); } }
-        c.fill();
-      };
-      const bak = (k) => k % 3 === 0, kraan = (k) => k % 3 !== 0 && k % 5 === 1;
-      laag('rgba(0,0,0,0.3)', bak, T * 0.004, T * 0.004, T * 0.007);
-      laag('#3d5a3a', bak, 0, 0, T * 0.007);
-      laag('#1e2a1c', bak, 0, 0, T * 0.004);
-      laag('#b8322a', kraan, 0, 0, T * 0.005);
-      laag('#e8d8c8', kraan, -T * 0.0015, -T * 0.0015, T * 0.0018);
-    }
-    if (z >= DREMPEL.halte - 0.3) this.tekenHaltes(c, smooth(8.7, 9.5, z));
-    if (z >= DREMPEL.bord - 0.3) {
-      const aB = smooth(10.7, 11.4, z);
-      c.globalAlpha = aB;
-      this.tekenBorden(c);
-      // verkeerslichten bij de ingang van woonwijken en hoofdstad
-      for (let i = 0; i < nz; i++) {
-        const w = W[this.zw[i]];
-        for (const kant of [0, 1]) {
-          if (kant ? !w.stadB : !w.stadA) continue;
-          const q = kant ? w.s1 - 0.1 * Tw : w.s0 + 0.1 * Tw, rich = kant ? -1 : 1;
-          const [P, g, o] = CYCLUS.ingang, stand = lichtStand(frac(nu / P + hash(w.zaad, kant, 7)), g, o);
-          const wx = w.ax + w.ux * q - w.uy * rich * 0.085 * Tw, wy = w.ay + w.uy * q + w.ux * rich * 0.085 * Tw;
-          if (this.opBouwwerk(wx, wy)) continue;
-          this.verkeerslicht(c, wx * sc + this.ox, wy * sc + this.oy, stand);
-        }
-      }
-    }
-    c.globalAlpha = 1;
-  }
-
-  tekenHaltes(c, a) {
-    const T = this.T, Tw = this.geo.T, sc = this.sc, z = this.zoom, W = this.wegen;
-    c.globalAlpha = a;
-    let n = 0;
-    for (let i = 0; i < this.nZw && n < PLAFOND.haltes; i++) {
-      const w = W[this.zw[i]];
-      if (hash(w.zaad, 21) > 0.35 || w.s1 - w.s0 < 1.2 * Tw) continue;
-      const q = (w.s0 + w.s1) / 2, nx = -w.uy, ny = w.ux;
-      const wx = w.ax + w.ux * q + nx * 0.105 * Tw, wy = w.ay + w.uy * q + ny * 0.105 * Tw;
-      const x = wx * sc + this.ox, y = wy * sc + this.oy;
-      if (!this.opScherm(x, y, T * 0.2) || this.opBouwwerk(wx, wy) || this.isWater(wx, wy) || this.isZoet(wx, wy) || this.inTunnel(w, q) || this.opBrug(w, q)) continue;
-      n++;
-      // abri: schaduw, glazen dak met rand, bankje, paal met bordje
-      c.fillStyle = 'rgba(0,0,0,0.3)'; c.beginPath(); rechthoek(c, x + T * 0.02, y + T * 0.022, w.ux, w.uy, T * 0.032, T * 0.012); c.fill();
-      c.fillStyle = '#5d6166'; c.beginPath(); rechthoek(c, x, y, w.ux, w.uy, T * 0.032, T * 0.012); c.fill();
-      c.fillStyle = 'rgba(165,190,205,0.85)'; c.beginPath(); rechthoek(c, x, y, w.ux, w.uy, T * 0.028, T * 0.009); c.fill();
-      c.fillStyle = '#7a5236'; c.beginPath(); rechthoek(c, x + nx * T * 0.004, y + ny * T * 0.004, w.ux, w.uy, T * 0.018, T * 0.003); c.fill();
-      const px = x + w.ux * T * 0.045 - nx * T * 0.008, py = y + w.uy * T * 0.045 - ny * T * 0.008;
-      c.strokeStyle = PAAL; c.lineWidth = Math.max(0.5, T * 0.004); c.beginPath(); c.moveTo(px, py); c.lineTo(px, py - T * 0.045); c.stroke();
-      c.fillStyle = '#2f6d9a'; c.fillRect(px - T * 0.008, py - T * 0.06, T * 0.016, T * 0.016);
-      c.fillStyle = '#e8d84a'; c.fillRect(px - T * 0.004, py - T * 0.056, T * 0.008, T * 0.004);
-      if (this.nacht > 0.05) this.zetLicht(x, y, T * 0.05, KOEL, 0.35);
-      // bus aan de halte: komt, wacht en rijdt weer door
-      const f = frac(this.klok / 45 + hash(w.zaad, 22));
-      if (f < 0.35) {
-        const k = f < 0.05 ? (0.05 - f) / 0.05 : f > 0.3 ? -(f - 0.3) / 0.05 : 0;
-        const bx = x - nx * T * 0.075 + w.ux * T * 0.4 * -k, by = y - ny * T * 0.075 + w.uy * T * 0.4 * -k;
-        c.fillStyle = 'rgba(0,0,0,0.3)'; c.beginPath(); rechthoek(c, bx + T * 0.012, by + T * 0.014, w.ux, w.uy, T * 0.06, T * 0.018); c.fill();
-        c.fillStyle = BUS[Math.floor(hash(w.zaad, 23) * BUS.length)]; c.beginPath(); rechthoek(c, bx, by, w.ux, w.uy, T * 0.06, T * 0.018); c.fill();
-        c.fillStyle = 'rgba(255,255,255,0.22)'; c.beginPath(); rechthoek(c, bx, by, w.ux, w.uy, T * 0.05, T * 0.009); c.fill();
-        if (z >= 11) {
-          c.fillStyle = '#7d8187'; c.beginPath(); rechthoek(c, bx - w.ux * T * 0.025, by - w.uy * T * 0.025, w.ux, w.uy, T * 0.012, T * 0.008); c.fill();
-          c.fillStyle = GLAS; c.beginPath(); rechthoek(c, bx + w.ux * T * 0.055, by + w.uy * T * 0.055, w.ux, w.uy, T * 0.004, T * 0.015); c.fill();
-        }
-        if (this.nacht > 0.05) this.zetLicht(bx + w.ux * T * 0.06, by + w.uy * T * 0.06, T * 0.03, KOEL, 0.9);
-      }
-    }
-    this.n.haltes = n;
-  }
-
-  // Verkeersborden zonder tekst: snelheid (rode rand), waarschuwing (driehoek), gebod (blauw rond),
-  // voorrang (gele ruit) en een groene wegwijzer met strepen in plaats van letters.
-  tekenBorden(c) {
-    const T = this.T, Tw = this.geo.T, sc = this.sc, W = this.wegen;
-    let n = 0;
-    const r = T * 0.011, H = T * 0.045;
-    for (let i = 0; i < this.nZw && n < PLAFOND.borden; i++) {
-      const w = W[this.zw[i]];
-      for (let q = w.s0 + Tw * 0.5, j = 0; q < w.s1 - Tw * 0.2 && n < PLAFOND.borden; q += Tw * 1.1, j++) {
-        if (hash(w.zaad, j, 31) > 0.6) continue;
-        const soort = Math.floor(hash(w.zaad, j, 32) * BORDEN), kant = hash(w.zaad, j, 33) < 0.5 ? 1 : -1;
-        const wx = w.ax + w.ux * q - w.uy * kant * 0.105 * Tw, wy = w.ay + w.uy * q + w.ux * kant * 0.105 * Tw;
-        const x = wx * sc + this.ox, y = wy * sc + this.oy;
-        if (!this.opScherm(x, y, T * 0.1) || this.opBouwwerk(wx, wy) || this.isWater(wx, wy) || this.isZoet(wx, wy) || this.inTunnel(w, q)) continue;
-        n++;
-        c.strokeStyle = 'rgba(0,0,0,0.25)'; c.lineWidth = Math.max(0.5, T * 0.004);
-        c.beginPath(); c.moveTo(x, y); c.lineTo(x + H * SCHUIN, y + H * SCHUIN); c.stroke();
-        c.strokeStyle = '#8a8d90'; c.beginPath(); c.moveTo(x, y); c.lineTo(x, y - H); c.stroke();
-        const sy = y - H - r * 0.6;
-        if (soort === 0) {
-          c.fillStyle = '#c43c32'; c.beginPath(); c.arc(x, sy, r, 0, TAU); c.fill();
-          c.fillStyle = '#f4f2ea'; c.beginPath(); c.arc(x, sy, r * 0.7, 0, TAU); c.fill();
-          c.fillStyle = '#222'; c.fillRect(x - r * 0.35, sy - r * 0.12, r * 0.7, r * 0.24);
-        } else if (soort === 1) {
-          c.fillStyle = '#c43c32'; c.beginPath(); c.moveTo(x, sy - r * 1.1); c.lineTo(x + r, sy + r * 0.7); c.lineTo(x - r, sy + r * 0.7); c.closePath(); c.fill();
-          c.fillStyle = '#f4f2ea'; c.beginPath(); c.moveTo(x, sy - r * 0.6); c.lineTo(x + r * 0.6, sy + r * 0.45); c.lineTo(x - r * 0.6, sy + r * 0.45); c.closePath(); c.fill();
-        } else if (soort === 2) {
-          c.fillStyle = '#2f5d9a'; c.beginPath(); c.arc(x, sy, r, 0, TAU); c.fill();
-          c.strokeStyle = '#f4f2ea'; c.lineWidth = Math.max(0.5, r * 0.25); c.beginPath(); c.moveTo(x - r * 0.5, sy + r * 0.3); c.lineTo(x, sy - r * 0.4); c.lineTo(x + r * 0.5, sy + r * 0.3); c.stroke();
-        } else if (soort === 3) {
-          c.fillStyle = '#f4f2ea'; c.beginPath(); c.moveTo(x, sy - r); c.lineTo(x + r, sy); c.lineTo(x, sy + r); c.lineTo(x - r, sy); c.closePath(); c.fill();
-          c.fillStyle = '#e0b020'; c.beginPath(); c.moveTo(x, sy - r * 0.65); c.lineTo(x + r * 0.65, sy); c.lineTo(x, sy + r * 0.65); c.lineTo(x - r * 0.65, sy); c.closePath(); c.fill();
-        } else {
-          c.fillStyle = '#2f6a45'; c.fillRect(x - r * 1.8, sy - r * 0.8, r * 3.6, r * 1.6);
-          c.fillStyle = 'rgba(240,240,232,0.85)'; c.fillRect(x - r * 1.4, sy - r * 0.4, r * 2.2, r * 0.22); c.fillRect(x - r * 1.4, sy + r * 0.15, r * 1.6, r * 0.22);
-        }
-      }
-    }
-    this.n.borden = n;
-  }
-
   // ---------- havens ----------
 
   tekenHavenLeven(c, a) {
@@ -3013,7 +3127,7 @@ export class InfraLaag {
       const co = Math.cos(hv.hoek), si = Math.sin(hv.hoek);
       const L = (u, v) => { this.qx = (hv.x + (u * co - v * si) * Tw) * sc + this.ox; this.qy = (hv.y + (u * si + v * co) * Tw) * sc + this.oy; };
       const dq = hv.dq;
-      const t = stil ? 0 : this.klok;
+      const t = stil ? 0 : this.u; // u: periodiek in 180 s, en alle perioden hieronder delen 180
       // vrachtwagens op een rondje over het terrein
       if (z >= DREMPEL.halte) {
         for (let k = 0; k < 3; k++) {
@@ -3034,7 +3148,7 @@ export class InfraLaag {
       }
       // portaalkraan boven de stapels
       if (z >= DREMPEL.markering && this.n.kranen < PLAFOND.kranen) {
-        const u = -0.3 + 0.6 * tri(t / 50 + hash(hv.zaad, 9)), Hp = T * 0.05;
+        const u = -0.3 + 0.6 * tri(t / 45 + hash(hv.zaad, 9)), Hp = T * 0.05;
         for (const v of [dq - 0.37, dq - 0.17]) {
           L(u, v); const ax = this.qx, ay = this.qy;
           L(u, v + 0.16); const bx = this.qx, by = this.qy;
@@ -3045,7 +3159,7 @@ export class InfraLaag {
       }
       // sleepboot die heen en weer pendelt langs het schip, met een kielzog
       if (hv.sleep && z >= DREMPEL.markering) {
-        const f = tri(t / 70 + hash(hv.zaad, 31)), u = -0.34 + 0.68 * f, rich = frac(t / 70 + hash(hv.zaad, 31)) < 0.5 ? 1 : -1;
+        const f = tri(t / 60 + hash(hv.zaad, 31)), u = -0.34 + 0.68 * f, rich = frac(t / 60 + hash(hv.zaad, 31)) < 0.5 ? 1 : -1;
         L(u, dq + 0.2);
         const hx = co * rich, hy = si * rich, x = this.qx, y = this.qy;
         c.fillStyle = 'rgba(235,245,250,0.35)'; c.beginPath();
@@ -3058,7 +3172,7 @@ export class InfraLaag {
       }
       // vissersboot aan de kade: deint, met stuurhuis, mast en netten
       if (hv.kotter && z >= DREMPEL.markering) {
-        const dein = Math.sin(this.klok * 1.3 + hv.zaad) * 0.004;
+        const dein = Math.sin((this.u / 5) * TAU + hv.zaad) * 0.004;
         L(-0.02, dq + 0.065 + dein);
         const x = this.qx, y = this.qy;
         c.fillStyle = 'rgba(0,0,0,0.22)'; c.beginPath(); rechthoek(c, x + T * 0.008, y + T * 0.009, co, si, T * 0.11, T * 0.022); c.fill();
@@ -3079,7 +3193,7 @@ export class InfraLaag {
       // zeilbootjes die voor de haven kruisen, alleen waar water is en niet hartje winter
       if (z >= DREMPEL.halte && this.sz.winter < 0.6) {
         for (let k = 0; k < 2; k++) {
-          const f = (this.klok / 90 + hash(hv.zaad, 70 + k)) * TAU, u = Math.cos(f) * 0.24, v = dq + 0.32 + Math.sin(f) * 0.1;
+          const f = (this.u / 90 + hash(hv.zaad, 70 + k)) * TAU, u = Math.cos(f) * 0.24, v = dq + 0.32 + Math.sin(f) * 0.1;
           if (!this.isWater(hv.x + (u * co - v * si) * Tw, hv.y + (u * si + v * co) * Tw)) continue;
           L(u, v);
           const du = -Math.sin(f) * 0.24, dv = Math.cos(f) * 0.1, dl = Math.hypot(du, dv) || 1;
@@ -3178,9 +3292,9 @@ export class InfraLaag {
   // Waar vliegtuig j van vliegveld v nu is, in lokale tegelcoördinaten: this.vx, this.vy, this.vh (hoogte in tegels),
   // this.vk (koers), this.va (zichtbaarheid). Het vliegveld gebruikt de baan tegen de wind in.
   vliegStand(v, j, d, stand) {
-    const PER = 80;
+    const PER = 90;
     const geland = this.wr.mist > 0.6 || this.wr.onweer > 0.5;
-    const u = geland ? 0.9 : frac(this.klok / PER + j * 0.5 + hash(v.zaad, 5));
+    const u = geland ? 0.9 : frac(this.u / PER + j * 0.5 + hash(v.zaad, 5));
     const sx = v.standen[stand];
     this.vh = 0; this.va = 1;
     const pad = (pts, f) => {
@@ -3246,7 +3360,7 @@ export class InfraLaag {
         }
         if (z >= DREMPEL.halte) {
           // bagagetreintje rond het platform, tankwagen bij een vliegtuig, follow-me-auto op de taxibaan
-          const f0 = this.klok / 40 + hash(v.zaad, 41);
+          const f0 = this.u / 45 + hash(v.zaad, 41);
           for (let k = 0; k < 4; k++) {
             this.platformLus(frac(f0 - k * 0.012));
             naar(this.lx, this.ly);
@@ -3260,9 +3374,9 @@ export class InfraLaag {
           c.fillStyle = 'rgba(0,0,0,0.28)'; c.beginPath(); rechthoek(c, this.qx + T * 0.006, this.qy + T * 0.007, tx, ty, T * 0.022, T * 0.008); c.fill();
           c.fillStyle = '#e8e6df'; c.beginPath(); rechthoek(c, this.qx - tx * T * 0.004, this.qy - ty * T * 0.004, tx, ty, T * 0.017, T * 0.008); c.fill();
           c.fillStyle = '#c43c32'; c.beginPath(); rechthoek(c, this.qx + tx * T * 0.016, this.qy + ty * T * 0.016, tx, ty, T * 0.006, T * 0.008); c.fill();
-          const fm = tri(this.klok / 55 + hash(v.zaad, 43));
+          const fm = tri(this.u / 60 + hash(v.zaad, 43));
           naar(-0.8 + 1.6 * fm, -0.1);
-          const fr = frac(this.klok / 55 + hash(v.zaad, 43)) < 0.5 ? 1 : -1, mx = Math.cos(v.hoek) * fr, my = Math.sin(v.hoek) * fr;
+          const fr = frac(this.u / 60 + hash(v.zaad, 43)) < 0.5 ? 1 : -1, mx = Math.cos(v.hoek) * fr, my = Math.sin(v.hoek) * fr;
           c.fillStyle = '#e0b020'; c.beginPath(); rechthoek(c, this.qx, this.qy, mx, my, T * 0.009, T * 0.005); c.fill();
           c.fillStyle = '#1f1d1b'; c.beginPath(); rechthoek(c, this.qx, this.qy, mx, my, T * 0.003, T * 0.005); c.fill();
           if (frac(nu / 500) < 0.5) this.zetLicht(this.qx, this.qy, Math.max(2, T * 0.015), AMBER, 1);
@@ -3472,7 +3586,8 @@ export class InfraLaag {
     const soorten = [0, 0, 0, 0, 0, 0]; // boog, ligger, vakwerk, tui, hang, staalboog
     for (const d of this.wegen) { if (d.brug) for (const b of d.brug) { bruggen++; soorten[b.soort]++; } if (d.tunnel) tunnels += d.tunnel.length / 2; if (d.viaduct) viaducten += d.viaduct.length / 3; }
     for (const d of this.routes) { if (d.brug) for (const b of d.brug) { bruggen++; soorten[b.soort]++; } if (d.tunnel) tunnels += d.tunnel.length / 2; if (d.viaduct) viaducten += d.viaduct.length / 3; }
-    for (const k of this.kruisingen) if (k.rotonde && !k.zij) rotondes++;
+    const net = this.net;
+    if (net) for (let k = 0; k < net.nK; k++) if (net.kSoort[k] === NK.ROTONDE) rotondes++;
     return { sprites: this.cache.size, bytes: this.bytes, gebakken: this.gebakken, routes: this.routes.length, vliegvelden: this.vliegvelden.length, havens: this.havens.length, depots: this.depots.length, stations: this.stations.length, lijnen: this.lijnen.length, pijpen: this.pijpen.length, kruisingen: this.kruisingen.length, overwegen: this.overwegen.length, wegen: this.wegen.length, bruggen, brugsoorten: { boog: soorten[BOOG], ligger: soorten[LIGGER], vakwerk: soorten[VAKWERK], tui: soorten[TUI], hang: soorten[HANG], staalboog: soorten[STAALBOOG] }, voetbruggen: this.voetbruggen.length, tunnels, viaducten, rotondes };
   }
 

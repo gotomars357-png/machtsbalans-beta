@@ -1,6 +1,7 @@
 // Kaartweergave met zoom en pan. Uitgezoomd is het een strategische kaart (blokken, routes, loyaliteit);
-// ingezoomd zie je terrein, vakjes, gebouwen, wegen naar knooppunten en vrachtwagens die productie afvoeren.
+// ingezoomd zie je terrein, vakjes, gebouwen en het wegennet (wegennet.js) waarop het verkeer rijdt.
 // Grenzen en vakjes komen uit src/engine/geografie.js, dus de kaart toont precies wat de bouwregels gebruiken.
+// Eén klok: teken() bepaalt één keer per beeld `nu` en geeft die aan alle lagen.
 
 import { tegelOp } from '../engine/geografie.js';
 import { woningCapaciteit } from '../engine/samenleving.js';
@@ -19,12 +20,20 @@ import { StadLaag } from './stad.js';
 import { ZeeLaag } from './zee.js';
 import { WerkLaag } from './werk.js';
 import { HemelLaag } from './hemel.js';
+import { Wegennet, KLASSE, KNOOP, PROFIEL, verkeersTijd } from './wegennet.js';
 
 // Vanaf deze zoom tekent de kaart vakjes als echte plekken: huizen, akkers, fabrieken, bomen.
 const DIEP = 4;
+// Vanaf MINI tekenen de gebouwen al als verkleinde tekening (met tot DIEP een klein merkje erop), zodat de middenzoom
+// een stad laat zien in plaats van vakjes.
+const MINI = 2.5;
 // Gebouwen uit andere packs met een vergelijkbare functie hergebruiken een bestaande tekening.
 const TEKENING_ALIAS = { olieveld: 'centrale', staalfabriek: 'industrie', landbouw: 'boerderij', zware_industrie: 'industrie', ruimtevaartcentrum: 'chipfabriek', spoor: 'opslag' };
 // cybercentrum heeft een eigen tekening in detail.js.
+// Pauze stopt het spel, niet het straatleven (net als dag en nacht). Op true staat de wereldklok stil zolang het spel
+// stilstaat: verkeer, lichten en dagdeel lopen dan pas verder als het spel weer loopt.
+export const PAUZE_STOPT_WERELD = false;
+const smooth = (a, b, v) => { const t = clamp((v - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 
 const hex = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
@@ -64,6 +73,8 @@ export class KaartView {
     this.zeeLaag = new ZeeLaag();
     this.werkLaag = new WerkLaag();
     this.hemelLaag = new HemelLaag();
+    this.wegennet = new Wegennet();
+    this.wegennetDebug = false; // tekent klassen, knopen en poorten van het net over alles heen
     this.bron = document.createElement('canvas');
     this.bron.width = 1000;
     this.bron.height = 620;
@@ -240,6 +251,7 @@ export class KaartView {
     this.cx = b.x;
     this.begrens();
     this.terreinLaag.laad(this);
+    this.wegennet.laad(this);
     this.levenLaag.laad(this);
     this.infraLaag.laad(this);
     this.sfeerLaag.laad(this);
@@ -261,6 +273,28 @@ export class KaartView {
     const halfW = this.w / 2 / (Math.min(this.w / 1000, this.h / 620) * zoom);
     const t = this.geo.tegels[this.geo.hoofdstad[this.state.speler]];
     return { x: clamp(t ? t.x : 500, halfW, 1000 - halfW), y: 310, zoom };
+  }
+
+  // Echte tijd in ms, voor werkbudgetten (het net bouwt in plakken); niet voor beweging of dagfase.
+  tijdMs() { return performance.now(); }
+
+  // De klok van dit beeld (ms), gezet door teken(). Zolang er nog geen beeld getekend is (ook in tests die een losse
+  // tekenfunctie aanroepen op een kaartview zonder constructor) geldt de echte klok, net als vroeger.
+  get nu() { return this._nu ?? performance.now(); }
+  set nu(v) { this._nu = v; }
+  // De echte tijd van dit beeld, voor de bediening (doelmarker, tutorialgloed): die loopt ook als de wereld stilstaat.
+  get echtNu() { return this._echtNu ?? performance.now(); }
+  set echtNu(v) { this._echtNu = v; }
+
+  // De klok van dit beeld: echte tijd, of bij PAUZE_STOPT_WERELD een klok die op pauze stilstaat.
+  klokVan(tempo) {
+    const echt = performance.now();
+    this.echtNu = echt;
+    if (!PAUZE_STOPT_WERELD) return echt;
+    if (this._echtVorig == null) this._wereldNu = echt;
+    else if (tempo > 0) this._wereldNu += echt - this._echtVorig;
+    this._echtVorig = echt;
+    return this._wereldNu;
   }
 
   // ---------- camera ----------
@@ -458,7 +492,12 @@ export class KaartView {
     c.fillRect(0, 0, this.w, this.h);
     const sc = this.schaal();
     const [x0, y0] = this.naarScherm(0, 0);
-    const nu = performance.now();
+    const nu = this.klokVan(tempo);
+    this.nu = nu;
+    // eerst de voorzieningen (station, vliegveld, havens), dan het net dat ze aansluit, dan de lagen
+    if (this.infraLaag.voorbereid) this.infraLaag.voorbereid(this);
+    else if (this.infraLaag.state) this.infraLaag.werkCache(this);
+    this.wegennet.werk(this, 3);
     c.imageSmoothingEnabled = true;
     c.drawImage(this.bron, x0, y0, 1000 * sc, 620 * sc);
     this.terreinLaag.teken(c, this, sc, nu);
@@ -466,7 +505,10 @@ export class KaartView {
     const detail = this.zoom >= 1.5;
     this.tekenTerrein(c, sc);
     if (this.bouwModus) this.tekenBouwRaster(c, sc);
-    if (detail) this.tekenWegen(c, sc);
+    if (detail) this.tekenBebouwing(c, sc);
+    this.tekenLeidingenOverzicht(c, sc);
+    this.tekenWegen(c, sc);
+    this.tekenSpoorOverzicht(c, sc);
     this.infraLaag.teken(c, this, sc, nu, dt, tempo);
     this.kustLaag.teken(c, this, sc, nu, dt, tempo);
     this.zeeLaag.teken(c, this, sc, nu, dt, tempo);
@@ -491,6 +533,7 @@ export class KaartView {
     this.sfeerLaag.tekenLucht(c, this, sc, nu);
     this.hemelLaag.tekenNacht(c, this, sc, nu);
     this.tekenGolven(c, sc, nu);
+    if (this.wegennetDebug) this.tekenNetDebug(c, sc);
     this.tekenStrategisch(c, sc);
     this.tekenMarkeringen(c);
   }
@@ -580,7 +623,7 @@ export class KaartView {
     const straal = detail ? Math.max(5, T * 0.3) : 3.2;
     const posities = new Map();
     for (const u of s.eenheden) posities.set(u.id, this.eenheidPositie(u, frac));
-    const nu = performance.now();
+    const nu = this.nu;
     // Ingezoomd worden de rondjes echte troepen (troepen.js); tussen zoom 6 en 7,5 vloeien ze in elkaar over.
     const diep = this.troepenLaag.mengsel(this.zoom);
     if (diep > 0) this.troepenLaag.teken(c, this, sc, nu, frac, posities, diep);
@@ -802,7 +845,7 @@ export class KaartView {
     }
     const m = this.doelMarker;
     if (m) {
-      const leeftijd = (performance.now() - m.tijd) / 700;
+      const leeftijd = (this.echtNu - m.tijd) / 700;
       if (leeftijd > 1) { this.doelMarker = null; return; }
       const tg = this.geo.tegels[m.t];
       const [x, y] = this.naarScherm(tg.x, tg.y);
@@ -819,7 +862,7 @@ export class KaartView {
     if (!g) return;
     const tg = this.geo.tegels[g.t];
     if (!tg) return;
-    const nu = performance.now();
+    const nu = this.echtNu;
     const [x, y] = this.naarScherm(tg.x, tg.y);
     const binnen = x > 8 && y > 8 && x < this.w - 8 && y < this.h - 8;
     c.save();
@@ -856,7 +899,7 @@ export class KaartView {
   tekenTerrein(c, sc) {
     if (this.zoom < 1.7) return;
     if (this.zoom >= DIEP) {
-      this.terreinLaag.tekenKenmerken(c, this, sc, performance.now()); return;
+      this.terreinLaag.tekenKenmerken(c, this, sc, this.nu); return;
     }
     const a = clamp((this.zoom - 1.7) / 0.8, 0, 1) * (1 - this.terreinLaag.dekking(this.zoom));
     if (a <= 0) return;
@@ -936,74 +979,222 @@ export class KaartView {
     }
   }
 
-  knooppuntVoor(land, t) {
-    // dichtstbijzijnde knooppunt (hoofdstad of depot) van dit land
-    const geo = this.geo;
-    const nodes = [geo.hoofdstad[land.idx], ...land.plaatsingen.filter((p) => p.t >= 0 && this.state.pack.gebouwIndex[p.g].knooppunt).map((p) => p.t)];
-    let best = -1, bd = Infinity;
-    const a = geo.tegels[t];
-    for (const n of nodes) {
-      const b = geo.tegels[n];
-      if (!b || n === t) continue;
-      const d = (a.k - b.k) ** 2 + (a.r - b.r) ** 2;
-      if (d < bd) { bd = d; best = n; }
-    }
-    return best;
-  }
-
+  // Het wegennet. Op zoom 1,5 tot 4,4 als overzichtslijnen; daarna eenvoudig asfalt op de breedte uit PROFIEL, zolang
+  // infra.js het wegdek nog niet zelf tekent (infraLaag.tekentWegdek). Elke lijn is een tak van het net: geen lijnen
+  // meer van een gebouw naar een knooppunt, en geen vrachtblokjes (de vracht rijdt als echte ritten over het net).
   tekenWegen(c, sc) {
-    const s = this.state;
-    const P = s.pack;
-    const T = this.geo.T * sc;
-    const a = clamp((this.zoom - 1.5) / 0.6, 0, 1);
+    const net = this.wegennet;
+    if (!net?.klaar || !net.nT) return;
+    const z = this.zoom, T = this.geo.T * sc;
+    const wegdek = !!this.infraLaag.tekentWegdek;
+    const op = smooth(3.6, 4.4, z);
+    // C12 herstel: het net is als wegenkaart zichtbaar vanaf het overzicht (eerst stam- en hoofdwegen, dan straten)
+    const lijnA = 1 - op;
+    const asfaltA = wegdek ? 0 : op;
+    if (lijnA <= 0.01 && asfaltA <= 0.01) return;
+    const [wx0, wy0] = this.naarWereld(0, 0), [wx1, wy1] = this.naarWereld(this.w, this.h);
+    const m = this.geo.T * 0.5, B = net.tBox, P = net.punten;
+    const zicht = this._zicht ??= [];
+    zicht.length = 0;
+    for (let i = 0; i < net.nT; i++) if (B[i * 4 + 2] >= wx0 - m && B[i * 4] <= wx1 + m && B[i * 4 + 3] >= wy0 - m && B[i * 4 + 1] <= wy1 + m) zicht.push(i);
+    let tunnel = false;
+    const pad = (klasse) => {
+      c.beginPath();
+      let n = 0;
+      for (const i of zicht) {
+        if (net.tKlasse[i] !== klasse || (tunnel !== (net.tBouw[i] === 3))) continue;
+        const p0 = net.tP0[i];
+        for (let j = 0; j < net.tNP[i]; j++) {
+          const [x, y] = this.naarScherm(P[(p0 + j) * 2], P[(p0 + j) * 2 + 1]);
+          if (j) c.lineTo(x, y); else c.moveTo(x, y);
+        }
+        n++;
+      }
+      return n;
+    };
+    const VOLG = [KLASSE.ERF, KLASSE.STRAAT, KLASSE.HOOFD, KLASSE.STAM];
     c.save();
     c.lineCap = 'round';
-    for (const land of s.landen) {
-      const items = [...land.plaatsingen.map((p) => ({ t: p.t, g: p.g, klaar: true })), ...land.bouw.map((b) => ({ t: b.tegel, g: b.gebouw, klaar: false }))];
-      for (const it of items) {
-        if (it.t < 0) continue;
-        const n = this.knooppuntVoor(land, it.t);
-        if (n < 0) continue;
-        const A = this.geo.tegels[it.t], B = this.geo.tegels[n];
-        if (!this.zichtbaar(A, 6) && !this.zichtbaar(B, 6)) continue;
-        const [ax, ay] = this.naarScherm(A.x, A.y);
-        const [bx, by] = this.naarScherm(B.x, B.y);
-        c.globalAlpha = a * (land.idx === s.speler ? 0.85 : 0.45);
-        c.strokeStyle = '#0d0f12';
-        c.lineWidth = Math.max(2, T * 0.16);
-        c.beginPath(); c.moveTo(ax, ay); c.lineTo(bx, by); c.stroke();
-        const diep = this.zoom >= DIEP;
-        c.strokeStyle = diep ? '#4a4a47' : '#c9b48a';
-        c.lineWidth = Math.max(1, T * (diep ? 0.11 : 0.08));
-        c.setLineDash(it.klaar ? [] : [T * 0.2, T * 0.2]);
-        c.beginPath(); c.moveTo(ax, ay); c.lineTo(bx, by); c.stroke();
-        if (diep && it.klaar) {
-          c.strokeStyle = '#d8c87a';
-          c.lineWidth = Math.max(0.6, T * 0.01);
-          c.setLineDash([T * 0.06, T * 0.06]);
-          c.beginPath(); c.moveTo(ax, ay); c.lineTo(bx, by); c.stroke();
-        }
-        c.setLineDash([]);
-        // Vrachtwagens: rijden van gebouw naar knooppunt in de kleur van wat ze vervoeren.
-        const g = P.gebouwIndex[it.g];
-        const res = Object.keys(g.productie || {})[0];
-        if (!it.klaar || !res || this.zoom < 2) continue;
-        const lengte = Math.hypot(bx - ax, by - ay);
-        if (lengte < T * 0.8) continue;
-        const kleur = P.resIndex[res]?.kleur ?? '#ffffff';
-        const fase = (it.t * 0.618) % 1;
-        const snelheid = 0.35 * (T * 6 / lengte);
-        for (let k = 0; k < 2; k++) {
-          const f = (this.animTijd * snelheid + fase + k * 0.5) % 1;
-          const x = ax + (bx - ax) * f, y = ay + (by - ay) * f;
-          c.globalAlpha = a;
-          c.fillStyle = '#0d0f12';
-          c.fillRect(x - T * 0.13, y - T * 0.09, T * 0.26, T * 0.18);
-          c.fillStyle = kleur;
-          c.fillRect(x - T * 0.1, y - T * 0.06, T * 0.2, T * 0.12);
+    c.lineJoin = 'round';
+    if (lijnA > 0.01) {
+      // overzicht als wegenkaart: donkere rand en een heldere kern per klasse (stamweg oranje, hoofdweg geel, straat
+      // licht). Kleine wegen komen pas op bij inzoomen, zodat het overzicht leesbaar blijft.
+      const kern = ['#d9d0bb', '#f1ece0', '#f6d66b', '#f29a3a'];
+      const opKomst = [smooth(2.4, 3, z), smooth(1.5, 2.1, z), smooth(1.3, 1.8, z), 1];
+      for (const k of VOLG) {
+        const ak = lijnA * opKomst[k];
+        if (ak <= 0.02 || !pad(k)) continue;
+        const b = Math.max([0.8, 1.1, 1.7, 2.4][k], PROFIEL[k].asfalt * T * 0.75);
+        c.globalAlpha = ak;
+        c.strokeStyle = 'rgba(16,18,22,0.9)'; c.lineWidth = b + 1.8; c.stroke();
+        c.strokeStyle = kern[k]; c.lineWidth = b; c.stroke();
+      }
+      // tunnels: gestippeld, zonder rand (de weg ligt onder de grond)
+      tunnel = true;
+      c.setLineDash([3, 3]);
+      for (const k of VOLG) {
+        const ak = lijnA * opKomst[k] * 0.8;
+        if (ak <= 0.02 || !pad(k)) continue;
+        c.globalAlpha = ak; c.strokeStyle = kern[k]; c.lineWidth = Math.max(1, [0.8, 1.1, 1.7, 2.4][k] * 0.6); c.stroke();
+      }
+      c.setLineDash([]);
+      tunnel = false;
+      // bruggen: een lichte rand over het water
+      c.globalAlpha = lijnA;
+      c.beginPath();
+      let nb = 0;
+      for (const i of zicht) {
+        const bw = net.tBouw[i];
+        if (bw !== 1 && bw !== 2) continue;
+        if (net.tKlasse[i] === KLASSE.ERF && z < 2.4) continue;
+        const p0 = net.tP0[i];
+        for (let j = 0; j < net.tNP[i]; j++) { const [x, y] = this.naarScherm(P[(p0 + j) * 2], P[(p0 + j) * 2 + 1]); if (j) c.lineTo(x, y); else c.moveTo(x, y); }
+        nb++;
+      }
+      if (nb) { c.lineCap = 'butt'; c.strokeStyle = 'rgba(245,242,232,0.95)'; c.lineWidth = Math.max(4, 0.11 * T); c.stroke(); c.strokeStyle = 'rgba(16,18,22,0.9)'; c.lineWidth = Math.max(2.6, 0.075 * T); c.stroke(); c.strokeStyle = '#f6d66b'; c.lineWidth = Math.max(1.4, 0.045 * T); c.stroke(); c.lineCap = 'round'; }
+    }
+    if (asfaltA > 0.01) {
+      c.globalAlpha = asfaltA;
+      // opritten: beton, de kavel in
+      if (z >= 4 && pad(KLASSE.OPRIT)) { c.lineCap = 'butt'; c.strokeStyle = '#8b877e'; c.lineWidth = PROFIEL[KLASSE.OPRIT].asfalt * T; c.stroke(); c.lineCap = 'round'; }
+      for (const k of VOLG) {
+        if (!pad(k)) continue;
+        const b = PROFIEL[k].asfalt * T;
+        if (k === KLASSE.STAM) { c.strokeStyle = 'rgba(150,150,120,0.55)'; c.lineWidth = b + 0.07 * T; c.stroke(); }
+        c.strokeStyle = '#34363a'; c.lineWidth = b + Math.max(1, 0.012 * T); c.stroke();
+        c.strokeStyle = '#4a4a47'; c.lineWidth = b; c.stroke();
+        if (z >= 7 && k >= KLASSE.HOOFD) {
+          c.setLineDash([0.06 * T, 0.08 * T]);
+          c.strokeStyle = 'rgba(236,235,228,0.75)'; c.lineWidth = Math.max(0.6, 0.008 * T); c.stroke();
+          c.setLineDash([]);
         }
       }
     }
+    c.restore();
+  }
+
+  // Middenzoom (1,5 tot 4): bebouwde tegels krijgen een eigen grond (beton, getint naar wat er gemaakt wordt; de
+  // hoofdstad licht), iets kleiner dan de tegel, zodat de straten op de tegelranden ertussen zichtbaar blijven. Zo
+  // lees je een stad als stad, met het wegennet erdoorheen, in plaats van als een tapijt van vakjes.
+  tekenBebouwing(c, sc) {
+    const z = this.zoom;
+    if (z >= MINI + 0.4) return;
+    const a = smooth(1.5, 2, z) * (1 - smooth(MINI, MINI + 0.4, z));
+    if (a <= 0.01) return;
+    const s = this.state, P = s.pack, T = this.geo.T * sc, h = T * 0.45;
+    const tint = this._grondTint ??= new Map();
+    const grond = (g) => {
+      let k = tint.get(g.id);
+      if (!k) {
+        const res = Object.keys(g.productie || {})[0];
+        const rk = P.resIndex[res]?.kleur;
+        const [r, gg, b] = rk && rk[0] === '#' && rk.length >= 7 ? hex(rk) : [128, 126, 118];
+        const m = 0.22;
+        k = `rgb(${Math.round(112 + (r - 112) * m)},${Math.round(110 + (gg - 110) * m)},${Math.round(104 + (b - 104) * m)})`;
+        tint.set(g.id, k);
+      }
+      return k;
+    };
+    c.save();
+    c.globalAlpha = a * 0.85;
+    const vlak = (t, kleur) => {
+      const tg = this.geo.tegels[t];
+      if (!tg || !this.zichtbaar(tg)) return;
+      const [x, y] = this.naarScherm(tg.x, tg.y);
+      c.fillStyle = kleur;
+      c.fillRect(x - h, y - h, h * 2, h * 2);
+    };
+    for (const land of s.landen) {
+      vlak(this.geo.hoofdstad[land.idx], '#b9ae98');
+      for (const p of land.plaatsingen) if (p.t >= 0) vlak(p.t, grond(P.gebouwIndex[p.g]));
+      for (const b of land.bouw) vlak(b.tegel, '#8d8676');
+    }
+    c.restore();
+  }
+
+  // Spoorlijnen als op een kaart: een donkere lijn met witte streepjes, van het overzicht tot het echte spoor van
+  // infra.js het overneemt.
+  tekenSpoorOverzicht(c, sc) {
+    const a = 1 - smooth(3.6, 4.4, this.zoom);
+    const routes = this.infraLaag.routes;
+    if (a <= 0.01 || !routes?.length) return;
+    const T = this.geo.T * sc, w = Math.max(1.8, 0.04 * T);
+    const [wx0, wy0] = this.naarWereld(0, 0), [wx1, wy1] = this.naarWereld(this.w, this.h);
+    c.save();
+    c.globalAlpha = a;
+    c.lineCap = 'butt'; c.lineJoin = 'round';
+    c.beginPath();
+    for (const r of routes) {
+      if (r.x1 < wx0 || r.x0 > wx1 || r.y1 < wy0 || r.y0 > wy1) continue;
+      for (let i = 0; i < r.n; i++) { const [x, y] = this.naarScherm(r.x[i], r.y[i]); if (i) c.lineTo(x, y); else c.moveTo(x, y); }
+    }
+    c.strokeStyle = 'rgba(16,18,22,0.92)'; c.lineWidth = w + 1.4; c.stroke();
+    c.strokeStyle = '#3a3b40'; c.lineWidth = w; c.stroke();
+    c.setLineDash([w * 2.4, w * 2.4]);
+    c.strokeStyle = '#f2efe6'; c.lineWidth = w * 0.5; c.stroke();
+    c.setLineDash([]);
+    c.restore();
+  }
+
+  // Hoogspanningslijnen op de middenzoom: een dunne draad met een stipje per mast (dichterbij tekent infra.js de
+  // echte masten).
+  tekenLeidingenOverzicht(c, sc) {
+    const z = this.zoom, a = smooth(2, 2.6, z) * (1 - smooth(4.2, 5, z));
+    const lijnen = this.infraLaag.lijnen;
+    if (a <= 0.01 || !lijnen?.length) return;
+    const T = this.geo.T * sc, r = Math.max(1, 0.025 * T);
+    const [wx0, wy0] = this.naarWereld(0, 0), [wx1, wy1] = this.naarWereld(this.w, this.h);
+    c.save();
+    c.globalAlpha = a * 0.8;
+    c.strokeStyle = 'rgba(58,52,70,0.9)'; c.lineWidth = Math.max(0.8, 0.01 * T);
+    c.fillStyle = 'rgba(40,36,50,0.95)';
+    for (const ln of lijnen) {
+      if (Math.max(ln.x0, ln.x1) < wx0 || Math.min(ln.x0, ln.x1) > wx1 || Math.max(ln.y0, ln.y1) < wy0 || Math.min(ln.y0, ln.y1) > wy1) continue;
+      const M = ln.m, n = M.length / 2;
+      c.beginPath();
+      for (let i = 0; i < n; i++) { const [x, y] = this.naarScherm(M[i * 2], M[i * 2 + 1]); if (i) c.lineTo(x, y); else c.moveTo(x, y); }
+      c.stroke();
+      for (let i = 0; i < n; i++) { const [x, y] = this.naarScherm(M[i * 2], M[i * 2 + 1]); c.fillRect(x - r, y - r, r * 2, r * 2); }
+    }
+    c.restore();
+  }
+
+  // Foutzoeken: klassen in kleur, knopen per soort, poorten met oprit en dock, haltes, zebra's en grensovergangen.
+  tekenNetDebug(c, sc) {
+    const net = this.wegennet;
+    if (!net?.klaar) return;
+    const T = this.geo.T * sc, P = net.punten;
+    const KLEUR = ['#5fd38d', '#f2f5f8', '#f0a030', '#e8483c', '#45c8e8'];
+    c.save();
+    c.lineCap = 'round'; c.lineJoin = 'round';
+    for (let i = 0; i < net.nT; i++) {
+      const p0 = net.tP0[i];
+      const [ax, ay] = this.naarScherm(net.tBox[i * 4], net.tBox[i * 4 + 1]), [bx, by] = this.naarScherm(net.tBox[i * 4 + 2], net.tBox[i * 4 + 3]);
+      if (bx < -20 || by < -20 || ax > this.w + 20 || ay > this.h + 20) continue;
+      c.beginPath();
+      for (let j = 0; j < net.tNP[i]; j++) { const [x, y] = this.naarScherm(P[(p0 + j) * 2], P[(p0 + j) * 2 + 1]); if (j) c.lineTo(x, y); else c.moveTo(x, y); }
+      c.strokeStyle = 'rgba(0,0,0,0.6)'; c.lineWidth = Math.max(2.5, T * 0.05) + 2; c.stroke();
+      c.strokeStyle = KLEUR[net.tKlasse[i]]; c.lineWidth = Math.max(2.5, T * 0.05);
+      if (net.tBouw[i]) c.setLineDash([4, 3]);
+      c.stroke(); c.setLineDash([]);
+    }
+    const r = Math.max(2.5, T * 0.04);
+    for (let k = 0; k < net.nK; k++) {
+      const [x, y] = this.naarScherm(net.kx[k], net.ky[k]);
+      if (x < -10 || y < -10 || x > this.w + 10 || y > this.h + 10) continue;
+      const so = net.kSoort[k];
+      c.fillStyle = so === KNOOP.LICHT ? '#ffe14a' : so === KNOOP.ROTONDE ? '#c38fff' : so === KNOOP.POORT ? '#45c8e8' : so === KNOOP.DOCK ? '#2f6dd0' : so === KNOOP.EIND ? '#ff2020' : '#ffffff';
+      c.strokeStyle = '#000'; c.lineWidth = 1;
+      c.beginPath();
+      if (so === KNOOP.POORT || so === KNOOP.DOCK) c.rect(x - r, y - r, r * 2, r * 2); else c.arc(x, y, so === KNOOP.LICHT ? r * 1.6 : r, 0, Math.PI * 2);
+      c.fill(); c.stroke();
+    }
+    c.fillStyle = '#ff40d0';
+    for (const g of net.grensovergangen) { const [x, y] = this.naarScherm(g.x, g.y); c.beginPath(); c.moveTo(x, y - r * 3); c.lineTo(x + r * 3, y); c.lineTo(x, y + r * 3); c.lineTo(x - r * 3, y); c.closePath(); c.fill(); c.stroke(); }
+    c.fillStyle = '#2ee0b0';
+    for (const h of net.haltes) { const [x, y] = this.naarScherm(h.x, h.y); c.fillRect(x - r * 1.5, y - r * 1.5, r * 3, r * 3); }
+    c.strokeStyle = '#ffffff'; c.lineWidth = Math.max(1, r * 0.6);
+    for (const zb of net.zebras) { const [x, y] = this.naarScherm(zb.x, zb.y); c.beginPath(); c.arc(x, y, r * 0.8, 0, Math.PI * 2); c.stroke(); }
     c.restore();
   }
 
@@ -1011,6 +1202,7 @@ export class KaartView {
     const s = this.state;
     const P = s.pack;
     const T = this.geo.T * sc;
+    const u = verkeersTijd(this.nu), tijd = this.nu / 1000;
     c.textAlign = 'center';
     c.textBaseline = 'middle';
     for (const land of s.landen) {
@@ -1019,11 +1211,12 @@ export class KaartView {
       const h = this.geo.tegels[this.geo.hoofdstad[land.idx]];
       if (h && this.zichtbaar(h)) {
         const [x, y] = this.naarScherm(h.x, h.y);
-        if (this.zoom >= DIEP) {
-          tekenGebouwDetail(c, 'hoofdstad', x, y, T, { regime: land.regime, kleur: rand, tijd: performance.now() / 1000, seed: h.i, actief: true, nacht: this.nacht ?? 0, dag: s.dag, stab: land.stab, welvaart: land.Y / Math.max(1, s.wereldY / s.landen.length), oorlog: s.oorlogen.length > 0, L: land.L, capaciteit: this.woningenVan(land), basis: land.basisWoningen });
+        if (this.zoom >= MINI) {
+          tekenGebouwDetail(c, 'hoofdstad', x, y, T, { regime: land.regime, kleur: rand, tijd, seed: h.i, actief: true, nacht: this.nacht ?? 0, dag: s.dag, stab: land.stab, welvaart: land.Y / Math.max(1, s.wereldY / s.landen.length), oorlog: s.oorlogen.length > 0, L: land.L, capaciteit: this.woningenVan(land), basis: land.basisWoningen, ...this.kavelCtx(h.i, 'hoofdstad', u) });
+          if (this.zoom < DIEP) this.merk(c, x, y, T, rand, '🏛');
         } else if (detail) {
           this.vakje(c, x, y, T, rand, 1);
-          c.font = `${Math.round(T * 0.6)}px ${EMOJI}`;
+          c.font = `${Math.round(this.vakjeMaat(T) * 1.25)}px ${EMOJI}`;
           c.fillText('🏛', x, y + 1);
         } else {
           c.fillStyle = rand;
@@ -1035,28 +1228,55 @@ export class KaartView {
         const kt = this.geo.tegels[k.t];
         if (!this.zichtbaar(kt)) continue;
         const [x, y] = this.naarScherm(kt.x, kt.y);
-        if (this.zoom >= DIEP) tekenGebouwDetail(c, 'kolonie', x, y, T, { regime: land.regime, kleur: rand, seed: k.t, nacht: this.nacht ?? 0, dag: s.dag, tijd: performance.now() / 1000 });
-        else if (detail) { this.vakje(c, x, y, T, rand, 1); c.font = `${Math.round(T * 0.56)}px ${EMOJI}`; c.fillText('🚩', x, y + 1); }
+        if (this.zoom >= MINI) { tekenGebouwDetail(c, 'kolonie', x, y, T, { regime: land.regime, kleur: rand, seed: k.t, nacht: this.nacht ?? 0, dag: s.dag, tijd, ...this.kavelCtx(k.t, 'kolonie', u) }); if (this.zoom < DIEP) this.merk(c, x, y, T, rand, '🚩'); }
+        else if (detail) { this.vakje(c, x, y, T, rand, 1); c.font = `${Math.round(this.vakjeMaat(T) * 1.2)}px ${EMOJI}`; c.fillText('🚩', x, y + 1); }
         else { c.fillStyle = rand; c.fillRect(x - 2, y - 2, 4, 4); }
       }
       for (const p of land.plaatsingen) {
         this.tekenGebouw(c, land, p.t, p.g, T, rand, detail, null, p.eff, p);
-        if ((p.uit ?? 0) > s.dag && p.t >= 0 && this.zichtbaar(this.geo.tegels[p.t])) tekenUitval(c, ...this.naarScherm(this.geo.tegels[p.t].x, this.geo.tegels[p.t].y), Math.max(4, T), performance.now());
+        if ((p.uit ?? 0) > s.dag && p.t >= 0 && this.zichtbaar(this.geo.tegels[p.t])) tekenUitval(c, ...this.naarScherm(this.geo.tegels[p.t].x, this.geo.tegels[p.t].y), Math.max(4, T), this.nu);
       }
       for (const b of land.bouw) this.tekenGebouw(c, land, b.tegel, b.gebouw, T, rand, detail, (s.dag - b.start) / Math.max(1, b.klaar - b.start), 1);
     }
   }
 
+  // Wat een gebouw van zijn kavel weet: de omgeving uit het net, de stand van zijn dock, de verkeersklok en de echte
+  // gebouw-id (de tekening kan een alias zijn).
+  kavelCtx(t, gebouw, u) {
+    return { omgeving: this.wegennet?.omgeving(t) ?? null, dock: this.levenLaag?.dockStand?.(t, u) ?? null, u, gebouw };
+  }
+
+  // Het merkje van een gebouw op de middenzoom: een rond schildje midden op de kavel, klein genoeg dat de grond, de
+  // straten en het spoor eromheen zichtbaar blijven (vroeger een donker vak over bijna de hele tegel).
   vakje(c, x, y, T, rand, alpha) {
-    const m = T * 0.42;
+    const m = this.vakjeMaat(T);
     c.globalAlpha = alpha;
-    c.fillStyle = 'rgba(10,15,21,0.82)';
+    c.fillStyle = 'rgba(10,15,21,0.8)';
     c.strokeStyle = rand;
-    c.lineWidth = Math.max(1, T * 0.07);
+    c.lineWidth = Math.max(1.2, m * 0.16);
     c.beginPath();
-    c.roundRect(x - m, y - m, m * 2, m * 2, T * 0.12);
+    c.arc(x, y, m, 0, Math.PI * 2);
     c.fill();
     c.stroke();
+    c.globalAlpha = 1;
+  }
+
+  vakjeMaat(T) { return clamp(T * 0.26, 6, 20); }
+
+  // Klein merkje op een verkleinde tekening (MINI tot DIEP): wat er staat en van wie, verdwijnt bij verder inzoomen.
+  merk(c, x, y, T, rand, icoon, voortgang = null) {
+    const a = 1 - smooth(3.3, DIEP, this.zoom);
+    if (a <= 0.02) return;
+    const m = clamp(T * 0.15, 6, 12);
+    c.globalAlpha = a;
+    c.fillStyle = 'rgba(10,15,21,0.78)'; c.strokeStyle = rand; c.lineWidth = Math.max(1.2, m * 0.18);
+    c.beginPath(); c.arc(x, y, m, 0, Math.PI * 2); c.fill(); c.stroke();
+    c.font = `${Math.round(m * 1.25)}px ${EMOJI}`;
+    c.fillText(icoon, x, y + 1);
+    if (voortgang != null) {
+      c.fillStyle = '#0c131b'; c.fillRect(x - m * 1.6, y + m + 2, m * 3.2, 3);
+      c.fillStyle = '#f0b429'; c.fillRect(x - m * 1.6, y + m + 2, m * 3.2 * clamp(voortgang, 0, 1), 3);
+    }
     c.globalAlpha = 1;
   }
 
@@ -1065,14 +1285,16 @@ export class KaartView {
     if (!tegel || !this.zichtbaar(tegel)) return;
     const g = this.state.pack.gebouwIndex[gebouwId];
     const [x, y] = this.naarScherm(tegel.x, tegel.y);
-    if (this.zoom >= DIEP) {
+    if (this.zoom >= MINI) {
       const soort = g.tekening ?? TEKENING_ALIAS[g.id] ?? g.id;
       const gelukt = tekenGebouwDetail(c, soort, x, y, T, {
-        regime: land.regime, kleur: rand, tijd: performance.now() / 1000, seed: t,
+        ...this.kavelCtx(t, g.id, verkeersTijd(this.nu)),
+        regime: land.regime, kleur: rand, tijd: this.nu / 1000, seed: t,
         actief: voortgang == null && (eff ?? 1) > 0, voortgang: voortgang == null ? null : clamp(voortgang, 0, 1),
         eff: eff ?? 1, aantal: land.gebouwen[gebouwId] ?? 1, niveau: p?.niveau ?? null, L: land.L, capaciteit: this.woningenVan(land), basis: land.basisWoningen, uit: (p?.uit ?? 0) > this.state.dag, nacht: this.nacht ?? 0, dag: this.state.dag, stab: land.stab, welvaart: land.Y / Math.max(1, this.state.wereldY / this.state.landen.length),
       });
       if (gelukt) {
+        if (this.zoom < DIEP) { this.merk(c, x, y, T, rand, g.icoon ?? '■', voortgang); return; }
         if (voortgang == null && eff < 0.95 && land.idx === this.state.speler) {
           c.font = `600 ${Math.max(9, Math.round(T * 0.13))}px -apple-system, sans-serif`;
           c.fillStyle = eff < 0.7 ? '#f2706a' : '#f0b429';
@@ -1092,22 +1314,22 @@ export class KaartView {
       this.vakje(c, x, y, T, rand, 0.75);
       c.setLineDash([]);
       c.globalAlpha = 0.45;
-      c.font = `${Math.round(T * 0.52)}px ${EMOJI}`;
+      c.font = `${Math.round(this.vakjeMaat(T) * 1.1)}px ${EMOJI}`;
       c.fillText(g.icoon ?? '■', x, y + 1);
       c.globalAlpha = 1;
       c.fillStyle = '#0c131b';
-      c.fillRect(x - T * 0.4, y + T * 0.32, T * 0.8, T * 0.1);
+      c.fillRect(x - T * 0.32, y + this.vakjeMaat(T) + 2, T * 0.64, Math.max(2, T * 0.07));
       c.fillStyle = '#f0b429';
-      c.fillRect(x - T * 0.4, y + T * 0.32, T * 0.8 * clamp(voortgang, 0, 1), T * 0.1);
+      c.fillRect(x - T * 0.32, y + this.vakjeMaat(T) + 2, T * 0.64 * clamp(voortgang, 0, 1), Math.max(2, T * 0.07));
       return;
     }
     this.vakje(c, x, y, T, rand, 1);
-    c.font = `${Math.round(T * 0.56)}px ${EMOJI}`;
+    c.font = `${Math.round(this.vakjeMaat(T) * 1.2)}px ${EMOJI}`;
     c.fillText(g.icoon ?? '■', x, y + 1);
     if (eff < 0.95 && this.zoom >= 2.4 && land.idx === this.state.speler) {
       c.font = `600 ${Math.max(8, Math.round(T * 0.26))}px -apple-system, sans-serif`;
       c.fillStyle = eff < 0.7 ? '#f2706a' : '#f0b429';
-      c.fillText(`${Math.round(eff * 100)}%`, x, y - T * 0.55);
+      c.fillText(`${Math.round(eff * 100)}%`, x, y - this.vakjeMaat(T) - Math.max(5, T * 0.12));
     }
   }
 
@@ -1164,9 +1386,9 @@ export class KaartView {
       if (!m) continue;
       let [x, y] = this.naarScherm(m.x, m.y);
       if (this.zoom >= 1.5) {
-        // ingezoomd: label boven de hoofdstad, zodat het gebouwen niet bedekt
+        // ingezoomd: label in de bovenste helft van de eigen hoofdstadtegel, niet op de tegel erboven
         const h = this.geo.tegels[this.geo.hoofdstad[l.idx]];
-        if (h) [x, y] = this.naarScherm(h.x, h.y - this.geo.T * 0.9);
+        if (h) [x, y] = this.naarScherm(h.x, h.y - this.geo.T * 0.32);
       }
       if (x < -80 || y < -20 || x > this.w + 80 || y > this.h + 20) continue;
       const leider = s.blokken.some((b) => b.leider === l.idx);
