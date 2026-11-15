@@ -10,8 +10,16 @@ export function regimeVan(state, c) {
   return state.pack.regimes[c.regime];
 }
 
+// Een leiderdoctrine (C13) telt op bij het regime-effect. Zonder doctrine is dat + 0: exact hetzelfde getal.
 export function regimeEffect(state, c, veld, standaard = 0) {
-  return regimeVan(state, c)?.effecten?.[veld] ?? standaard;
+  const basis = regimeVan(state, c)?.effecten?.[veld] ?? standaard;
+  const d = c.doctrine ? state.pack.doctrineIndex?.[c.doctrine]?.effecten?.[veld] ?? 0 : 0;
+  return basis + d;
+}
+
+// De doctrine van een land (alleen de speler kan er een hebben), of null.
+export function doctrineVan(state, c) {
+  return (c?.doctrine && state.pack.doctrineIndex?.[c.doctrine]) || null;
 }
 
 // Landen voelen zich aangetrokken tot blokken die door een land met hetzelfde regime worden geleid.

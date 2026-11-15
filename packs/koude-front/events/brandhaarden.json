@@ -1,0 +1,326 @@
+[
+  {
+    "id": "olieveldprotest",
+    "naam": "Arbeiders op het olieveld leggen het werk neer",
+    "tekst": "Na een brand op een boortoren eisen de arbeiders betere veiligheid. De pompen staan stil.",
+    "anker": "olieveld",
+    "pictogram": "bliksem",
+    "voorwaarde": {
+      "na_dag": 120,
+      "kans_per_dag": 0.001
+    },
+    "groei_per_dag": 1.6,
+    "deadline_dagen": 55,
+    "trappen": [
+      {
+        "vanaf": 33,
+        "effect": {
+          "stabiliteit_doel": -3,
+          "duur_dagen": 30
+        }
+      },
+      {
+        "vanaf": 66,
+        "tekst": "De oliestroom droogt op.",
+        "effect": {
+          "stabiliteit_doel": -4,
+          "productie_factor": 0.95,
+          "duur_dagen": 30
+        },
+        "gebouw_uit_dagen": 0
+      }
+    ],
+    "acties": [
+      {
+        "id": "inspectie",
+        "naam": "Een veiligheidsinspectie toezeggen",
+        "tekst": "Langzaam, maar de arbeiders luisteren.",
+        "kosten": {
+          "kapitaal": 40
+        },
+        "druk": -40,
+        "effect": {}
+      },
+      {
+        "id": "militie",
+        "naam": "De volksmilitie inzetten",
+        "tekst": "De pompen draaien weer, de angst blijft.",
+        "kosten": {
+          "kapitaal": 70
+        },
+        "vereist_gebouw": "politie",
+        "druk": -65,
+        "effect": {
+          "stabiliteit": -3
+        }
+      },
+      {
+        "id": "toeslag",
+        "naam": "Een gevarentoeslag",
+        "tekst": "Duur, maar het werk wordt hervat.",
+        "kosten": {
+          "kapitaal": 130
+        },
+        "druk": -100,
+        "effect": {
+          "stabiliteit": 1
+        }
+      }
+    ],
+    "uitbarsting": {
+      "tekst": "Het olieveld ligt een maand stil.",
+      "effect": {
+        "stabiliteit": -5,
+        "olie": -40,
+        "productie_factor": 0.93,
+        "duur_dagen": 30
+      },
+      "gebouw_uit_dagen": 30
+    },
+    "opgelost": {
+      "effect": {
+        "stabiliteit": 2
+      }
+    }
+  },
+  {
+    "id": "staalstaking",
+    "naam": "Staking in de staalgieterij",
+    "tekst": "De hoogovens draaien op een te hoge norm. De ploegen weigeren nog langer dubbele diensten.",
+    "anker": "staalfabriek",
+    "pictogram": "tandwiel",
+    "voorwaarde": {
+      "na_dag": 130,
+      "kans_per_dag": 0.001
+    },
+    "groei_per_dag": 1.5,
+    "deadline_dagen": 60,
+    "trappen": [
+      {
+        "vanaf": 33,
+        "effect": {
+          "stabiliteit_doel": -3,
+          "duur_dagen": 30
+        }
+      },
+      {
+        "vanaf": 66,
+        "tekst": "De ovens koelen af.",
+        "effect": {
+          "stabiliteit_doel": -4,
+          "productie_factor": 0.95,
+          "duur_dagen": 30
+        },
+        "gebouw_uit_dagen": 0
+      }
+    ],
+    "acties": [
+      {
+        "id": "norm",
+        "naam": "De norm tijdelijk verlagen",
+        "tekst": "Minder druk, het duurt even.",
+        "kosten": {
+          "kapitaal": 45
+        },
+        "druk": -40,
+        "effect": {}
+      },
+      {
+        "id": "plicht",
+        "naam": "Arbeidsplicht afkondigen",
+        "tekst": "Snel weer aan het werk, met tegenzin.",
+        "kosten": {
+          "kapitaal": 75
+        },
+        "druk": -70,
+        "effect": {
+          "stabiliteit": -4
+        }
+      }
+    ],
+    "uitbarsting": {
+      "tekst": "De staalfabriek ligt een maand stil.",
+      "effect": {
+        "stabiliteit": -5,
+        "productie_factor": 0.92,
+        "duur_dagen": 30
+      },
+      "gebouw_uit_dagen": 30
+    },
+    "opgelost": {
+      "effect": {
+        "stabiliteit": 2
+      }
+    }
+  },
+  {
+    "id": "werkonderbreking",
+    "naam": "Werkonderbreking in de zware industrie",
+    "tekst": "In de grote fabriekshallen leggen ploegen het werk stil. Het vijfjarenplan is te zwaar.",
+    "anker": "zware_industrie",
+    "pictogram": "tandwiel",
+    "voorwaarde": {
+      "na_dag": 150,
+      "kans_per_dag": 0.001
+    },
+    "groei_per_dag": 1.5,
+    "deadline_dagen": 60,
+    "trappen": [
+      {
+        "vanaf": 33,
+        "effect": {
+          "stabiliteit_doel": -3,
+          "duur_dagen": 30
+        }
+      },
+      {
+        "vanaf": 66,
+        "tekst": "De productie zakt zichtbaar.",
+        "effect": {
+          "stabiliteit_doel": -4,
+          "productie_factor": 0.95,
+          "duur_dagen": 30
+        },
+        "gebouw_uit_dagen": 0
+      }
+    ],
+    "acties": [
+      {
+        "id": "overleg",
+        "naam": "Overleg met de ploegleiders",
+        "tekst": "Stap voor stap terug naar het plan.",
+        "kosten": {
+          "kapitaal": 40
+        },
+        "druk": -40,
+        "effect": {}
+      },
+      {
+        "id": "secretaris",
+        "naam": "De partijsecretaris erop af",
+        "tekst": "Snel stil, maar het gemor blijft.",
+        "kosten": {
+          "kapitaal": 65
+        },
+        "druk": -65,
+        "effect": {
+          "stabiliteit": -3,
+          "complot": 3
+        }
+      },
+      {
+        "id": "plan",
+        "naam": "Het plan bijstellen",
+        "tekst": "Duur, maar de hallen draaien weer.",
+        "kosten": {
+          "kapitaal": 140
+        },
+        "druk": -100,
+        "effect": {
+          "stabiliteit": 1
+        }
+      }
+    ],
+    "uitbarsting": {
+      "tekst": "De hallen liggen een maand stil.",
+      "effect": {
+        "stabiliteit": -5,
+        "productie_factor": 0.92,
+        "duur_dagen": 30
+      },
+      "gebouw_uit_dagen": 30
+    },
+    "opgelost": {
+      "effect": {
+        "stabiliteit": 2
+      }
+    }
+  },
+  {
+    "id": "broodprotest",
+    "naam": "Wachtrijen voor brood",
+    "tekst": "Lange rijen bij de winkels in de hoofdstad. Op het plein groeit een stil protest.",
+    "anker": "hoofdstad",
+    "pictogram": "zuil",
+    "voorwaarde": {
+      "na_dag": 140,
+      "kans_per_dag": 0.001
+    },
+    "groei_per_dag": 1.4,
+    "deadline_dagen": 60,
+    "trappen": [
+      {
+        "vanaf": 33,
+        "effect": {
+          "stabiliteit_doel": -3,
+          "duur_dagen": 30
+        }
+      },
+      {
+        "vanaf": 66,
+        "tekst": "Het plein staat vol: de hoofdstad kijkt mee.",
+        "effect": {
+          "stabiliteit_doel": -4,
+          "productie_factor": 0.95,
+          "duur_dagen": 30
+        },
+        "gebouw_uit_dagen": 0
+      }
+    ],
+    "acties": [
+      {
+        "id": "graan",
+        "naam": "Graan uit de reserve",
+        "tekst": "Het helpt, maar het kost voorraad.",
+        "kosten": {
+          "kapitaal": 40
+        },
+        "druk": -40,
+        "effect": {
+          "graan": -30
+        }
+      },
+      {
+        "id": "verbod",
+        "naam": "Samenscholing verbieden",
+        "tekst": "Het plein is leeg, de wrok blijft.",
+        "kosten": {
+          "kapitaal": 55
+        },
+        "vereist_gebouw": "politie",
+        "druk": -70,
+        "effect": {
+          "stabiliteit": -4,
+          "complot": 4
+        }
+      },
+      {
+        "id": "winkels",
+        "naam": "Extra winkels en aanvoer",
+        "tekst": "Duur, maar de rijen verdwijnen.",
+        "kosten": {
+          "kapitaal": 130
+        },
+        "druk": -100,
+        "effect": {
+          "stabiliteit": 2
+        }
+      }
+    ],
+    "uitbarsting": {
+      "tekst": "Het protest slaat over op het hele land.",
+      "effect": {
+        "stabiliteit": -6,
+        "complot": 5,
+        "productie_factor": 0.95,
+        "duur_dagen": 30
+      },
+      "gebouw_uit_dagen": 0
+    },
+    "opgelost": {
+      "effect": {
+        "stabiliteit": 2
+      }
+    }
+  }
+]

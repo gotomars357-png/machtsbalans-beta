@@ -3,7 +3,7 @@
 
 import {
   DEFAULT_FILES, DEFAULT_MODEL, DEFAULT_RESOURCES, DEFAULT_GEBOUWEN, DEFAULT_PERSOONLIJKHEDEN,
-  DEFAULT_ACTIES, DEFAULT_VERHAAL, DEFAULT_EENHEDEN, DEFAULT_REGIMES, ZWEVEND,
+  DEFAULT_ACTIES, DEFAULT_VERHAAL, DEFAULT_EENHEDEN, DEFAULT_REGIMES, ZWEVEND, DEFAULT_DOCTRINES,
 } from './defaults.js';
 import { validatePack } from './validate.js';
 
@@ -69,12 +69,15 @@ export function normalizePack(meta, raw, info = []) {
     overname: acties.overname ?? clone(DEFAULT_ACTIES.overname),
   };
   p.events = raw.events ?? [];
+  p.brandhaarden = raw.brandhaarden ?? [];
   p.schokken = raw.schokken ?? [];
   p.verhaal = { ...clone(DEFAULT_VERHAAL), ...(raw.verhaal || {}) };
   // Tutorial voor de eerste minuten (story/tutorial.json): alleen aanwezig als het pack stappen levert.
   const heeft = (k) => Array.isArray(raw.tutorial?.[k]) && raw.tutorial[k].length;
   p.tutorial = heeft('stappen') || heeft('tips') ? clone(raw.tutorial) : null;
   p.regimes = raw.regimes ?? clone(DEFAULT_REGIMES);
+  p.doctrines = raw.doctrines ?? clone(DEFAULT_DOCTRINES);
+  p.doctrineIndex = Object.fromEntries((Array.isArray(p.doctrines) ? p.doctrines : []).filter((d) => d?.id).map((d) => [d.id, d]));
 
   p.rollen = {};
   for (const r of p.resources) {

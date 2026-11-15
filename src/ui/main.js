@@ -13,8 +13,10 @@ import { CONTRACT, contractenVan } from '../engine/contracten.js';
 import { maakDoelen } from './doelen.js';
 import { toonEindoverzicht, startSessie, kaartGeklikt, gezondSpelen } from './einde.js';
 import { toonUitdaging } from './uitdaging.js';
+import { toonHuis, gekozenDoctrine, doctrineKort } from './huis.js';
 import { extraEffectTekst, keuzeKnop } from './dilemma.js';
 import { cyberBlok, cyberTrede } from './cyber.js';
+import { brandhaardBlok, brandhaardBij } from './brandhaard.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -59,6 +61,7 @@ async function init() {
   renderPacks();
   toonVerderKnop();
   toonUitdaging(ui.packs, startSpel);
+  toonHuis(ui.packs.find((p) => p.pack && !p.rapport.fouten.length)?.pack);
   const eerste = ui.packs.find((p) => p.pack && !p.rapport.fouten.length);
   if (eerste) kiesPack(eerste);
 }
@@ -88,6 +91,7 @@ function kiesPack(p) {
     ${r.fouten.length ? `<div class="fout">Dit pack kan niet starten:</div>${lijst(r.fouten, 'fout')}` : '<div class="goed">Klaar om te spelen.</div>'}
     ${lijst(r.waarschuwingen, 'waarsch')}
     ${r.info.length ? `<details><summary class="inf">Aangevuld met standaardwaarden (${r.info.length})</summary>${lijst(r.info, 'inf')}</details>` : ''}`;
+  toonHuis(p.pack);
   renderLanden();
 }
 
@@ -112,9 +116,10 @@ function leesInstellingen() {
   return {
     seed: +$('#opt-seed').value || 1,
     land: ui.gekozenLand,
+    doctrine: gekozenDoctrine(ui.gekozenPack?.pack),
     moeilijkheid: $('#opt-moeilijkheid').value,
     onboarding: $('#opt-onboarding').checked,
-    systemen: { events: $('#opt-events').checked, schokken: $('#opt-schokken').checked, escalatie: $('#opt-escalatie').checked },
+    systemen: { events: $('#opt-events').checked, schokken: $('#opt-schokken').checked, escalatie: $('#opt-escalatie').checked, brandhaarden: $('#opt-brandhaarden').checked },
   };
 }
 
@@ -377,6 +382,7 @@ document.addEventListener('pointerdown', (e) => {
     case 'vrede': geef({ type: 'vrede', met: d.id }); break;
     case 'selecteer-leger': selecteerLeger(); break;
     case 'leger-thuis': stuurEenheden(ui.state.pack.geo.hoofdstad[ui.state.speler]); break;
+    case 'brandhaard': geef({ type: 'brandhaard', id: +d.doel, actie: d.id }); break;
   }
 });
 
@@ -728,10 +734,11 @@ function gebouwLijst(filter) {
 
 function klikOpKaart(idx, t, x, y) {
   const s = ui.state;
+  const hb = brandhaardBij(s, t, ui.kaart.zoom < 1.5 ? 2 : 0); if (hb) t = hb.tegel;
   const b = s.bezet[t];
   kaartGeklikt();
   tutorialEvent('klik', { t, b });
-  if (b && (ui.kaart.zoom >= 1.5 || b.hoofdstad)) {
+  if (b && (hb || ui.kaart.zoom >= 1.5 || b.hoofdstad)) {
     ui.context = { t, x, y };
     if (b.land !== s.speler) selecteer(b.land); else { ui.dirty = true; renderUI(); }
     return;
@@ -867,6 +874,7 @@ function renderContext() {
     h += `<div class="zacht" style="font-size:12px">${r?.icoon ?? ''} ${esc(r?.naam ?? '')} · ${esc(blokNaam(land.alignment))} · ${esc(land.leider)}</div>`;
     h += `<div class="kern-grid" style="margin:6px 0"><div><span class="l">Productie</span><span class="w">${fmt(land.Y)}</span></div><div><span class="l">Stabiliteit</span><span class="w">${land.stab.toFixed(0)}</span></div><div><span class="l">Leger</span><span class="w">${s.eenheden.filter((u) => u.land === land.idx).length}</span></div></div>`;
     h += moraalBlok(land, eigen);
+    if (eigen && land.doctrine) h += `<div class="doctrine-regel">Doctrine: <b>${esc(doctrineKort(P.doctrineIndex?.[land.doctrine]))}</b></div>`;
     if (eigen) {
       h += `<h3 style="margin-top:10px">Thuisfront</h3>${mediaActies(land, ['propaganda', 'verdediging'])}
         <div style="display:flex;gap:6px;margin-top:6px"><button class="knop klein" data-actie="naar-tab" data-id="volk">Regime en samenleving</button><button class="knop klein" data-actie="naar-tab" data-id="leger">Leger</button></div>`;
@@ -919,6 +927,7 @@ function renderContext() {
       h += buitenlandsGebouw(land, g, b);
     }
   }
+  h = brandhaardBlok(s, t) + h; // een brandhaard bovenaan: die vraagt nu aandacht
   const html = `<div class="context-kop"><b>${titel}</b><button class="knop klein" data-actie="sluit-context">×</button></div>${h}`;
   if (el._html !== html) { el.innerHTML = html; el._html = html; }
   el.hidden = false;
@@ -1153,6 +1162,7 @@ function renderVolk() {
     <div class="land-kop"><span class="naam" style="font-size:16px">${r.icoon ?? ''} ${esc(r.naam)}</span>${c.revoluties ? `<span class="pil">${c.revoluties} revolutie${c.revoluties > 1 ? 's' : ''}</span>` : ''}</div>
     <p style="font-size:12.5px;color:#b9c6d4;margin:4px 0">${esc(r.beschrijving ?? '')}</p>
     <div style="font-size:12px">${regimeEffecten(r)}</div>
+    ${c.doctrine ? `<div class="doctrine-regel">Doctrine: <b>${esc(doctrineKort(P.doctrineIndex?.[c.doctrine]))}</b></div>` : ''}
     ${r.verkiezingen ? `<div class="advies">Volgende verkiezingen over ${Math.max(0, r.verkiezingen - (s.dag - (c.laatsteVerkiezing ?? 0)))} dagen. Onder ${r.verkiezing_drempel ?? 45} stabiliteit verlies je ze.</div>` : ''}
     ${r.staatsgreep ? '<div class="advies">Onder 30 stabiliteit dreigt een staatsgreep.</div>' : ''}
     <details style="margin-top:8px"><summary class="zacht" style="font-size:12px;cursor:pointer">Staatshervorming</summary>`;
@@ -1623,6 +1633,7 @@ function naarStart() {
   $('#spel').hidden = true;
   $('#start').hidden = false;
   toonVerderKnop();
+  toonHuis(ui.gekozenPack?.pack);
 }
 
 // ---------- tutorial en tips (B5, B21) ----------

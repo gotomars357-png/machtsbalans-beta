@@ -5,6 +5,7 @@ export const ENGINE_VERSION = '0.1.0';
 
 export const DEFAULT_FILES = {
   kaart: 'map/kaart.json',
+  doctrines: 'actors/doctrines.json',
   resources: 'economy/resources.json',
   gebouwen: 'economy/gebouwen.json',
   model: 'economy/model.json',
@@ -18,6 +19,7 @@ export const DEFAULT_FILES = {
   tutorial: 'story/tutorial.json',
   eenheden: 'military/eenheden.json',
   regimes: 'actors/regimes.json',
+  brandhaarden: 'events/brandhaarden.json',
 };
 
 export const TOEGESTANE_LICENTIES = ['CC-BY-4.0', 'CC-BY-SA-4.0', 'CC0-1.0', 'MIT'];
@@ -92,6 +94,10 @@ export const DEFAULT_MODEL = {
   media_verval: 0.03,
   moraal_basis: 50,           // strijdbereidheid zonder bijzondere factoren
   moraal_snelheid: 0.04,
+  brandhaard_max_per_land: 2,   // zoveel brandhaarden kan een land tegelijk hebben
+  brandhaard_afkoeling: 120,    // dezelfde soort komt in hetzelfde land pas na zoveel dagen terug
+  brandhaard_ai_drempel: 20,    // vanaf deze druk pakt een AI-land een haard aan (vóór de eerste trap op 33)
+  brandhaard_stilte: 80,        // na zoveel stille dagen bij de speler (geen haard, gebeurtenis of oorlog) loopt de kans op
 };
 
 export const DEFAULT_REGIMES = {
@@ -309,3 +315,20 @@ export const DEFAULT_VERHAAL = {
 };
 
 export const ZWEVEND = { id: 'zwevend', naam: 'Zwevend', kleur: '#7d8590' };
+
+// C13 leiderdoctrines: een keuze vóór het potje die optelt bij de regime-effecten (zelfde twaalf velden).
+// Elke doctrine heeft een voordeel en een nadeel; 'ontgrendel' zegt hoe je hem in je Huis vrijspeelt.
+export const DEFAULT_DOCTRINES = [
+  { id: 'bouwer', naam: 'De Bouwer', tekst: 'Je bouwt 8% goedkoper. Het tempo vraagt veel van je mensen: stabiliteit −1.',
+    effecten: { bouw_korting: 0.08, stabiliteit: -1 }, ontgrendel: { start: true }, embleem: 'kraan' },
+  { id: 'handelsvorst', naam: 'De Handelsvorst', tekst: '11% meer inkomsten uit handel. Je leger is 10% duurder, want het geld zit in schepen en contracten.',
+    effecten: { handel_bonus: 0.11, leger_korting: -0.1 }, ontgrendel: { start: true }, embleem: 'schip' },
+  { id: 'omroepbaas', naam: 'De Omroepbaas', tekst: 'Meer grip op wat je volk ziet: informatiecontrole +4. Wie alles stuurt, wekt argwaan: 25% vatbaarder voor complotten.',
+    effecten: { informatiecontrole: 4, complot_gevoeligheid: 0.25 }, ontgrendel: { orders: { type: 'media', minimaal: 12 } }, embleem: 'mast' },
+  { id: 'fluisteraar', naam: 'De Fluisteraar', tekst: 'Je hoort de geruchten voordat ze rondgaan: 12% minder vatbaar voor complotten. In een oorlog vertrouwt je volk je minder: strijdbereidheid −4.',
+    effecten: { complot_gevoeligheid: -0.12, moraal: -4 }, ontgrendel: { winst_zonder_oorlog: true }, embleem: 'sleutel' },
+  { id: 'veldheer', naam: 'De Veldheer', tekst: 'Je leger is 12% goedkoper. Een land dat in de kazerne leeft, mort: stabiliteit −3.',
+    effecten: { leger_korting: 0.12, stabiliteit: -3 }, ontgrendel: { potjes: 3 }, embleem: 'schild' },
+  { id: 'hervormer', naam: 'De Hervormer', tekst: 'Je technologie groeit sneller. Niet iedereen vertrouwt al dat nieuwe: 10% vatbaarder voor complotten.',
+    effecten: { tech_groei: 0.000006, complot_gevoeligheid: 0.1 }, ontgrendel: { winst_route: 'aantal_landen' }, embleem: 'kolf' },
+];

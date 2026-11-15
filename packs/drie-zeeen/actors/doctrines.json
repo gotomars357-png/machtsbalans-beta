@@ -1,0 +1,50 @@
+[
+  {
+    "id": "bouwer",
+    "naam": "De Bouwer",
+    "tekst": "Je bouwt 8% goedkoper. Het tempo vraagt veel van je mensen: stabiliteit −1.",
+    "effecten": { "bouw_korting": 0.08, "stabiliteit": -1 },
+    "ontgrendel": { "start": true },
+    "embleem": "kraan"
+  },
+  {
+    "id": "handelsvorst",
+    "naam": "De Handelsvorst",
+    "tekst": "11% meer inkomsten uit handel. Je leger is 10% duurder, want het geld zit in schepen en contracten.",
+    "effecten": { "handel_bonus": 0.11, "leger_korting": -0.1 },
+    "ontgrendel": { "start": true },
+    "embleem": "schip"
+  },
+  {
+    "id": "omroepbaas",
+    "naam": "De Omroepbaas",
+    "tekst": "Meer grip op wat je volk ziet: informatiecontrole +4. Wie alles stuurt, wekt argwaan: 25% vatbaarder voor complotten.",
+    "effecten": { "informatiecontrole": 4, "complot_gevoeligheid": 0.25 },
+    "ontgrendel": { "orders": { "type": "media", "minimaal": 12 } },
+    "embleem": "mast"
+  },
+  {
+    "id": "fluisteraar",
+    "naam": "De Fluisteraar",
+    "tekst": "Je hoort de geruchten voordat ze rondgaan: 12% minder vatbaar voor complotten. In een oorlog vertrouwt je volk je minder: strijdbereidheid −4.",
+    "effecten": { "complot_gevoeligheid": -0.12, "moraal": -4 },
+    "ontgrendel": { "winst_zonder_oorlog": true },
+    "embleem": "sleutel"
+  },
+  {
+    "id": "veldheer",
+    "naam": "De Veldheer",
+    "tekst": "Je leger is 12% goedkoper. Een land dat in de kazerne leeft, mort: stabiliteit −3.",
+    "effecten": { "leger_korting": 0.12, "stabiliteit": -3 },
+    "ontgrendel": { "potjes": 3 },
+    "embleem": "schild"
+  },
+  {
+    "id": "hervormer",
+    "naam": "De Hervormer",
+    "tekst": "Je technologie groeit sneller. Niet iedereen vertrouwt al dat nieuwe: 10% vatbaarder voor complotten.",
+    "effecten": { "tech_groei": 0.000006, "complot_gevoeligheid": 0.1 },
+    "ontgrendel": { "winst_route": "aantal_landen" },
+    "embleem": "kolf"
+  }
+]

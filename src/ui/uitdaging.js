@@ -35,7 +35,7 @@ export function uitdagingInstellingen(pack, sleutel) {
     moeilijkheid: MOEILIJKHEDEN[(seed >>> 8) % MOEILIJKHEDEN.length],
     onboarding: true,
     tutorial: false,
-    systemen: { events: true, schokken: true, escalatie: true },
+    systemen: { events: true, schokken: true, escalatie: true, brandhaarden: true },
     uitdaging: sleutel,
   };
 }

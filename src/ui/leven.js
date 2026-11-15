@@ -16,7 +16,8 @@ import { woningCapaciteit } from '../engine/samenleving.js';
 import { oorlogenVan } from '../engine/leger.js';
 import { seizoen, weer, wind } from './seizoen.js';
 import { verkeersTijd, H as DAG, PROFIEL, KLASSE } from './wegennet.js';
-import { Ritten, ritStand as ritStandVan, dockStand as dockStandVan, slagboom as slagboomVan, standSinds, zebraBezet, TOESTAND, VRACHTSOORT } from './ritten.js';
+import { Ritten, ritStand as ritStandVan, dockStand as dockStandVan, slagboom as slagboomVan, standSinds, zebraBezet, TOESTAND, VRACHTSOORT, tauVan } from './ritten.js';
+import { bijwerken as straatBijwerken, straatStand, stilOp, landStand, straatVerkeer, parkOvergang, vervaag, padPunt, DREMPELS as STRAAT, RIJ_MAX, BLOEI_EXTRA } from './straatstand.js';
 import { kenmerkenVoorTegel, KENMERK, GEWAS, perceelHoek } from './terrein.js';
 import { DREMPEL } from './infra.js';
 
@@ -59,6 +60,8 @@ export const PLAFOND = {
   // verkeer dat klopt: vrachtwagens met oplegger, vuilniswagens, sneeuwschuivers en strooiwagens, veegwagens,
   // overstekers bij de zebra, groepjes die even blijven staan praten en de vrachtblokjes op de overzichtskaart
   opleggers: 24, vuilniswagens: 4, strooiers: 6, veegwagens: 3, overstekers: 40, groepjes: 16, reizigers: 80, blokjes: 160,
+  // C13c (straatstand.js): tekort-merkjes op de middenzoom bij stilstaande gebouwen van de speler
+  tekorten: 40,
 };
 // Tellers die elke frame op nul gaan (alles behalve de oude zeven, die eigen velden hebben).
 const PLUS = Object.keys(PLAFOND).slice(7);
@@ -182,6 +185,8 @@ function berekenDichtheid(state, idx) {
   }
   const jaarDag = ((state.dag % 365) + 365) % 365;
   const oorlog = oorlogenVan(state, c).length > 0;
+  // C13c: een bloeiend land (welvaart boven de drempel van straatstand.js en groei) heeft tot 25 % meer auto's
+  const bloei = welvaart > STRAAT.bloei_welvaart && (c.groei ?? 0) > 0;
   return {
     stab: c.stab,
     // groeiende wijken: de woningen raken vol, dus er wordt gebouwd
@@ -199,8 +204,68 @@ function berekenDichtheid(state, idx) {
     politie: (c.gebouwen.politie ?? 0) > 0,
     gedempt: !!GEDEMPT_REGIME[c.regime],
     mensenFactor: bezetting * (0.6 + 0.4 * welvaart) * (ziek ? 0.25 : 1),
-    autoFactor: welvaart * (ziek ? 0.4 : 1),
+    bloei,
+    autoFactor: welvaart * (ziek ? 0.4 : 1) * (bloei ? 1 + BLOEI_EXTRA : 1),
   };
+}
+
+// ---------- C13c: de straatstand en het verkeer ----------
+
+// De volgers van een bloeiend land (sx, sy, hx, hy, kleur, alpha, id, stand, rem) rijden VOLG_AFSTAND tegel achter
+// hun voorganger; de onrustpuls is nooit sterker dan PULS_ALFA. Wat er stilstaat, in de rij staat of extra rijdt,
+// rekent straatstand.js uit (straatVerkeer). Komt een volger te dicht bij een ander voertuig, dan vervaagt hij
+// (vanaf VOLG_RUIM tegel tussenruimte, weg bij VOLG_KRAP), en nooit sneller dan VOLG_SNEL per milliseconde.
+const VOLG = 9, MAX_VOLG = 48, VOLG_AFSTAND = 0.145, PULS_ALFA = 0.35, VOLG_RUIM = 0.15, VOLG_KRAP = 0.02, VOLG_SNEL = 1 / 250;
+
+// Pictogram voor de rol van het ontbrekende goed (via pack.rollen): 1 bliksem (energie), 2 blokje (grondstof),
+// 3 aar (voedsel), 4 chip (tech), anders 0 (driehoek).
+const ICOON_ROL = { energie: 1, grondstof: 2, voedsel: 3, tech: 4 };
+function icoonVan(P, res) {
+  for (const rol in P.rollen ?? {}) if (P.rollen[rol] === res && ICOON_ROL[rol]) return ICOON_ROL[rol];
+  return ICOON_ROL[P.resIndex?.[res]?.rol] ?? 0;
+}
+// Teken pictogram i rond (x, y), halve maat m, in vectorvormen (geen emoji, geen tekst).
+function pictogram(c, i, x, y, m) {
+  c.fillStyle = '#fff4d6';
+  c.beginPath();
+  if (i === 1) {
+    // bliksem
+    c.moveTo(x + 0.25 * m, y - 1.05 * m); c.lineTo(x - 0.6 * m, y + 0.15 * m); c.lineTo(x - 0.02 * m, y + 0.15 * m);
+    c.lineTo(x - 0.3 * m, y + 1.05 * m); c.lineTo(x + 0.62 * m, y - 0.22 * m); c.lineTo(x + 0.05 * m, y - 0.22 * m); c.closePath();
+    c.fill();
+  } else if (i === 2) {
+    // blokje: een kist van boven met een lichte bovenkant
+    c.rect(x - 0.72 * m, y - 0.55 * m, 1.44 * m, 1.3 * m); c.fill();
+    c.fillStyle = 'rgba(120,40,30,0.55)';
+    c.fillRect(x - 0.72 * m, y - 0.08 * m, 1.44 * m, Math.max(0.6, 0.16 * m));
+  } else if (i === 3) {
+    // aar: een steel met korrels om en om
+    c.fillRect(x - 0.08 * m, y - 0.9 * m, Math.max(0.7, 0.16 * m), 1.95 * m);
+    for (let k = 0; k < 3; k++) {
+      const ky = y - 0.55 * m + k * 0.45 * m;
+      c.moveTo(x - 0.05 * m, ky); c.ellipse(x - 0.32 * m, ky, 0.3 * m, 0.17 * m, -0.6, 0, TAU);
+      c.moveTo(x + 0.6 * m, ky); c.ellipse(x + 0.32 * m, ky, 0.3 * m, 0.17 * m, 0.6, 0, TAU);
+    }
+    c.moveTo(x + 0.2 * m, y - 1.05 * m); c.ellipse(x, y - 1.0 * m, 0.17 * m, 0.27 * m, 0, 0, TAU);
+    c.fill();
+  } else if (i === 4) {
+    // chip: een plaatje met pootjes aan vier kanten
+    c.rect(x - 0.55 * m, y - 0.55 * m, 1.1 * m, 1.1 * m);
+    for (let k = -1; k <= 1; k++) {
+      const d = k * 0.34 * m, w = Math.max(0.6, 0.14 * m);
+      c.rect(x + d - w / 2, y - 0.95 * m, w, 0.4 * m); c.rect(x + d - w / 2, y + 0.55 * m, w, 0.4 * m);
+      c.rect(x - 0.95 * m, y + d - w / 2, 0.4 * m, w); c.rect(x + 0.55 * m, y + d - w / 2, 0.4 * m, w);
+    }
+    c.fill();
+    c.fillStyle = 'rgba(120,40,30,0.6)';
+    c.fillRect(x - 0.25 * m, y - 0.25 * m, 0.5 * m, 0.5 * m);
+  } else {
+    // driehoek met een streep: iets ontbreekt
+    c.moveTo(x, y - 0.95 * m); c.lineTo(x + 0.95 * m, y + 0.75 * m); c.lineTo(x - 0.95 * m, y + 0.75 * m); c.closePath();
+    c.fill();
+    c.fillStyle = 'rgba(120,40,30,0.75)';
+    c.fillRect(x - 0.09 * m, y - 0.35 * m, Math.max(0.6, 0.18 * m), 0.6 * m);
+  }
 }
 
 // ---------- tekenhulpjes ----------
@@ -407,6 +472,12 @@ export class LevenLaag {
     this.sp = { x: 0, y: 0, hx: 0, hy: 0 };
     this.reis = new Float32Array(MAX_REIS * REIS); this.nReis = 0;
     this.zorg = new Uint8Array(0);
+    // C13c: per ritset wat de straatstand met het verkeer doet (zie straatVoor), en de tekort-merkjes van dit beeld
+    this.straatCache = new WeakMap();
+    this.volg = new Float32Array(MAX_VOLG * VOLG); this.nVolg = 0; this.volgSt = { x: 0, y: 0, hx: 1, hy: 0, alpha: 1 };
+    this.volgA = new Float32Array(0); this.volgNu = new Float64Array(0); // per volger: laatste alpha en wanneer
+    this.tekortT = new Int32Array(PLAFOND.tekorten); this.tekortIcoon = new Uint8Array(PLAFOND.tekorten);
+    this.tekortX = new Float32Array(PLAFOND.tekorten * 2); this.nPuls = 0;
   }
 
   // Na het laden van een spel: vaste dingen voorrekenen (kustwater, zeilplekken, vogelzwermen).
@@ -540,6 +611,14 @@ export class LevenLaag {
     return false;
   }
 
+  // Ligt (x, y) op of vlak bij een overweg van de infralaag? (de rij voor de douane stopt ervoor)
+  opOverweg(x, y) {
+    const O = this.infra?.overwegen, T = this.geo?.T ?? 1;
+    if (!O) return false;
+    for (let i = 0; i < O.length; i++) if (Math.hypot(O[i].x - x, O[i].y - y) < 0.28 * T) return true;
+    return false;
+  }
+
   isWater(x, y) {
     const e = this.eigenaar;
     if (!e) return true;
@@ -642,8 +721,10 @@ export class LevenLaag {
   // op, het verkeer via u = verkeersTijd(nu). dt en tempo doen niet meer mee (pauze stopt het spel, niet het
   // straatleven; zie PAUZE_STOPT_WERELD in map.js).
   teken(c, view, sc, nu, dt = 0, tempo = 0) {
+    straatBijwerken(view.state);
     this.klok = nu / 1000;
     this.nu = nu;
+    this.infra = view.infraLaag ?? null;
     // de percelen van terrein.js (voor de tractoren); opnieuw zodra het terrein of het net verandert
     const tb = view.terreinLaag?.basis ?? null, tv = view.wegennet?.versie ?? 0;
     if (tb !== this.akkerBasis || tv !== this.akkerVersie) { this.akkerBasis = tb; this.akkerVersie = tv; this.akkerStaat?.fill(0); }
@@ -663,6 +744,7 @@ export class LevenLaag {
     this.nGevecht = 0;
     this.nachtVorig = view.nacht ?? 0;
     this.nPraat = 0;
+    this.nPuls = 0;
     // het wegennet en de ritten erop (bouwen gaat in plakken; de ritten van het vorige net rijden zolang door)
     const net = view.wegennet ?? null;
     this.net = net && net.D ? net : null;
@@ -682,6 +764,9 @@ export class LevenLaag {
     if (z >= 4) this.tekenMeeuwen(c, nu);
     if (this.nKlein) this.tekenKlein(c, nu);
     if (z >= 2.5) this.tekenLucht(c, nu);
+    // C13c: onrust al op de middenzoom (het protest neemt het tussen zoom 4 en 5 over) en de tekort-merkjes
+    if (z < 5) this.tekenOnrustPuls(c, nu, 1 - smooth(4, 5, z));
+    if (z >= 2.5 && z < ZOOM_BLOK_UIT) this.tekenTekorten(c, smooth(2.5, 2.9, z) * (1 - smooth(ZOOM_VRACHT, ZOOM_BLOK_UIT, z)));
     c.restore();
   }
 
@@ -697,9 +782,37 @@ export class LevenLaag {
     return ritStandVan(R, v, u, uit);
   }
   // Het dock van tegel t op u: { bezet, soort 0 laden / 1 lossen, voortgang 0..1, voertuig } of null (dicht en leeg).
-  dockStand(t, u) { return this.rit.R && this.net ? dockStandVan(this.rit.R, this.net, t, u) : null; }
-  // De slagboom van net.grensovergangen[i] op u: 0 dicht tot 1 open.
-  slagboom(i, u) { return this.rit.R ? slagboomVan(this.rit.R, i, u) : 0; }
+  // C13c: een stilstaand gebouw (straatstand.js) laadt en lost niet: zijn dock blijft dicht.
+  dockStand(t, u) { return this.rit.R && this.net && stilOp(t) == null ? dockStandVan(this.rit.R, this.net, t, u) : null; }
+  // De slagboom van net.grensovergangen[i] op u: 0 dicht tot 1 open. C13c: dicht waar een blokkade de opleggers
+  // laat wachten.
+  slagboom(i, u) {
+    const R = this.rit.R;
+    if (!R) return 0;
+    if (this.net && this.straatVoor(R).boom[i]) return 0;
+    return slagboomVan(R, i, u);
+  }
+
+  // ---------- C13c: de straatstand op straat (zie straatstand.js) ----------
+
+  // Per ritset en momentopname: welke vracht stilstaat, waar de geparkeerde vrachtwagen bij een stil gebouw staat,
+  // de rij voor de grens bij een blokkade en de extra auto's van een bloeiend land. Eén keer per speldag of ritset.
+  straatVoor(R) {
+    const st = straatStand(), net = this.net;
+    const oud = this.straatCache.get(R);
+    if (oud && oud.st === st && oud.net === net) return oud;
+    const k = straatVerkeer(R, st, net, this);
+    // Wat sinds de vorige stand stil is komen te staan (of weer rijdt) vervaagt in een seconde. Per voertuig en per
+    // geparkeerde wagen onthouden wanneer hij wisselde, zodat een nieuwe speldag zonder wissel niets laat knipperen
+    // (op tempo 8 komt er acht keer per seconde een nieuwe stand).
+    const vorig = oud && oud.net === net ? oud : null, nu = this.nu;
+    k.wissel = vorig?.wissel ?? new Float64Array(R.n).fill(-1e9);
+    if (vorig) for (let v = 0; v < R.n; v++) if (vorig.verborgen[v] !== k.verborgen[v]) k.wissel[v] = nu;
+    k.parkO = parkOvergang(k.park, vorig?.parkO ?? null, nu);
+    k.extraO = parkOvergang(k.extra, vorig?.extraO ?? null, nu);
+    this.straatCache.set(R, k);
+    return k;
+  }
 
   // Seizoen, weer en wind van vandaag, op het midden van het beeld (een weerfront is veel groter dan het beeld).
   omgeving(view) {
@@ -753,8 +866,10 @@ export class LevenLaag {
     this.nAuto = 0; this.nWacht = 0; this.nRij = 0; this.nReis = 0; this.nBlok = 0;
     const M = this.rit;
     M.ruim(nu);
+    this.nVolg = 0;
     if (M.oud) this.verzamelSet(M.oud, nu, true);
     if (M.R) this.verzamelSet(M.R, nu, false);
+    if (this.nVolg) this.plaatsVolgers();
     this.sorteerAutos();
   }
 
@@ -764,6 +879,9 @@ export class LevenLaag {
     const kleinA = smooth(ZOOM_AUTO, ZOOM_AUTO + 0.6, z), wissel = !!M.oud;
     const box = R.box, soorten = R.soort, MAX = PLAFOND.autos;
     const metAutos = z >= ZOOM_VRACHT, metBlok = z < ZOOM_BLOK_UIT;
+    // C13c: wat de straatstand met dit verkeer doet (stilstaande vracht, de rij voor de grens, bloei)
+    const K = this.straatVoor(R), tau = tauVan(u);
+    const dagRand = clamp(tau / 3, 0, 1) * clamp((DAG - tau) / 3, 0, 1);
     for (let v = 0; v < R.n; v++) {
       const o4 = v * 4;
       if (box[o4] > x1 || box[o4 + 2] < x0 || box[o4 + 1] > y1 || box[o4 + 3] < y0) continue;
@@ -771,8 +889,27 @@ export class LevenLaag {
       let a = klein ? kleinA : 1;
       if (a <= 0.02) continue;
       if (wissel) { a *= M.wisselAlfa(v, nu, oud); if (a <= 0.02) continue; }
+      // vracht van en naar een stil gebouw rijdt niet (er staat er een geparkeerd aan het dock, zie hieronder);
+      // wat net stil kwam te staan of weer gaat rijden, vervaagt
+      const ov = vervaag(nu, K.wissel[v]);
+      if (K.verborgen[v]) { a *= 1 - ov; if (a <= 0.02) continue; }
+      else if (ov < 1) { a *= ov; if (a <= 0.02) continue; }
       ritStandVan(R, v, u, st);
+      // blokkade: wie zijn plek in de rij voor de douane bereikt, blijft daar staan tot middernacht; meer dan
+      // RIJ_MAX per overgang verdwijnen voor ze bij de rij zijn
+      const rij = K.rij[v];
+      if (rij >= 0) {
+        a *= dagRand;
+        if (rij >= RIJ_MAX) a *= clamp((K.rijS[v] - st.s) / (0.3 * Tw), 0, 1);
+        else if (st.s >= K.rijS[v]) {
+          const q = v * 5, P5 = K.rijPos;
+          st.x = P5[q]; st.y = P5[q + 1]; st.hx = P5[q + 2]; st.hy = P5[q + 3]; st.alpha = P5[q + 4];
+          st.toestand = TOESTAND.WACHT; st.stop = 1; st.knip = 0; st.achter = 0;
+        }
+        if (a <= 0.02) continue;
+      }
       if (st.x < x0 || st.x > x1 || st.y < y0 || st.y > y1) continue;
+      const aZonder = a;
       a *= st.alpha;
       if (a <= 0.03) continue;
       const stand = st.toestand;
@@ -801,6 +938,154 @@ export class LevenLaag {
         Rz[r] = st.x; Rz[r + 1] = st.y; Rz[r + 2] = st.hx; Rz[r + 3] = st.hy;
         Rz[r + 4] = soort; Rz[r + 5] = standSinds(R, v, u); Rz[r + 6] = v; Rz[r + 7] = 0; Rz[r + 8] = 0; Rz[r + 9] = a;
       }
+      // C13c bloei: een tweede auto rijdt een eindje achter deze aan (niet bij het in- en uitparkeren)
+      if (K.volger[v] && (stand === TOESTAND.RIJDT || stand === TOESTAND.WACHT) && !st.achter && this.nVolg < MAX_VOLG) this.volger(R, v, st, aZonder, kleur, rem, oud, stand);
+    }
+    if (oud || !metAutos) return;
+    // C13c: een vrachtwagen geparkeerd aan het dock van elk stil gebouw, en de extra geparkeerde auto's bij bloei
+    this.zetParkLijst(K.parkO, 0.6, 500000, nu, x0, y0, x1, y1);
+    if (kleinA > 0.02) this.zetParkLijst(K.extraO, kleinA, 600000, nu, x0, y0, x1, y1);
+  }
+
+  // De geparkeerde wagens van een parkOvergang in de buffer: wie er nieuw bij kwam vervaagt in, wie wegging vervaagt uit.
+  zetParkLijst(O, basis, id0, nu, x0, y0, x1, y1) {
+    const MAX = PLAFOND.autos;
+    for (let k = 0; k < 2; k++) {
+      const L = k ? O.weg : O.lijst, S = k ? O.wegSinds : O.sinds;
+      for (let i = 0; i < L.length && this.nAuto < MAX; i++) {
+        const p = L[i];
+        if (p.x < x0 || p.x > x1 || p.y < y0 || p.y > y1) continue;
+        const f = vervaag(nu, S[i]), a = basis * (k ? 1 - f : f);
+        if (a <= 0.02) continue;
+        this.zetGeparkeerd(p, a, id0 + p.sleutel % 100000);
+      }
+    }
+  }
+
+  // Een stilstaand voertuig in de buffer (geparkeerd, zonder lichten): p = { x, y, hx, hy, soort, kleur, land }.
+  zetGeparkeerd(p, a, id) {
+    let kleur = p.kleur;
+    if (kleur < 8 && levenDichtheid(this.state, p.land).gedempt) kleur += 8;
+    const o = this.nAuto * AUTO, b = this.auto;
+    this.autoId[this.nAuto++] = id;
+    b[o] = p.x * this.sc + this.ox; b[o + 1] = p.y * this.sc + this.oy; b[o + 2] = p.hx; b[o + 3] = p.hy; b[o + 4] = kleur; b[o + 5] = p.soort;
+    b[o + 6] = 0; b[o + 7] = 0; b[o + 8] = hash(id, 7, p.land); b[o + 9] = a; b[o + 10] = TOESTAND.GEPARKEERD;
+  }
+
+  // C13c bloei: de volger van auto v een autolengte achter hem op zijn eigen pad, alleen midden in een rit (niet bij
+  // het vertrek of de aankomst); vervaagt bij het begin en eind van de rit. plaatsVolgers zet hem in de buffer.
+  volger(R, v, st, a, kleur, rem, oud, stand) {
+    const Tw = this.geo.T, benen = R.info[v].benen, s = st.s;
+    let b0 = 0, b1 = -1;
+    for (let i = 0; i < benen.length; i++) if (s >= benen[i].sStart && s <= benen[i].sEind) { b0 = benen[i].sStart; b1 = benen[i].sEind; break; }
+    if (b1 - b0 < 0.8 * Tw) return;
+    const sf = s - VOLG_AFSTAND * Tw;
+    a *= smooth(b0 + 0.15 * Tw, b0 + 0.35 * Tw, sf) * (1 - smooth(b1 - 0.35 * Tw, b1 - 0.15 * Tw, s));
+    if (a <= 0.02) return;
+    const sp = padPunt(R, v, sf, this.volgSt);
+    a *= sp.alpha;
+    if (a <= 0.03) return;
+    const o = this.nVolg++ * VOLG, F = this.volg;
+    F[o] = sp.x * this.sc + this.ox; F[o + 1] = sp.y * this.sc + this.oy; F[o + 2] = sp.hx; F[o + 3] = sp.hy;
+    F[o + 4] = ((kleur % 8) + 3) % 8 + (kleur >= 8 && kleur < 16 ? 8 : 0); F[o + 5] = a; F[o + 6] = (oud ? 100000 : 0) + 300000 + v; F[o + 7] = stand; F[o + 8] = rem;
+  }
+
+  // De volgers in de buffer, behalve waar ze een ander voertuig raken: dan vervagen ze (geen twee in elkaar).
+  plaatsVolgers() {
+    const F = this.volg, b = this.auto, T = this.T, MAX = PLAFOND.autos, nR = this.rit.R?.n ?? 0, nu = this.nu;
+    if (this.volgA.length !== 2 * nR) { this.volgA = new Float32Array(2 * nR); this.volgNu = new Float64Array(2 * nR).fill(-1e9); }
+    for (let i = 0; i < this.nVolg && this.nAuto < MAX; i++) {
+      const f = i * VOLG, x = F[f], y = F[f + 1];
+      let vrij = 1;
+      for (let j = 0; j < this.nAuto && vrij > 0; j++) {
+        const o = j * AUTO, d = Math.hypot(b[o] - x, b[o + 1] - y) / T - (MAAT[b[o + 5]][0] + MAAT[0][0]);
+        if (d < VOLG_RUIM) vrij = Math.min(vrij, smooth(VOLG_KRAP, VOLG_RUIM, d));
+      }
+      // geen flits: de alpha schuift hooguit VOLG_SNEL per ms naar zijn doel (na een sprong in de tijd meteen)
+      const id = F[f + 6], k = id >= 400000 ? id - 400000 + nR : id - 300000;
+      let a = F[f + 5] * vrij;
+      if (k >= 0 && k < 2 * nR) {
+        const dt = nu - this.volgNu[k];
+        if (dt >= 0 && dt < 250) { const m = VOLG_SNEL * dt, a0 = this.volgA[k]; a = clamp(a, a0 - m, a0 + m); }
+        this.volgA[k] = a; this.volgNu[k] = nu;
+      }
+      if (a <= 0.03) continue;
+      const o = this.nAuto * AUTO;
+      this.autoId[this.nAuto++] = F[f + 6];
+      b[o] = x; b[o + 1] = y; b[o + 2] = F[f + 2]; b[o + 3] = F[f + 3]; b[o + 4] = F[f + 4]; b[o + 5] = 0;
+      b[o + 6] = F[f + 8]; b[o + 7] = 0; b[o + 8] = hash(F[f + 6], 7); b[o + 9] = a; b[o + 10] = F[f + 7];
+      if (F[f + 7] === TOESTAND.RIJDT) this.nRij++; else this.nWacht++;
+    }
+  }
+
+  // C13c tekort: een rood kwartrondje rechtsboven op de kavel van een stilstaand gebouw van de speler, met een
+  // pictogram van wat ontbreekt (bliksem, blokje, aar, chip of anders een driehoek). Geen tekst; de cijfers staan in
+  // de panelen. Middenzoom, vervaagt zoals de vrachtblokjes.
+  tekenTekorten(c, a) {
+    this.n.tekorten = 0;
+    const st = straatStand(), s = this.state;
+    if (!st || a <= 0.01 || !st.stilT.length) return;
+    const geo = this.geo, Tw = geo.T, net = this.net, P = s.pack;
+    const r = clamp(this.T * 0.3, 7, 15);
+    let n = 0;
+    const X = this.tekortX;
+    for (let i = 0; i < st.stilT.length && n < PLAFOND.tekorten; i++) {
+      if (st.stilLand[i] !== s.speler) continue;
+      const t = st.stilT[i], tg = geo.tegels[t];
+      if (!tg || !this.inBeeld(tg.x, tg.y, Tw)) continue;
+      const o = net?.omgeving?.(t) ?? null;
+      const ux = o ? 0.5 - o.inzet[1] : 0.5, uy = o ? -0.5 + o.inzet[0] : -0.5;
+      X[n * 2] = (tg.x + ux * Tw) * this.sc + this.ox; X[n * 2 + 1] = (tg.y + uy * Tw) * this.sc + this.oy;
+      this.tekortT[n] = t; this.tekortIcoon[n] = icoonVan(P, st.stilRes[i]);
+      n++;
+    }
+    this.n.tekorten = n;
+    if (!n) return;
+    c.globalAlpha = a;
+    // het kwartrondje, met een donkere rand zodat het ook op een licht dak leesbaar is
+    c.beginPath();
+    for (let i = 0; i < n; i++) { const x = X[i * 2], y = X[i * 2 + 1]; c.moveTo(x, y); c.arc(x, y, r, Math.PI / 2, Math.PI); c.closePath(); }
+    c.fillStyle = '#d6453b'; c.fill();
+    c.lineWidth = Math.max(1, r * 0.1); c.strokeStyle = 'rgba(40,12,10,0.65)'; c.stroke();
+    for (let i = 0; i < n; i++) pictogram(c, this.tekortIcoon[i], X[i * 2] - r * 0.43, X[i * 2 + 1] + r * 0.43, r * 0.3);
+    c.globalAlpha = 1;
+  }
+
+  // C13c onrust: een trage oranje puls om de hoofdstad van een land met lage stabiliteit, al op de middenzoom
+  // (straal ongeveer 0,6 tegel, periode 2,5 s, alfa hooguit 0,35); tussen zoom 4 en 5 neemt het protest het over.
+  tekenOnrustPuls(c, nu, a) {
+    this.nPuls = 0;
+    if (a <= 0.01) return;
+    const s = this.state, geo = this.geo, Tw = geo.T;
+    // f: zacht op en neer (de gloed); g: een golf die elke periode van binnen naar buiten loopt en uitdooft (de ring).
+    // Donkeroranje, zodat hij ook op de gele hoofdweg bij de hoofdstad opvalt.
+    const f = 0.5 - 0.5 * Math.cos((nu / 2500) * TAU), w = ((nu / 2500) % 1 + 1) % 1;
+    for (let i = 0; i < s.landen.length; i++) {
+      const L = landStand(i);
+      if (!L || !L.onrust) continue;
+      const h = geo.hoofdstad?.[i];
+      if (h == null || h < 0) continue;
+      const tg = geo.tegels[h];
+      if (!tg || !this.inBeeld(tg.x, tg.y, Tw)) continue;
+      const ernst = clamp((STRAAT.onrust_stab - (s.landen[i].stab ?? 0)) / STRAAT.onrust_stab, 0, 1);
+      const x = tg.x * this.sc + this.ox, y = tg.y * this.sc + this.oy, R0 = Math.max(7, 0.6 * this.T);
+      const sterk = a * PULS_ALFA * (0.75 + 0.25 * ernst);
+      const r = R0 * (0.8 + 0.2 * f), al = sterk * (0.5 + 0.5 * f);
+      const g = c.createRadialGradient(x, y, r * 0.1, x, y, r);
+      g.addColorStop(0, `rgba(226,92,24,${al.toFixed(3)})`);
+      g.addColorStop(0.65, `rgba(226,84,20,${(al * 0.6).toFixed(3)})`);
+      g.addColorStop(1, 'rgba(226,80,20,0)');
+      c.fillStyle = g;
+      c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill();
+      // twee golven, een halve periode na elkaar, zodat er altijd een ring te zien is
+      c.lineWidth = Math.max(2, R0 * 0.14);
+      for (let k = 0; k < 2; k++) {
+        const wk = (w + k * 0.5) % 1, rr = R0 * (0.35 + 0.75 * wk), ar = sterk * (1 - wk);
+        if (ar <= 0.01) continue;
+        c.strokeStyle = `rgba(214,70,18,${ar.toFixed(3)})`;
+        c.beginPath(); c.arc(x, y, rr, 0, TAU); c.stroke();
+      }
+      this.nPuls++;
     }
   }
 

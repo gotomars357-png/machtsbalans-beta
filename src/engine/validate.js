@@ -89,6 +89,7 @@ export function validatePack(p) {
   for (const [id, r] of Object.entries(p.regimes)) {
     if (r.revolutie_naar && !p.regimes[r.revolutie_naar]) waarschuwingen.push(`Regime '${id}': revolutie naar onbekend regime '${r.revolutie_naar}'.`);
   }
+  checkDoctrines(p, fouten);
   for (const o of p.verhaal.overwinning || []) {
     if (!OVERWINNING_TYPES.includes(o.type)) fouten.push(`Onbekende overwinningsvoorwaarde '${o.type}'.`);
   }
@@ -116,6 +117,8 @@ export function validatePack(p) {
       }
     }
   }
+
+  checkBrandhaarden(p, resIds, gebIds, fouten, waarschuwingen);
 
   if (m.classificatie === 'actueel') {
     waarschuwingen.push('Dit pack gaat over actuele verhoudingen. Leiders zijn archetypen; uitkomsten zijn spel, geen voorspelling.');
@@ -188,6 +191,48 @@ function legerDag(p, id) {
   return dag;
 }
 
+// Leiderdoctrines (C13): alleen de twaalf regimevelden, binnen vaste grenzen, en altijd een voordeel én een nadeel.
+// Positief is goed, behalve bij complot_gevoeligheid en oorlog_moeheid (factoren): daar is negatief goed.
+const DOCTRINE_GRENZEN = {
+  productiviteit: 0.15, bouw_korting: 0.15, handel_bonus: 0.15, leger_korting: 0.15, tech_groei: 0.00002,
+  weerbaarheid: 8, informatiecontrole: 10, informatiecontrole_max: 15, moraal: 8, stabiliteit: 5,
+  complot_gevoeligheid: 0.3, oorlog_moeheid: 0.3,
+};
+const DOCTRINE_OMGEKEERD = ['complot_gevoeligheid', 'oorlog_moeheid'];
+const ONTGRENDEL_SLEUTELS = ['start', 'potjes', 'winst_route', 'winst_zonder_oorlog', 'orders'];
+
+function checkDoctrines(p, fouten) {
+  const lijst = p.doctrines;
+  if (!Array.isArray(lijst)) { fouten.push('Doctrines moeten een lijst zijn.'); return; }
+  const ids = new Set();
+  let start = false;
+  for (let i = 0; i < lijst.length; i++) {
+    const d = lijst[i] || {};
+    const waar = `Doctrine '${d.id ?? `#${i + 1}`}'`;
+    if (!d.id) fouten.push(`Doctrine #${i + 1} mist een id.`);
+    else if (ids.has(d.id)) fouten.push(`${waar} komt dubbel voor.`);
+    ids.add(d.id);
+    if (!d.naam) fouten.push(`${waar} mist een naam.`);
+    let voordeel = false, nadeel = false;
+    const eff = d.effecten && typeof d.effecten === 'object' ? d.effecten : {};
+    for (const [k, v] of Object.entries(eff)) {
+      if (!(k in DOCTRINE_GRENZEN)) { fouten.push(`${waar}: onbekend effectveld '${k}' (kies uit ${Object.keys(DOCTRINE_GRENZEN).join(', ')}).`); continue; }
+      if (typeof v !== 'number' || !Number.isFinite(v)) { fouten.push(`${waar}: '${k}' is geen getal.`); continue; }
+      if (Math.abs(v) > DOCTRINE_GRENZEN[k]) fouten.push(`${waar}: '${k}' = ${v} ligt buiten de grens van ${DOCTRINE_GRENZEN[k]}.`);
+      const goed = DOCTRINE_OMGEKEERD.includes(k) ? v < 0 : v > 0;
+      if (v !== 0) { if (goed) voordeel = true; else nadeel = true; }
+    }
+    if (!voordeel || !nadeel) fouten.push(`${waar} heeft niet zowel een voordeel als een nadeel (elke doctrine heeft een tegenzet).`);
+    const o = d.ontgrendel && typeof d.ontgrendel === 'object' ? d.ontgrendel : {};
+    for (const k of Object.keys(o)) if (!ONTGRENDEL_SLEUTELS.includes(k)) fouten.push(`${waar}: onbekende ontgrendelvoorwaarde '${k}' (kies uit ${ONTGRENDEL_SLEUTELS.join(', ')}).`);
+    if (o.start === true) start = true;
+    if (o.potjes != null && !(Number.isInteger(o.potjes) && o.potjes > 0)) fouten.push(`${waar}: 'potjes' moet een positief geheel getal zijn.`);
+    if (o.winst_route != null && !OVERWINNING_TYPES.includes(o.winst_route)) fouten.push(`${waar}: winst_route '${o.winst_route}' is geen overwinningstype (kies uit ${OVERWINNING_TYPES.join(', ')}).`);
+    if (o.orders != null && !(o.orders && typeof o.orders.type === 'string' && Number.isInteger(o.orders.minimaal) && o.orders.minimaal > 0)) fouten.push(`${waar}: 'orders' vraagt een type en een positief 'minimaal'.`);
+  }
+  if (lijst.length && !start) fouten.push('Geen enkele doctrine is vanaf het begin vrij (zet bij minstens één ontgrendel.start: true).');
+}
+
 function cmpVersie(a = '0', b = '0') {
   const pa = a.split('.').map(Number);
   const pb = b.split('.').map(Number);
@@ -196,4 +241,51 @@ function cmpVersie(a = '0', b = '0') {
     if (d) return Math.sign(d);
   }
   return 0;
+}
+
+// Brandhaarden (events/brandhaarden.json): unieke soorten met een bekend anker, positieve groei en deadline,
+// kosten in bekende resources, bestaande gebouwen en events, en geldige effecten.
+const BRANDHAARD_ANKERS_EXTRA = ['hoofdstad'];
+const BRANDHAARD_PICTOGRAMMEN = ['tandwiel', 'golf', 'bliksem', 'aar', 'huisje', 'zuil'];
+const BRANDHAARD_VOORWAARDEN = ['na_dag', 'voor_dag', 'stabiliteit_onder', 'stabiliteit_boven', 'complot_boven', 'resource', 'onder', 'boven', 'in_oorlog', 'kans_per_dag'];
+function checkBrandhaarden(p, resIds, gebIds, fouten, waarschuwingen) {
+  const lijst = p.brandhaarden || [];
+  if (!Array.isArray(lijst)) { fouten.push('brandhaarden.json moet een lijst van soorten zijn.'); return; }
+  const ids = new Set();
+  const eventIds = new Set((p.events || []).map((e) => e.id));
+  for (const b of lijst) {
+    if (!b.id) { fouten.push('Een brandhaard mist een id.'); continue; }
+    const waar = `Brandhaard '${b.id}'`;
+    if (ids.has(b.id)) fouten.push(`${waar} komt dubbel voor.`);
+    ids.add(b.id);
+    if (!b.naam) waarschuwingen.push(`${waar} heeft geen naam.`);
+    if (!gebIds.has(b.anker) && !BRANDHAARD_ANKERS_EXTRA.includes(b.anker)) fouten.push(`${waar} heeft onbekend anker '${b.anker}' (kies een gebouw of 'hoofdstad').`);
+    if (b.pictogram != null && !BRANDHAARD_PICTOGRAMMEN.includes(b.pictogram)) waarschuwingen.push(`${waar}: onbekend pictogram '${b.pictogram}' (kies uit ${BRANDHAARD_PICTOGRAMMEN.join(', ')}).`);
+    if (!(b.groei_per_dag > 0)) fouten.push(`${waar} mist een positieve 'groei_per_dag'.`);
+    if (!(b.deadline_dagen > 0)) fouten.push(`${waar} mist een positieve 'deadline_dagen'.`);
+    const v = b.voorwaarde || {};
+    for (const k of Object.keys(v)) if (!BRANDHAARD_VOORWAARDEN.includes(k)) waarschuwingen.push(`${waar}: onbekende voorwaarde '${k}'.`);
+    if (v.resource && !resIds.has(v.resource)) fouten.push(`${waar}: voorwaarde verwijst naar onbekende resource '${v.resource}'.`);
+    (b.trappen || []).forEach((t, i) => {
+      if (!(t.vanaf > 0 && t.vanaf < 100)) fouten.push(`${waar}, trap ${i + 1}: 'vanaf' moet tussen 0 en 100 liggen.`);
+      checkEffect(`${waar}, trap ${i + 1}`, t.effect || {}, resIds, waarschuwingen, fouten, p);
+    });
+    if (!b.acties?.length) fouten.push(`${waar} heeft geen acties.`);
+    const actieIds = new Set();
+    for (const a of b.acties || []) {
+      const aw = `${waar}, actie '${a.id}'`;
+      if (!a.id) fouten.push(`${waar}: een actie mist een id.`);
+      if (actieIds.has(a.id)) fouten.push(`${aw} komt dubbel voor.`);
+      actieIds.add(a.id);
+      for (const r of Object.keys(a.kosten || {})) if (!resIds.has(r)) fouten.push(`${aw} kost onbekende resource '${r}'.`);
+      if (a.vereist_gebouw != null && !gebIds.has(a.vereist_gebouw)) fouten.push(`${aw} vraagt onbekend gebouw '${a.vereist_gebouw}'.`);
+      if (!(a.druk < 0)) fouten.push(`${aw} moet de druk verlagen ('druk' negatief).`);
+      checkEffect(aw, a.effect || {}, resIds, waarschuwingen, fouten, p);
+    }
+    if ((b.acties || []).length && b.acties.every((a) => a.vereist_gebouw)) waarschuwingen.push(`${waar}: elke actie vraagt een gebouw; geef er minstens één die altijd kan.`);
+    const u = b.uitbarsting || {};
+    if (u.event != null && !eventIds.has(u.event)) fouten.push(`${waar}: uitbarsting verwijst naar onbekend event '${u.event}'.`);
+    checkEffect(`${waar}, uitbarsting`, u.effect || {}, resIds, waarschuwingen, fouten, p);
+    checkEffect(`${waar}, opgelost`, b.opgelost?.effect || {}, resIds, waarschuwingen, fouten, p);
+  }
 }

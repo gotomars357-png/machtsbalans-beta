@@ -353,3 +353,66 @@ table.vr td.r { text-align: right; font-family: var(--mono); }
 .ladder .cyber-varianten { padding-left: 32px; }
 .ladder .cyber-varianten .actie .knop { grid-row: 1 / span 2; grid-column: 2; }
 .ladder .cyber-varianten .actie .sub { grid-column: 1; }
+/* C13 huis en doctrines (src/ui/huis.js, einde.js) */
+.huis-kaart { border: 1px solid var(--lijn); border-radius: 10px; background: var(--paneel); padding: 14px 16px; margin: 0 0 24px; display: grid; gap: 8px; min-width: 0; }
+.huis-kop { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; font-weight: 700; color: var(--accent); }
+.huis-kop .zacht { font-weight: 400; font-size: 12px; }
+.huis-uitleg { margin: 0; font-size: 12.5px; }
+.huis-kaart .huis-sub { margin: 6px 0 0; }
+.doctrine-rij { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.doctrine-kaart { display: grid; grid-template-columns: 34px 1fr; gap: 10px; align-items: start; text-align: left; background: var(--paneel-2); border: 1px solid var(--lijn); border-radius: 8px; padding: 9px 10px; color: var(--tekst); font: inherit; cursor: pointer; min-width: 0; }
+.doctrine-kaart:hover:not(:disabled) { border-color: var(--accent); }
+.doctrine-kaart.gekozen { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: rgba(240, 180, 41, .07); }
+.doctrine-kaart .dk-embleem { color: var(--accent); display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; border: 1px solid rgba(240, 180, 41, .35); }
+.doctrine-kaart .dk-tekst { display: grid; gap: 3px; min-width: 0; }
+.doctrine-kaart .dk-tekst b { font-size: 13.5px; }
+.doctrine-kaart .dk-regels { display: grid; gap: 1px; font-size: 12px; }
+.doctrine-kaart .dk-nieuw { margin-left: 6px; padding: 1px 6px; border-radius: 999px; font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; vertical-align: 2px; color: var(--bg, #0b0f14); background: var(--accent); }
+.doctrine-kaart .dk-slot { font-size: 12px; color: var(--zacht); font-style: italic; }
+.doctrine-kaart.dicht { cursor: not-allowed; opacity: .62; filter: grayscale(1); }
+.doctrine-kaart.dicht .dk-embleem { color: var(--zacht); border-color: var(--lijn); border-style: dashed; }
+.huis-strook { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; font-size: 12.5px; }
+.huis-strook li { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; grid-template-areas: "e land nr" "e uit score" "e datum datum"; gap: 1px 8px; align-items: center; background: var(--paneel-2); border: 1px solid var(--lijn); border-top: 2px solid var(--lijn); border-radius: 6px; padding: 6px 8px; min-width: 0; }
+.huis-strook li.gewonnen { border-top-color: var(--goed); }
+.huis-strook li.verloren { border-top-color: var(--slecht); }
+.huis-strook .hs-embleem { grid-area: e; align-self: start; color: var(--accent); display: grid; place-items: center; padding-top: 1px; }
+.huis-strook .hs-land { grid-area: land; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.huis-strook .hs-nr { grid-area: nr; font-size: 11px; }
+.huis-strook .hs-uitslag { grid-area: uit; }
+.huis-strook .gewonnen .hs-uitslag { color: var(--goed); }
+.huis-strook .verloren .hs-uitslag { color: var(--slecht); }
+.huis-strook .hs-score { grid-area: score; text-align: right; }
+.huis-strook .hs-datum { grid-area: datum; font-size: 11px; }
+.huis-leeg { margin: 0; font-size: 12.5px; }
+.doctrine-regel { font-size: 12px; margin-top: 6px; color: #b9c6d4; }
+.einde-huis { border: 1px solid var(--lijn); border-radius: 8px; padding: 10px 12px; margin: 10px 0; display: grid; gap: 8px; }
+.einde-nieuw { display: grid; grid-template-columns: 44px 1fr; gap: 10px; align-items: start; border: 1px solid var(--accent); border-radius: 8px; padding: 10px; background: rgba(240, 180, 41, .07); }
+.einde-nieuw .en-embleem { color: var(--accent); display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; border: 1px solid rgba(240, 180, 41, .5); }
+.einde-nieuw b { color: var(--accent); }
+.einde-nieuw p { margin: 3px 0 0; font-size: 12.5px; }
+.einde-generatie { margin: 0; font-size: 13px; font-weight: 650; }
+@media (max-width: 560px) {
+  .huis-kaart { padding: 12px; }
+  .doctrine-rij { grid-template-columns: 1fr; }
+  .huis-strook { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+/* C13 brandhaarden */
+.bh-blok { --bh: var(--accent); border: 1px solid var(--lijn); border-left: 3px solid var(--bh); border-radius: 6px; background: rgba(229, 72, 77, 0.06); padding: 8px 10px; margin: 6px 0 8px; font-size: 12.5px; }
+.bh-kop { display: flex; align-items: center; gap: 6px; font-size: 13.5px; }
+.bh-kop b { flex: 1; min-width: 0; }
+.bh-stip { width: 9px; height: 9px; border-radius: 50%; background: var(--bh); box-shadow: 0 0 0 3px rgba(240, 140, 41, 0.22); flex: none; }
+.bh-dagen { font-variant-numeric: tabular-nums; color: var(--bh); font-weight: 650; white-space: nowrap; }
+.bh-dagen.dringend { color: var(--slecht); }
+.bh-tekst { margin: 4px 0 6px; color: #b9c6d4; }
+.bh-meter { position: relative; height: 7px; border-radius: 4px; background: var(--paneel-2); overflow: hidden; margin: 2px 0 4px; }
+.bh-meter span { position: absolute; left: 0; top: 0; bottom: 0; background: var(--bh); border-radius: 4px; }
+.bh-meter i { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255, 255, 255, 0.35); }
+.bh-regel { font-size: 12px; margin: 2px 0; }
+.bh-actie .sub .bh-eff { color: var(--tekst); opacity: 0.75; }
+.bh-actie .sub .reden { display: block; color: var(--slecht); margin-top: 2px; }
+.bh-actie.kan-niet b { opacity: 0.55; }
+.bh-vreemd { display: flex; align-items: center; gap: 8px; background: transparent; }
+@media (max-width: 600px) {
+  .bh-blok { margin: 4px 0 6px; }
+  .bh-actie .knop { min-height: 36px; }
+}

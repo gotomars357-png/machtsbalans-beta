@@ -18,6 +18,7 @@ import { regimeTick, regimeEffect, regimeVerwantschap, hervorm } from './regimes
 import { mediaTick, voerMediaActieUit, voerOvernameUit } from './media.js';
 import { initContracten, contractenTick, voerContractUit, contractenAfdruk, aiContractenTick } from './contracten.js';
 import { voerCyberUit, cyberTick } from './cyber.js';
+import { brandhaardenTick, voerBrandhaardActieUit, brandhaardenAfdruk } from './brandhaarden.js';
 
 export const MOEILIJKHEID = {
   makkelijk: { econ: 0.93, invloed: 0.6, oorlog: 0.2, naam: 'Makkelijk' },
@@ -31,7 +32,7 @@ export function createGame(pack, settings = {}) {
   const s = {
     seed: 12345, moeilijkheid: 'normaal', onboarding: true, land: null,
     ...settings,
-    systemen: { events: true, schokken: true, escalatie: true, contracten: true, ...(settings.systemen || {}) },
+    systemen: { events: true, schokken: true, escalatie: true, contracten: true, brandhaarden: false, ...(settings.systemen || {}) },
   };
   pack.gebouwIndex ??= Object.fromEntries(pack.gebouwen.map((g) => [g.id, g]));
   pack.resIndex ??= Object.fromEntries(pack.resources.map((r) => [r.id, r]));
@@ -52,6 +53,7 @@ export function createGame(pack, settings = {}) {
     grensVersie: 0, animaties: [], kolonies: [], eenheden: [], volgendeEenheidId: 1, oorlogen: [], casusBelli: {}, wapenstilstand: {}, pandemie: null,
     balans: { investeren: 0, invloed: 0, reserve: 0 },
     wereldY: 0,
+    brandhaarden: [], volgendeBrandhaardId: 1, brandhaardLaatst: {},
   };
 
   const stabStart = pack.resources.find((r) => r.id === pack.rollen.stabiliteit)?.start ?? 65;
@@ -96,6 +98,7 @@ export function createGame(pack, settings = {}) {
   state.spelerBlok = speler.blok;
   speler.belasting = pack.model.belasting_start;
   speler.verdeling = pack.model.verdeling_start;
+  speler.doctrine = s.doctrine && pack.doctrineIndex?.[s.doctrine] ? s.doctrine : null;
 
   state.blokken = pack.blokken.map((b) => {
     const leider = b.id === state.spelerBlok
@@ -629,6 +632,7 @@ export function tick(state) {
   contractenTick(state);
   const inkomen = speler.voorraad[state.pack.rollen.geld] - geldVoor;
   samenlevingTick(state);
+  if (state.instellingen.systemen.brandhaarden) brandhaardenTick(state);
   mediaTick(state);
   regimeTick(state);
   loyaliteitTick(state);
@@ -695,6 +699,7 @@ export function applyOrder(state, o) {
     case 'overname': return voerOvernameUit(state, s, o.doel, o.actie);
     case 'netwerk': return voerNetwerkActieUit(state, s, o.doel, o.actie);
     case 'contract': return voerContractUit(state, s, o);
+    case 'brandhaard': return voerBrandhaardActieUit(state, s, o.id, o.actie);
     case 'train': return train(state, s, o.eenheid);
     case 'beweeg': return beweegEenheden(state, s, o.eenheden, o.tegel);
     case 'vrede': {
@@ -956,5 +961,5 @@ export function vingerafdruk(state) {
   const leger = state.eenheden.map((u) => `${u.id}:${u.t}:${u.hp.toFixed(2)}`).join(',');
   const regimes = state.landen.map((c) => c.regime[0]).join('');
   const keten = state.eventKeten.length ? `#k${state.eventKeten.map((k) => `${k.id}@${k.dag}@${k.land}`).join(',')}` : '';
-  return `${state.dag}#${state.rng}#${parts.join(';')}#${leger}#${state.oorlogen.length}#${regimes}#${state.kolonies.length}${contractenAfdruk(state)}${keten}`;
+  return `${state.dag}#${state.rng}#${parts.join(';')}#${leger}#${state.oorlogen.length}#${regimes}#${state.kolonies.length}${contractenAfdruk(state)}${keten}${brandhaardenAfdruk(state)}`;
 }

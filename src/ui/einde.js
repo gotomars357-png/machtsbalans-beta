@@ -6,6 +6,7 @@ import { maakReplay } from '../engine/sim.js';
 import { tekenGrafiek } from './chart.js';
 import { berekenScore } from './score.js';
 import { bewaarResultaat, deelTekst, kopieer, datumTekst, vernieuwUitdaging } from './uitdaging.js';
+import { registreerPotje, embleemSvg, effectRegels } from './huis.js';
 
 const SPELTEST_SLEUTEL = 'machtsbalans.speltest';
 const UUR = 3600;
@@ -188,6 +189,15 @@ export function toonEindoverzicht(state, ctx) {
     top = bewaarResultaat(datum, { id: `${state.instellingen.seed}-${u.dag}-${state.orders.length}-${score.totaal}`, score: score.totaal, dag: u.dag, spelerWint: !!u.spelerWint, zonderOorlog: score.zonderOorlog, opgeslagen: new Date().toISOString() });
   }
   const mijnId = datum ? `${state.instellingen.seed}-${u.dag}-${state.orders.length}-${score.totaal}` : null;
+  // Je huis (C13): één generatie per afgerond potje, ook als dit scherm twee keer opent; niet bij een replay.
+  const huis = replay ? null : registreerPotje(state, score);
+  const gespeeld = state.pack.doctrineIndex?.[state.instellingen.doctrine];
+  const huisHtml = huis?.generatie ? `<div class="einde-huis">
+      ${huis.nieuw.map((d) => `<div class="einde-nieuw"><span class="en-embleem">${embleemSvg(d.embleem, 36)}</span><div><b>Nieuwe doctrine vrijgespeeld: ${esc(d.naam)}</b>
+        <p>${effectRegels(d).map((r) => `<span class="${r.goed ? 'goed' : 'slecht'}">${esc(r.tekst)}</span>`).join(' · ')}</p>
+        <p class="zacht">Kies hem op het startscherm voor je volgende potje.</p></div></div>`).join('')}
+      <p class="einde-generatie">Generatie ${huis.generatie} van je huis${gespeeld ? ` · gespeeld als ${esc(gespeeld.naam)}` : ''}</p>
+    </div>` : '';
 
   const zetHtml = zet
     ? `<p>Tussen dag ${zet.vanDag} en ${zet.totDag} steeg het aandeel van ${esc(b.naam)} van ${pct(zet.van)} naar ${pct(zet.tot)}.${zet.tekst ? ` Jouw zet toen: <b>${esc(zet.tekst)}</b>.` : ''}</p>`
@@ -199,6 +209,7 @@ export function toonEindoverzicht(state, ctx) {
       <div class="einde-totaal"><span class="zacht">Score</span><b class="num">${score.totaal}</b>${score.spelerWint && score.zonderOorlog ? '<span class="goed">zonder oorlog</span>' : ''}</div>
       <div class="einde-opbouw">${score.regels.map((r) => `<span>${esc(r.label)}</span><span class="num">${r.waarde >= 0 ? '+' : '−'}${Math.abs(r.waarde)}</span>`).join('')}</div>
     </div>
+    ${huisHtml}
     ${datum ? `<div class="einde-uitdaging">
       <div class="uitdaging-kop"><span>Uitdaging ${datumTekst(datum)}</span><button class="knop klein" id="e-deel">Deel</button></div>
       <ol class="einde-top">${top.map((r) => `<li class="${r.id === mijnId ? 'jij' : ''}"><span class="num">${r.score}</span> <span class="zacht">${r.spelerWint ? 'gewonnen' : 'verloren'} op dag ${r.dag}${r.spelerWint && r.zonderOorlog ? ', zonder oorlog' : ''}</span></li>`).join('')}</ol>

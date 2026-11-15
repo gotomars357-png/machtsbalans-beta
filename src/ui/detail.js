@@ -22,6 +22,7 @@ import { seizoen, wind } from './seizoen.js';
 import { sneeuwDekVan, ijsVan } from './terrein.js';
 import { OPRIT } from './wegennet.js';
 import { maakTekeningen } from './tekeningen.js';
+import { stilOp } from './straatstand.js';
 
 const STIJL = {
   democratie: { daken: ['#b5563b', '#7c8a99', '#4f6d8f', '#a8623a', '#8b6f5a'], muur: '#ddd5c6', accent: '#4c8ef7' },
@@ -154,13 +155,31 @@ function tint(hex, f) {
   return v;
 }
 
+// C13c: het dak van een stilstaand gebouw (tekort aan wat het verbruikt): 15 % ontzadigd en 6 % donkerder. Geeft weer
+// #rrggbb, zodat tint() er daarna nog op werkt; het resultaat wordt onthouden.
+const STIL_DAK = new Map();
+function stilDak(hex) {
+  let v = STIL_DAK.get(hex);
+  if (v) return v;
+  if (typeof hex !== 'string' || hex[0] !== '#' || hex.length < 7) return hex;
+  const n = parseInt(hex.slice(1, 7), 16);
+  let r = n >> 16, g = (n >> 8) & 255, b = n & 255;
+  const grijs = 0.299 * r + 0.587 * g + 0.114 * b;
+  r = (r + (grijs - r) * 0.15) * 0.94; g = (g + (grijs - g) * 0.15) * 0.94; b = (b + (grijs - b) * 0.15) * 0.94;
+  v = '#' + ((1 << 24) | (Math.round(r) << 16) | (Math.round(g) << 8) | Math.round(b)).toString(16).slice(1);
+  STIL_DAK.set(hex, v);
+  return v;
+}
+// Staat het gebouw dat nu getekend wordt stil? Gezet door tekenGebouwDetail, gelezen door zetB en tekenLevend.
+let stilNu = false;
+
 // ---------- bakcontext ----------
 
 // Wat nu getekend wordt: maat, detail- en bouwniveau, staat van het gebouw, en de lijsten waarin ramen en
 // levende delen worden vastgelegd (genormaliseerd op het midden van het vakje, in eenheden van s).
 const B = {
   S: 100, cx: 0, cy: 0, lod: 0, niveau: 1, seed: 0, regime: 'democratie', kleur: '#ffffff',
-  verwaarloosd: false, uit: false, onrust: false, oorlog: false, strak: false, r2: rnd(1), ramen: null, levend: null,
+  verwaarloosd: false, uit: false, onrust: false, oorlog: false, strak: false, stil: false, r2: rnd(1), ramen: null, levend: null,
   sneeuw: 0, blad: 'z', groeiend: false, nieuw: 0, lamp: 0, soort: '', wv: 1, nieuwB: 0, nieuwE: 0, armen: 15,
   kavel: false, vangGrond: false, omg: null, variant: 0, woonerf: 0, direct: false,
 };
@@ -323,6 +342,7 @@ function pand(c, x, y, w, d, v, dak, muur, o = NIETS) {
   }
   const ry = y - h;
   dakV = v;
+  if (B.stil) dak = stilDak(dak);
   if (o.schuin) schuinDak(c, x, ry, w, d, dak, muur, o);
   else platDak(c, x, ry, w, d, dak, o);
   if (B.verwaarloosd) roest(c, x, ry, w, d);
@@ -4494,7 +4514,7 @@ const effEmmer = (eff) => (eff < 0.7 ? 0 : eff < 1.05 ? 1 : 2);
 function zetB(soort, ctx, S, cx, cy, niveau, effB, ramen, levendLijst, sz, groeiend, wv = 1, armen = 15) {
   B.S = S; B.cx = cx; B.cy = cy; B.lod = lodVan(S); B.niveau = niveau;
   B.seed = ctx.seed ?? 0; B.regime = ctx.regime; B.kleur = ctx.kleur;
-  B.verwaarloosd = effB === 0; B.uit = !!ctx.uit;
+  B.verwaarloosd = effB === 0; B.uit = !!ctx.uit; B.stil = stilNu;
   B.onrust = !!WONEN[soort] && ctx.stab != null && ctx.stab < 30;
   B.oorlog = soort === 'hoofdstad' && !!ctx.oorlog;
   B.strak = stijlVan(ctx.regime).strak === true;
@@ -5399,7 +5419,10 @@ export function tekenGebouwDetail(c, soort, x, y, s, ctx) {
   const effB = effEmmer(ctx.eff ?? 1);
   const uit = ctx.uit ? 1 : 0;
   const dag = dagVan(ctx), sz = seizoenVan(dag), groeiend = groeitVan(naam, ctx, dag), wv = welzijnVan(ctx);
-  const toestand = (WONEN[naam] && ctx.stab != null && ctx.stab < 30 ? 'o' : '') + (naam === 'hoofdstad' && ctx.oorlog ? 'w' : '');
+  // C13c: een stil gebouw (tekort aan wat het verbruikt, zie straatstand.js) krijgt een eigen bitmap met een doffer dak
+  const stil = ctx.gebouw && ctx.seed != null ? stilOp(ctx.seed) : null;
+  stilNu = stil != null;
+  const toestand = (WONEN[naam] && ctx.stab != null && ctx.stab < 30 ? 'o' : '') + (naam === 'hoofdstad' && ctx.oorlog ? 'w' : '') + (stilNu ? 's' : '');
   // Schaal van het doel (apparaatpixels per CSS-pixel), zodat de bitmap 1-op-1 op het scherm valt.
   const m = typeof c.getTransform === 'function' ? c.getTransform() : null;
   const dpr = m && m.a > 0 ? m.a : typeof globalThis.devicePixelRatio === 'number' ? globalThis.devicePixelRatio : 1;
@@ -5598,7 +5621,7 @@ function tekenLevend(c, x, y, s, e, st, ctx, t, sz = GEEN_SEIZOEN) {
   dagNu = dagVan(ctx); isKerst = kerstVan(dagNu); stNu = st; szNu = sz;
   vakX = x; vakY = y; armNu = e.armen ?? 15; zaadNu = ctx.seed ?? 0; kavelNu = !!e.kavel;
   const nu = t * 1000, nacht = ctx.nacht ?? 0, seed = ctx.seed ?? 0;
-  const draait = ctx.actief !== false && !ctx.uit && ctx.voortgang == null && !e.verwaarloosd;
+  const draait = ctx.actief !== false && !ctx.uit && ctx.voortgang == null && !e.verwaarloosd && !stilNu;
   const wx = Math.cos(sz.windHoek) * sz.windKracht, wy = Math.sin(sz.windHoek) * sz.windKracht;
   for (let i = 0; i < L.length; i += 6) {
     const soort = L[i], px = x + L[i + 1] * s, py = y + L[i + 2] * s, a = L[i + 3], b = L[i + 4], k = L[i + 5];

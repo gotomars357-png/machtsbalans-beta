@@ -8,6 +8,7 @@ import * as sim from '../engine/sim.js';
 import * as leger from '../engine/leger.js';
 import { woningCapaciteit, campagneStatus } from '../engine/samenleving.js';
 import { mediaStatus, overnameStatus } from '../engine/media.js';
+import { brandhaardenVan, brandhaardSoort, dagenOver, goedkoopsteActie } from '../engine/brandhaarden.js';
 
 const KIES_INTERVAL = 3000; // zo vaak mag de balk naar een ander doel springen
 const VERNIEUW = 700; // voortgang en "bijna klaar" vaker bijwerken
@@ -167,6 +168,22 @@ function schuldDoel(s) {
   const c = speler(s);
   if ((c.voorraad[s.pack.rollen.geld] ?? 0) >= 0) return null;
   return { id: 'schuld', soort: 'dreiging', titel: 'Je staat rood: verhoog de belasting', waarom: 'Rente en onrust lopen op. Bouw even niets bij.', voortgang: null, naar: { tab: 'economie', knop: '#s-belasting' } };
+}
+
+// Brandhaard: de eigen haard met de minste dagen, zodra de druk oploopt of de tijd dringt.
+export function brandhaardDoel(s) {
+  let h = null;
+  for (const x of brandhaardenVan(s, s.speler)) if (!h || dagenOver(s, x) < dagenOver(s, h)) h = x;
+  if (!h) return null;
+  const n = dagenOver(s, h);
+  if (h.druk < 33 && n > 30) return null;
+  const soort = brandhaardSoort(s, h.soort);
+  const a = goedkoopsteActie(s, h) ?? goedkoopsteActie(s, h, false);
+  const geld = s.pack.rollen.geld;
+  const waarom = a
+    ? `Goedkoopste aanpak: ${a.naam.toLowerCase()} voor ${a.kosten?.[geld] ?? 0} ${(s.pack.resIndex[geld]?.naam ?? geld).toLowerCase()}.`
+    : 'Alle aanpakken zijn gebruikt: houd de stabiliteit op peil tot hij voorbij is.';
+  return { id: `brandhaard:${h.id}`, soort: 'dreiging', titel: `${soort?.naam ?? 'Brandhaard'}: nog ${n} ${n === 1 ? 'dag' : 'dagen'}`, waarom, voortgang: 1 - Math.max(0, Math.min(100, h.druk)) / 100, naar: { tegel: h.tegel } };
 }
 
 // Oorlog dreigt: een ander blok met spanning en een veel groter leger.
@@ -359,7 +376,7 @@ function winrouteDoel(s) {
 }
 
 // Volgorde: dreiging eerst, dan kansen die je nu kunt verzilveren, dan de fase van het spel.
-const DREIGINGEN = [oorlogDoel, stabiliteitDoel, moraalDoel, complotDoel, pandemieDoel, schuldDoel, dreigingDoel];
+const DREIGINGEN = [oorlogDoel, stabiliteitDoel, moraalDoel, complotDoel, pandemieDoel, schuldDoel, brandhaardDoel, dreigingDoel];
 
 export function kiesDoel(s, { zonderDreiging = false } = {}) {
   if (!s || s.uitkomst) return null;

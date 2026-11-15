@@ -6,6 +6,7 @@
 import { tegelOp } from '../engine/geografie.js';
 import { woningCapaciteit } from '../engine/samenleving.js';
 import { tekenGebouwDetail } from './detail.js';
+import { veer, vluchtPlan, nalopen, veegSnelheid, volgendeVerdieping, ankerMidden, begrensPunt, ZOOM_TAU, PIJL_SNELHEID, PIJL_TIK } from './camera.js';
 import { TerreinLaag } from './terrein.js';
 import { zoekPad } from '../engine/leger.js';
 import { tekenUitval, tekenCyberFlits, CYBER_KLEUR } from './cyber.js';
@@ -20,6 +21,7 @@ import { StadLaag } from './stad.js';
 import { ZeeLaag } from './zee.js';
 import { WerkLaag } from './werk.js';
 import { HemelLaag } from './hemel.js';
+import { BrandhaardLaag } from './brandhaard.js';
 import { Wegennet, KLASSE, KNOOP, PROFIEL, verkeersTijd } from './wegennet.js';
 
 // Vanaf deze zoom tekent de kaart vakjes als echte plekken: huizen, akkers, fabrieken, bomen.
@@ -73,16 +75,26 @@ export class KaartView {
     this.zeeLaag = new ZeeLaag();
     this.werkLaag = new WerkLaag();
     this.hemelLaag = new HemelLaag();
+    this.brandLaag = new BrandhaardLaag();
     this.wegennet = new Wegennet();
     this.wegennetDebug = false; // tekent klassen, knopen en poorten van het net over alles heen
     this.bron = document.createElement('canvas');
     this.bron.width = 1000;
     this.bron.height = 620;
 
+    // Wiel: zet een zoomdoel; teken() veert er per beeld naartoe en houdt het wereldpunt onder de muis op zijn plek.
+    // Het anker komt van de eerste wielstap van een reeks; beweegt de muis, dan begint een nieuwe reeks.
     canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
       const f = Math.exp(-e.deltaY * 0.0015);
-      this.zoomRond(e.offsetX, e.offsetY, this.zoom * f);
+      const sx = e.offsetX, sy = e.offsetY;
+      this.doel = null;
+      this.glij = null;
+      if (this.zoomDoel == null || !this.anker || Math.abs(this.anker.sx - sx) + Math.abs(this.anker.sy - sy) > 2) {
+        const [wx, wy] = this.naarWereld(sx, sy);
+        this.anker = { sx, sy, wx, wy };
+      }
+      this.zoomDoel = clamp((this.zoomDoel ?? this.zoom) * f, 1, 14);
     }, { passive: false });
     // Aanraken: één vinger schuift en tikt, twee vingers knijpen om te zoomen,
     // lang drukken werkt als rechtsklik (eenheden sturen, bouwen annuleren).
@@ -93,8 +105,13 @@ export class KaartView {
       this.vingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       canvas.setPointerCapture(e.pointerId);
       clearTimeout(this.langDruk);
+      // Vastpakken stopt het nalopen en een lopende wielzoom meteen.
+      this.glij = null;
+      this.zoomDoel = null;
+      this.veeg = [];
       if (this.vingers.size === 2) {
         this.sleep = null;
+        this.doel = null;
         const [mx, my] = this.vingerMidden();
         this.knijp = { afstand: this.vingerAfstand(), zoom: this.zoom, wereld: this.naarWereld(mx, my) };
         return;
@@ -138,6 +155,12 @@ export class KaartView {
         const dx = e.clientX - this.sleep.x, dy = e.clientY - this.sleep.y;
         if (Math.abs(dx) + Math.abs(dy) > 5 && !this.sleep.bewogen) {
           this.sleep.bewogen = true;
+          // Liep er nog een vlucht, dan pak je de kaart op waar hij nu is (geen sprong terug naar het begin).
+          if (this.doel) {
+            const s = this.schaal();
+            this.sleep.cx = this.cx + dx / s;
+            this.sleep.cy = this.cy + dy / s;
+          }
           // Schuiven met een vinger: de vaste tooltip hoort bij een plek die nu verschuift.
           if (e.pointerType === 'touch') this.opties.onHover(-1, -1);
         }
@@ -147,6 +170,11 @@ export class KaartView {
           this.cy = this.sleep.cy - dy / s;
           this.doel = null;
           this.begrens();
+          // De laatste 80 ms bewaren voor het nalopen na loslaten.
+          const t = performance.now();
+          this.veeg ??= [];
+          this.veeg.push({ t, x: e.clientX, y: e.clientY });
+          while (this.veeg.length > 2 && t - this.veeg[0].t > 80) this.veeg.shift();
         }
       }
       // Op touch geen hover: de tooltip komt bij een tik en blijft staan tot de volgende.
@@ -177,7 +205,26 @@ export class KaartView {
         return;
       }
       this.kader = null;
+      if (sl?.bewogen && !sl.gebied) {
+        // Nalopen: de kaart glijdt door met de snelheid van de laatste 80 ms en remt dan af.
+        const v = this.rustig ? null : veegSnelheid(this.veeg ?? [], performance.now());
+        this.glij = v && Math.hypot(v.vx, v.vy) > 8 ? v : null;
+      }
+      this.veeg = [];
       if (sl?.lang && !sl.bewogen) { this.rechts(e); return; }
+      if (sl && !sl.bewogen && e.pointerType === 'touch' && !this.bouwModus) {
+        // Dubbeltik: de tweede tik binnen 300 ms en 24 px van de eerste vliegt een verdieping dieper, naar de plek
+        // van de eerste tik (die kan de kaart al verschoven hebben voor het uitschuifpaneel). In bouwmodus niet:
+        // daar plaatst elke tik een gebouw.
+        const t = performance.now(), vorige = this.vorigeTik;
+        if (vorige && t - vorige.t < 300 && Math.hypot(e.clientX - vorige.x, e.clientY - vorige.y) < 24) {
+          this.vorigeTik = null;
+          this.vliegNaar(vorige.wx, vorige.wy, volgendeVerdieping(this.zoom, false));
+          return;
+        }
+        const [wx, wy] = this.muisWereld(e);
+        this.vorigeTik = { t, x: e.clientX, y: e.clientY, wx, wy };
+      }
       if (sl && !sl.bewogen) {
         this.klik(e, sl.shift);
         if (e.pointerType === 'touch') {
@@ -196,6 +243,48 @@ export class KaartView {
       if (Date.now() - (this.laatsteAanraking ?? 0) < 1500) return;
       this.rechts(e);
     });
+    // Dubbelklik: vlieg een verdieping dieper naar de plek onder de muis; met Shift een verdieping terug.
+    canvas.addEventListener('dblclick', (e) => {
+      // Een dubbeltik op een touchscreen handelt pointerup al af.
+      if (Date.now() - (this.laatsteAanraking ?? 0) < 1500) return;
+      // In bouwmodus plaatst elke klik een gebouw; snel twee keer klikken is dan geen vlucht.
+      if (this.bouwModus) return;
+      e.preventDefault();
+      const [wx, wy] = this.muisWereld(e);
+      this.vliegNaar(wx, wy, volgendeVerdieping(this.zoom, e.shiftKey));
+    });
+    // Pijltjes: schuiven zolang de toets is ingedrukt (in teken). Niet tijdens typen, een open venster of een
+    // verborgen kaart; Space, cijfers, Escape, A, H en W blijven in main.js.
+    this.pijl = { ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false };
+    this.modalEl = document.getElementById('modal');
+    document.addEventListener('keydown', (e) => {
+      if (!(e.key in this.pijl)) return;
+      // Met Cmd, Ctrl of Alt horen pijltjes bij de browser (terug, vooruit, regel-einde): niet afvangen.
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const doelEl = e.target;
+      if (doelEl && (/^(INPUT|SELECT|TEXTAREA)$/.test(doelEl.tagName) || doelEl.isContentEditable)) return;
+      if (this.modalEl && !this.modalEl.hidden) return;
+      if (this.canvas.offsetParent === null) return;
+      e.preventDefault();
+      if (!this.pijl[e.key]) this.pijlVan[e.key] = performance.now();
+      this.pijl[e.key] = true;
+      this.pijlTot[e.key] = 0;
+      this.doel = null;
+      this.glij = null;
+    });
+    // Een korte tik (sneller dan een beeld) schuift toch een stukje: de toets blijft minstens PIJL_TIK ms actief.
+    this.pijlVan = {}; this.pijlTot = {};
+    document.addEventListener('keyup', (e) => {
+      if (!(e.key in this.pijl) || !this.pijl[e.key]) return;
+      const tot = (this.pijlVan[e.key] ?? 0) + PIJL_TIK;
+      if (performance.now() < tot) this.pijlTot[e.key] = tot;
+      else this.pijl[e.key] = false;
+    });
+    window.addEventListener('blur', () => { for (const k in this.pijl) this.pijl[k] = false; });
+    // Minder beweging gevraagd: korte vlucht zonder boog, geen nalopen, wielzoom direct.
+    const minder = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    this.rustig = !!minder?.matches;
+    minder?.addEventListener?.('change', (e) => { this.rustig = e.matches; if (this.rustig) this.glij = null; });
     new ResizeObserver(() => this.pasAan()).observe(wrap);
   }
 
@@ -332,10 +421,74 @@ export class KaartView {
     this.cx = wx - (sx - this.w / 2) / s;
     this.cy = wy - (sy - this.h / 2) / s;
     this.doel = null;
+    this.zoomDoel = null;
+    this.glij = null;
     this.begrens();
   }
 
-  vliegNaar(x, y, zoom) { this.doel = { x, y, zoom }; }
+  // Vlieg in een boog (camera.js): ver weg eerst iets uit en dan in, dichtbij recht toe. Dezelfde naam `doel` als
+  // vroeger, zodat `doel = null` (knijpen, het uitschuifpaneel in main.js) de vlucht nog steeds afbreekt.
+  vliegNaar(x, y, zoom) {
+    this.glij = null;
+    this.zoomDoel = null;
+    zoom = clamp(zoom, 1, 14);
+    if (!this.w || !this.h) { this.cx = x; this.cy = y; this.zoom = zoom; this.doel = null; this.begrens(); return; }
+    const p = begrensPunt(x, y, zoom, this.w, this.h);
+    const plan = vluchtPlan({ x: this.cx, y: this.cy, zoom: this.zoom }, { x: p.x, y: p.y, zoom }, this.w, this.h, { kort: this.rustig });
+    this.doel = { x: p.x, y: p.y, zoom, plan, t: 0 };
+  }
+
+  // Eén camerastap per beeld: vlucht, wielzoom, nalopen en pijltjes. Na elke stap begrens().
+  cameraStap(dt) {
+    if (this._cameraState !== this.state) {
+      // Nieuw spel geladen: geen restsnelheid of half afgemaakte zoom van het vorige.
+      this._cameraState = this.state;
+      this.glij = null; this.zoomDoel = null; this.anker = null;
+    }
+    const d = this.doel;
+    if (d) {
+      if (!d.plan) {
+        // Een doel zonder plan (iemand zette `doel` zelf): plan alsnog een vlucht.
+        this.vliegNaar(d.x, d.y, d.zoom ?? this.zoom);
+      } else {
+        d.t += dt;
+        const p = d.plan.op(d.t);
+        this.cx = p.x; this.cy = p.y; this.zoom = p.zoom;
+        if (d.t >= d.plan.duur) this.doel = null;
+        this.begrens();
+      }
+    }
+    if (this.zoomDoel != null) {
+      this.zoom = veer(this.zoom, this.zoomDoel, dt, this.rustig ? 0 : ZOOM_TAU);
+      if (Math.abs(this.zoom - this.zoomDoel) < 0.002) { this.zoom = this.zoomDoel; this.zoomDoel = null; }
+      if (this.anker) { const m = ankerMidden(this.anker, this.zoom, this.w, this.h); this.cx = m.x; this.cy = m.y; }
+      this.begrens();
+    }
+    if (this.glij) {
+      const s = this.schaal();
+      this.cx -= this.glij.vx * dt / s;
+      this.cy -= this.glij.vy * dt / s;
+      this.glij = this.rustig ? null : nalopen(this.glij.vx, this.glij.vy, dt);
+      this.begrens();
+    }
+    const pl = this.pijl;
+    if (pl && (pl.ArrowUp || pl.ArrowDown || pl.ArrowLeft || pl.ArrowRight)) {
+      if (this.modalEl && !this.modalEl.hidden) { for (const k in pl) pl[k] = false; return; }
+      // Losgelaten tikken lopen af zodra hun minimumtijd voorbij is.
+      const nu = performance.now();
+      for (const k in pl) if (pl[k] && this.pijlTot[k] && nu >= this.pijlTot[k]) { pl[k] = false; this.pijlTot[k] = 0; }
+      const rx = (pl.ArrowRight ? 1 : 0) - (pl.ArrowLeft ? 1 : 0), ry = (pl.ArrowDown ? 1 : 0) - (pl.ArrowUp ? 1 : 0);
+      const n = Math.hypot(rx, ry);
+      if (n) {
+        const stap = PIJL_SNELHEID * this.w * dt / this.schaal() / n;
+        const ox = this.cx, oy = this.cy;
+        this.cx += rx * stap; this.cy += ry * stap;
+        this.begrens();
+        // Een lopende wielzoom zoomt mee rond hetzelfde schermpunt.
+        if (this.anker && this.zoomDoel != null) { this.anker.wx += this.cx - ox; this.anker.wy += this.cy - oy; }
+      }
+    }
+  }
 
   naarLand(idx, zoom = 3) {
     const h = this.geo.hoofdstad[idx];
@@ -477,14 +630,7 @@ export class KaartView {
     if (sig !== this.handtekening) { this.tekenBasis(); this.handtekening = sig; }
     this.animTijd += dt * Math.min(tempo, 4);
 
-    if (this.doel) {
-      const k = 1 - Math.pow(0.002, dt);
-      this.cx += (this.doel.x - this.cx) * k;
-      this.cy += (this.doel.y - this.cy) * k;
-      this.zoom += (this.doel.zoom - this.zoom) * k;
-      if (Math.abs(this.doel.zoom - this.zoom) < 0.01 && Math.abs(this.doel.x - this.cx) < 0.5) this.doel = null;
-      this.begrens();
-    }
+    this.cameraStap(dt);
 
     const c = this.canvas.getContext('2d');
     c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
@@ -533,6 +679,7 @@ export class KaartView {
     this.sfeerLaag.tekenLucht(c, this, sc, nu);
     this.hemelLaag.tekenNacht(c, this, sc, nu);
     this.tekenGolven(c, sc, nu);
+    this.brandLaag.teken(c, this, sc, nu);
     if (this.wegennetDebug) this.tekenNetDebug(c, sc);
     this.tekenStrategisch(c, sc);
     this.tekenMarkeringen(c);
@@ -1234,7 +1381,7 @@ export class KaartView {
       }
       for (const p of land.plaatsingen) {
         this.tekenGebouw(c, land, p.t, p.g, T, rand, detail, null, p.eff, p);
-        if ((p.uit ?? 0) > s.dag && p.t >= 0 && this.zichtbaar(this.geo.tegels[p.t])) tekenUitval(c, ...this.naarScherm(this.geo.tegels[p.t].x, this.geo.tegels[p.t].y), Math.max(4, T), this.nu);
+        if ((p.uit ?? 0) > s.dag && p.t >= 0 && this.zichtbaar(this.geo.tegels[p.t])) tekenUitval(c, ...this.naarScherm(this.geo.tegels[p.t].x, this.geo.tegels[p.t].y), Math.max(4, T), this.nu, this.zoom >= MINI);
       }
       for (const b of land.bouw) this.tekenGebouw(c, land, b.tegel, b.gebouw, T, rand, detail, (s.dag - b.start) / Math.max(1, b.klaar - b.start), 1);
     }

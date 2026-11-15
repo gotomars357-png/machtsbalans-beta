@@ -45,9 +45,33 @@ export function cyberTrede(s, t, e, hulp) {
 // ---------- kaart ----------
 
 // Uitgevallen gebouw: donker vlak met een knipperende storingsstreep.
-export function tekenUitval(c, x, y, T, nu) {
+export function tekenUitval(c, x, y, T, nu, detail = false) {
   const m = T * 0.46;
   c.save();
+  if (detail) {
+    // C13: dichtbij staat de gebouwtekening er al (lichten uit, rode lampjes). Niet afdekken, maar lichtjes dimmen,
+    // een gestippelde rand eromheen en een klein knipperend waarschuwingsdriehoekje in de hoek.
+    c.fillStyle = 'rgba(6,10,16,0.3)';
+    c.fillRect(x - m, y - m, m * 2, m * 2);
+    c.strokeStyle = CYBER_KLEUR;
+    c.globalAlpha = 0.55;
+    c.lineWidth = Math.max(1, T * 0.012);
+    c.setLineDash([T * 0.06, T * 0.045]);
+    c.lineDashOffset = -(nu / 90) % (T * 0.105);
+    c.strokeRect(x - m, y - m, m * 2, m * 2);
+    c.setLineDash([]);
+    const r = Math.max(4, T * 0.07), hx = x + m - r * 1.4, hy = y - m + r * 1.4;
+    c.globalAlpha = Math.floor(nu / 500) % 2 === 0 ? 0.95 : 0.55;
+    c.fillStyle = '#0c131b';
+    c.beginPath(); c.arc(hx, hy, r * 1.25, 0, Math.PI * 2); c.fill();
+    c.fillStyle = '#f0b429';
+    c.beginPath(); c.moveTo(hx, hy - r * 0.8); c.lineTo(hx + r * 0.8, hy + r * 0.6); c.lineTo(hx - r * 0.8, hy + r * 0.6); c.closePath(); c.fill();
+    c.fillStyle = '#0c131b';
+    c.fillRect(hx - r * 0.07, hy - r * 0.35, r * 0.14, r * 0.5);
+    c.fillRect(hx - r * 0.07, hy + r * 0.25, r * 0.14, r * 0.14);
+    c.restore();
+    return;
+  }
   c.fillStyle = 'rgba(4,8,12,0.72)';
   c.fillRect(x - m, y - m, m * 2, m * 2);
   if (Math.floor(nu / 380) % 3 !== 0) {

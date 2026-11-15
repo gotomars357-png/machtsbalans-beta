@@ -1,0 +1,681 @@
+[
+  {
+    "id": "mijnstaking",
+    "naam": "Mijnwerkers dreigen met staking",
+    "tekst": "In de mijnen gaat het gerucht dat de lonen worden bevroren. De ploegen dreigen het werk neer te leggen.",
+    "anker": "mijn",
+    "pictogram": "tandwiel",
+    "voorwaarde": {
+      "na_dag": 120,
+      "kans_per_dag": 0.0007
+    },
+    "groei_per_dag": 1.6,
+    "deadline_dagen": 60,
+    "trappen": [
+      {
+        "vanaf": 33,
+        "effect": {
+          "stabiliteit_doel": -3,
+          "duur_dagen": 30
+        }
+      },
+      {
+        "vanaf": 66,
+        "tekst": "De ploegen werken langzaam: de mijn draait op halve kracht.",
+        "effect": {
+          "stabiliteit_doel": -4,
+          "productie_factor": 0.95,
+          "duur_dagen": 30
+        },
+        "gebouw_uit_dagen": 0
+      }
+    ],
+    "acties": [
+      {
+        "id": "overleg",
+        "naam": "Overleg met de ploegen",
+        "tekst": "Praten kost weinig, maar het duurt.",
+        "kosten": {
+          "kapitaal": 40
+        },
+        "druk": -40,
+        "effect": {}
+      },
+      {
+        "id": "politie",
+        "naam": "Politie bij de poort",
+        "tekst": "De staking is snel gebroken, het land ziet het.",
+        "kosten": {
+          "kapitaal": 70
+        },
+        "vereist_gebouw": "politie",
+        "druk": -65,
+        "effect": {
+          "stabiliteit": -3,
+          "complot": 3
+        }
+      },
+      {
+        "id": "loon",
+        "naam": "Loonsverhoging toezeggen",
+        "tekst": "Duur, maar daarna is het klaar.",
+        "kosten": {
+          "kapitaal": 130
+        },
+        "druk": -100,
+        "effect": {
+          "stabiliteit": 1
+        }
+      }
+    ],
+    "uitbarsting": {
+      "tekst": "De mijn ligt een maand stil.",
+      "effect": {
+        "stabiliteit": -5,
+        "productie_factor": 0.93,
+        "duur_dagen": 30
+      },
+      "gebouw_uit_dagen": 30,
+      "event": "staking"
+    },
+    "opgelost": {
+      "effect": {
+        "stabiliteit": 2
+      }
+    }
+  },
+  {
+    "id": "fabrieksbezetting",
+    "naam": "Bezetting van de fabriek",
+    "tekst": "Na geruchten over sluiting hebben arbeiders de fabriekshal bezet. Ze willen garanties.",
+    "anker": "industrie",
+    "pictogram": "tandwiel",
+    "voorwaarde": {
+      "na_dag": 140,
+      "kans_per_dag": 0.0007
+    },
+    "groei_per_dag": 1.5,
+    "deadline_dagen": 60,
+    "trappen": [
+      {
+        "vanaf": 33,
+        "effect": {
+          "stabiliteit_doel": -3,
+          "duur_dagen": 30
+        }
+      },
+      {
+        "vanaf": 66,
+        "tekst": "De bezetters leggen de lopende band stil.",
+        "effect": {
+          "stabiliteit_doel": -4,
+          "productie_factor": 0.95,
+          "duur_dagen": 30
+        },
+        "gebouw_uit_dagen": 0
+      }
+    ],
+    "acties": [
+      {
+        "id": "gesprek",
+        "naam": "Gesprek op de werkvloer",
+        "tekst": "Langzaam vertrouwen terugwinnen.",
+        "kosten": {
+          "kapitaal": 45
+        },
+        "druk": -40,
+        "effect": {}
+      },
+      {
+        "id": "ontruimen",
+        "naam": "De hal laten ontruimen",
+        "tekst": "Snel voorbij, maar de beelden gaan rond.",
+        "kosten": {
+          "kapitaal": 75
+        },
+        "vereist_gebouw": "politie",
+        "druk": -70,
+        "effect": {
+          "stabiliteit": -4,
+          "complot": 3
+        }
+      },
+      {
+        "id": "plan",
+        "naam": "Investeringsplan voor de fabriek",
+        "tekst": "Garanties op papier en geld erbij.",
+        "kosten": {
+          "kapitaal": 140
+        },
+        "druk": -100,
+        "effect": {
+          "stabiliteit": 1
+        }
+      }
+    ],
+    "uitbarsting": {
+      "tekst": "De fabriek ligt een maand stil.",
+      "effect": {
+        "stabiliteit": -5,
+        "productie_factor": 0.92,
+        "duur_dagen": 30
+      },
+      "gebouw_uit_dagen": 30,
+      "event": "staking"
+    },
+    "opgelost": {
+      "effect": {
+        "stabiliteit": 2
+      }
+    }
+  },
+  {
+    "id": "havenstaking",
+    "naam": "Dokwerkers leggen de haven stil",
+    "tekst": "Dokwerkers protesteren tegen nieuwe ploegendiensten. Schepen wachten op de rede.",
+    "anker": "haven",
+    "pictogram": "golf",
+    "voorwaarde": {
+      "na_dag": 150,
+      "kans_per_dag": 0.0007
+    },
+    "groei_per_dag": 1.7,
+    "deadline_dagen": 55,
+    "trappen": [
+      {
+        "vanaf": 33,
+        "effect": {
+          "stabiliteit_doel": -3,
+          "duur_dagen": 30
+        }
+      },
+      {
+        "vanaf": 66,
+        "tekst": "Containers stapelen zich op: de haven draait nauwelijks.",
+        "effect": {
+          "stabiliteit_doel": -4,
+          "productie_factor": 0.95,
+          "duur_dagen": 30
+        },
+        "gebouw_uit_dagen": 0
+      }
+    ],
+    "acties": [
+      {
+        "id": "bemiddelaar",
+        "naam": "Een bemiddelaar sturen",
+        "tekst": "Rustig onderhandelen, kade voor kade.",
+        "kosten": {
+          "kapitaal": 40
+        },
+        "druk": -40,
+        "effect": {}
+      },
+      {
+        "id": "vervangers",
+        "naam": "Vervangende ploegen inhuren",
+        "tekst": "De haven draait weer, de dokwerkers zijn woedend.",
+        "kosten": {
+          "kapitaal": 70
+        },
+        "druk": -65,
+        "effect": {
+          "stabiliteit": -3
+        }
+      },
+      {
+        "id": "afspraken",
+        "naam": "Nieuwe afspraken over de diensten",
+        "tekst": "Duur, maar het conflict is voorbij.",
+        "kosten": {
+          "kapitaal": 130
+        },
+        "druk": -100,
+        "effect": {
+          "stabiliteit": 1
+        }
+      }
+    ],
+    "uitbarsting": {
+      "tekst": "De haven ligt een maand stil.",
+      "effect": {
+        "stabiliteit": -5,
+        "productie_factor": 0.9,
+        "duur_dagen": 30
+      },
+      "gebouw_uit_dagen": 30,
+      "event": "staking"
+    },
+    "opgelost": {
+      "effect": {
+        "stabiliteit": 2
+      }
+    }
+  },
+  {
+    "id": "stroomprotest",
+    "naam": "Protest tegen stroomuitval",
+    "tekst": "Na een reeks storingen trekken bewoners naar de centrale. Ze eisen een betrouwbaar net.",
+    "anker": "centrale",
+    "pictogram": "bliksem",
+    "voorwaarde": {
+      "na_dag": 150,
+      "kans_per_dag": 0.0007
+    },
+    "groei_per_dag": 1.5,
+    "deadline_dagen": 55,
+    "trappen": [
+      {
+        "vanaf": 33,
+        "effect": {
+          "stabiliteit_doel": -3,
+          "duur_dagen": 30
+        }
+      },
+      {
+        "vanaf": 66,
+        "tekst": "De storingen worden een politieke zaak.",
+        "effect": {
+          "stabiliteit_doel": -4,
+          "productie_factor": 0.95,
+          "duur_dagen": 30
+        },
+        "gebouw_uit_dagen": 0
+      }
+    ],
+    "acties": [
+      {
+        "id": "aggregaten",
+        "naam": "Noodaggregaten in de wijken",
+        "tekst": "Het helpt een beetje en het kost energie.",
+        "kosten": {
+          "kapitaal": 45
+        },
+        "druk": -40,
+        "effect": {
+          "energie": -20
+        }
+      },
+      {
+        "id": "rantsoen",
+        "naam": "Stroom rantsoeneren",
+        "tekst": "Snel stabiel, maar de fabrieken voelen het.",
+        "kosten": {
+          "kapitaal": 60
+        },
+        "druk": -65,
+        "effect": {
+          "stabiliteit": -2,
+          "productie_factor": 0.97,
+          "duur_dagen": 20
+        }
+      },
+      {
+        "id": "net",
+        "naam": "Het net versterken",
+        "tekst": "Een grote investering: het probleem is weg.",
+        "kosten": {
+          "kapitaal": 140
+        },
+        "druk": -100,
+        "effect": {
+          "stabiliteit": 1
+        }
+      }
+    ],
+    "uitbarsting": {
+      "tekst": "De centrale draait drie weken niet.",
+      "effect": {
+        "stabiliteit": -5,
+        "productie_factor": 0.93,
+        "duur_dagen": 30
+      },
+      "gebouw_uit_dagen": 20
+    },
+    "opgelost": {
+      "effect": {
+        "stabiliteit": 2
+      }
+    }
+  },
+  {
+    "id": "boerenprotest",
+    "naam": "Boerenprotest",
+    "tekst": "Trekkers blokkeren de wegen rond de akkers. De boeren vinden de nieuwe regels onwerkbaar.",
+    "anker": "boerderij",
+    "pictogram": "aar",
+    "voorwaarde": {
+      "na_dag": 120,
+      "kans_per_dag": 0.0007
+    },
+    "groei_per_dag": 1.4,
+    "deadline_dagen": 60,
+    "trappen": [
+      {
+        "vanaf": 33,
+        "effect": {
+          "stabiliteit_doel": -3,
+          "duur_dagen": 30
+        }
+      },
+      {
+        "vanaf": 66,
+        "tekst": "De blokkades houden de oogst tegen.",
+        "effect": {
+          "stabiliteit_doel": -4,
+          "productie_factor": 0.95,
+          "duur_dagen": 30
+        },
+        "gebouw_uit_dagen": 0
+      }
+    ],
+    "acties": [
+      {
+        "id": "cooperaties",
+        "naam": "Gesprek met de coöperaties",
+        "tekst": "Stap voor stap naar een akkoord.",
+        "kosten": {
+          "kapitaal": 40
+        },
+        "druk": -40,
+        "effect": {}
+      },
+      {
+        "id": "wegen",
+        "naam": "De wegen vrijmaken",
+        "tekst": "De trekkers zijn weg, de wrok blijft.",
+        "kosten": {
+          "kapitaal": 60
+        },
+        "vereist_gebouw": "politie",
+        "druk": -65,
+        "effect": {
+          "stabiliteit": -3,
+          "complot": 3
+        }
+      },
+      {
+        "id": "steun",
+        "naam": "Een steunregeling",
+        "tekst": "Geld voor de boeren: het protest is voorbij.",
+        "kosten": {
+          "kapitaal": 120
+        },
+        "druk": -100,
+        "effect": {
+          "voedsel": 20
+        }
+      }
+    ],
+    "uitbarsting": {
+      "tekst": "De oogst blijft liggen.",
+      "effect": {
+        "stabiliteit": -4,
+        "voedsel": -40,
+        "productie_factor": 0.95,
+        "duur_dagen": 30
+      },
+      "gebouw_uit_dagen": 20
+    },
+    "opgelost": {
+      "effect": {
+        "stabiliteit": 2
+      }
+    }
+  },
+  {
+    "id": "lozingsprotest",
+    "naam": "Buurtprotest tegen lozing",
+    "tekst": "Omwonenden zien verkleurd water bij de chipfabriek. Een buurtcomité eist opheldering.",
+    "anker": "chipfabriek",
+    "pictogram": "tandwiel",
+    "voorwaarde": {
+      "na_dag": 200,
+      "kans_per_dag": 0.0007
+    },
+    "groei_per_dag": 1.5,
+    "deadline_dagen": 60,
+    "trappen": [
+      {
+        "vanaf": 33,
+        "effect": {
+          "stabiliteit_doel": -3,
+          "duur_dagen": 30
+        }
+      },
+      {
+        "vanaf": 66,
+        "tekst": "Het verhaal haalt het nieuws: de fabriek draait onder vuur.",
+        "effect": {
+          "stabiliteit_doel": -4,
+          "productie_factor": 0.95,
+          "duur_dagen": 30
+        },
+        "gebouw_uit_dagen": 0
+      }
+    ],
+    "acties": [
+      {
+        "id": "meting",
+        "naam": "Onafhankelijk meetrapport",
+        "tekst": "Feiten op tafel; het duurt even.",
+        "kosten": {
+          "kapitaal": 50
+        },
+        "druk": -40,
+        "effect": {
+          "complot": -3
+        }
+      },
+      {
+        "id": "campagne",
+        "naam": "Geruststellende campagne",
+        "tekst": "Snel stil, maar niet iedereen gelooft het.",
+        "kosten": {
+          "kapitaal": 65
+        },
+        "druk": -60,
+        "effect": {
+          "stabiliteit": -2,
+          "complot": 4
+        }
+      },
+      {
+        "id": "zuivering",
+        "naam": "Een zuiveringsinstallatie",
+        "tekst": "Duur, maar de lozing stopt echt.",
+        "kosten": {
+          "kapitaal": 150
+        },
+        "druk": -100,
+        "effect": {
+          "stabiliteit": 2
+        }
+      }
+    ],
+    "uitbarsting": {
+      "tekst": "De chipfabriek moet tijdelijk dicht.",
+      "effect": {
+        "stabiliteit": -4,
+        "chips": -20,
+        "productie_factor": 0.95,
+        "duur_dagen": 30
+      },
+      "gebouw_uit_dagen": 25
+    },
+    "opgelost": {
+      "effect": {
+        "stabiliteit": 2
+      }
+    }
+  },
+  {
+    "id": "huurstaking",
+    "naam": "Huurstaking",
+    "tekst": "In een nieuwe wijk betalen honderden huishoudens hun huur niet meer. Ze vinden de verhogingen onredelijk.",
+    "anker": "woonwijk",
+    "pictogram": "huisje",
+    "voorwaarde": {
+      "na_dag": 130,
+      "kans_per_dag": 0.0007
+    },
+    "groei_per_dag": 1.3,
+    "deadline_dagen": 65,
+    "trappen": [
+      {
+        "vanaf": 33,
+        "effect": {
+          "stabiliteit_doel": -3,
+          "duur_dagen": 30
+        }
+      },
+      {
+        "vanaf": 66,
+        "tekst": "De staking breidt zich uit naar andere wijken.",
+        "effect": {
+          "stabiliteit_doel": -4,
+          "productie_factor": 0.95,
+          "duur_dagen": 30
+        },
+        "gebouw_uit_dagen": 0
+      }
+    ],
+    "acties": [
+      {
+        "id": "bevriezing",
+        "naam": "Huren een jaar bevriezen",
+        "tekst": "Rust op korte termijn, het kost de staat geld.",
+        "kosten": {
+          "kapitaal": 40
+        },
+        "druk": -40,
+        "effect": {}
+      },
+      {
+        "id": "ontruiming",
+        "naam": "Ontruimingen aankondigen",
+        "tekst": "De dreiging werkt, de stemming niet.",
+        "kosten": {
+          "kapitaal": 60
+        },
+        "vereist_gebouw": "politie",
+        "druk": -70,
+        "effect": {
+          "stabiliteit": -5
+        }
+      },
+      {
+        "id": "woningbouw",
+        "naam": "Betaalbare woningbouw",
+        "tekst": "Een structurele oplossing.",
+        "kosten": {
+          "kapitaal": 140
+        },
+        "druk": -100,
+        "effect": {
+          "stabiliteit": 3
+        }
+      }
+    ],
+    "uitbarsting": {
+      "tekst": "De onrust slaat over op de stad.",
+      "effect": {
+        "stabiliteit": -6,
+        "productie_factor": 0.95,
+        "duur_dagen": 30
+      },
+      "gebouw_uit_dagen": 0
+    },
+    "opgelost": {
+      "effect": {
+        "stabiliteit": 2
+      }
+    }
+  },
+  {
+    "id": "studentenprotest",
+    "naam": "Studentenprotest op het plein",
+    "tekst": "Studenten kamperen op het plein voor het parlement. Ze eisen inspraak en betaalbaar onderwijs.",
+    "anker": "hoofdstad",
+    "pictogram": "zuil",
+    "voorwaarde": {
+      "na_dag": 150,
+      "kans_per_dag": 0.0007
+    },
+    "groei_per_dag": 1.4,
+    "deadline_dagen": 60,
+    "trappen": [
+      {
+        "vanaf": 33,
+        "effect": {
+          "stabiliteit_doel": -3,
+          "duur_dagen": 30
+        }
+      },
+      {
+        "vanaf": 66,
+        "tekst": "Het plein staat vol: de hoofdstad kijkt mee.",
+        "effect": {
+          "stabiliteit_doel": -4,
+          "productie_factor": 0.95,
+          "duur_dagen": 30
+        },
+        "gebouw_uit_dagen": 0
+      }
+    ],
+    "acties": [
+      {
+        "id": "dialoog",
+        "naam": "Dialoog met de studenten",
+        "tekst": "Een ronde tafel, week na week.",
+        "kosten": {
+          "kapitaal": 40
+        },
+        "druk": -40,
+        "effect": {}
+      },
+      {
+        "id": "ontruimen",
+        "naam": "Het plein ontruimen",
+        "tekst": "Het plein is leeg, de beelden blijven hangen.",
+        "kosten": {
+          "kapitaal": 55
+        },
+        "vereist_gebouw": "politie",
+        "druk": -70,
+        "effect": {
+          "stabiliteit": -4,
+          "complot": 4
+        }
+      },
+      {
+        "id": "fonds",
+        "naam": "Een onderwijsfonds",
+        "tekst": "Geld voor scholen en beurzen.",
+        "kosten": {
+          "kapitaal": 130
+        },
+        "druk": -100,
+        "effect": {
+          "stabiliteit": 2
+        }
+      }
+    ],
+    "uitbarsting": {
+      "tekst": "Het protest slaat over op het hele land.",
+      "effect": {
+        "stabiliteit": -6,
+        "complot": 5,
+        "productie_factor": 0.95,
+        "duur_dagen": 30
+      },
+      "gebouw_uit_dagen": 0,
+      "event": "onrust"
+    },
+    "opgelost": {
+      "effect": {
+        "stabiliteit": 2
+      }
+    }
+  }
+]

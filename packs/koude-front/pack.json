@@ -20,6 +20,7 @@
     "acties": "actions/acties.json",
     "verhaal": "story/verhaal.json",
     "eenheden": "military/eenheden.json",
-    "events": "events/events.json"
+    "events": "events/events.json",
+    "brandhaarden": "events/brandhaarden.json"
   }
 }
