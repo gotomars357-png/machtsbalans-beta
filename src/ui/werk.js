@@ -21,6 +21,7 @@
 
 import { seizoen, weer, wind } from './seizoen.js';
 import { maakBasis, TerreinLaag, kenmerkenVoorTegel, KENMERK, perceelHoek } from './terrein.js';
+import { budget, begin, verbruik, echtNu } from './bakbudget.js';
 
 // ---------- gedeelde hulpjes (eigen kopie, zie inzoom-spec §0) ----------
 
@@ -273,6 +274,7 @@ export class WerkLaag {
     this.laatste.clear();
     this.bytes = 0;
     this.vorigPlan = null; // routes en werkplannen van de vorige keuze (alleen binnen deze toestand)
+    this.voorGen = null; this.voorAan = false; this.voorSig = '';
   }
 
   // ---------- opzoeken ----------
@@ -327,7 +329,8 @@ export class WerkLaag {
 
   // ---------- kiezen (alleen als de toestand iets verandert) ----------
 
-  werkCache(view) {
+  // De handtekening van wat de keuze bepaalt; met of de natuurlaag al klaar is (C14d).
+  sigVan(view) {
     const s = this.state;
     let nP = 0, somT = 0;
     for (let i = 0; i < s.landen.length; i++) {
@@ -336,12 +339,81 @@ export class WerkLaag {
       for (let j = 0; j < l.plaatsingen.length; j++) somT += l.plaatsingen[j].t;
       for (let j = 0; j < (l.bouw?.length ?? 0); j++) somT += l.bouw[j].tegel * 7;
     }
-    const inf = view.infraLaag, net = view.wegennet?.versie > 0 ? view.wegennet : null;
-    const sig = `${s.grensVersie}|${nP}|${somT}|${s.landen.length}|${inf ? inf.sig : '-'}|${net?.versie ?? '-'}`;
+    const inf = view.infraLaag, net = view.wegennet?.versie > 0 ? view.wegennet : null, nat = view.natuurLaag;
+    return `${s.grensVersie}|${nP}|${somT}|${s.landen.length}|${inf ? inf.sig : '-'}|${net?.versie ?? '-'}|${nat?.geo === view.geo ? 1 : 0}`;
+  }
+
+  // Kiezen in één keer: alleen de eerste keer na laad() (en in tests). Daarna doet voorwerk() het in stappen.
+  werkCache(view) {
+    if (this.voorGen || (this.voorAan && this.sig !== '')) return;
+    const sig = this.sigVan(view);
     if (sig === this.sig) return;
     this.sig = sig;
+    const net = view.wegennet?.versie > 0 ? view.wegennet : null;
     this.net = net && typeof net.wegen === 'function' ? net : null;
-    this.kies(inf, view.natuurLaag);
+    this.kies(view.infraLaag, view.natuurLaag);
+  }
+
+  // ---------- voorwerk (C14d) ----------
+  // Elk beeld, op elke zoom: bij een nieuwe handtekening kiest een generator in stappen (binnen het gedeelde budget van
+  // bakbudget.js) op een schaduwobject, zodat de oude keuze getekend blijft tot de nieuwe af is; dan alles in één keer.
+  voorwerk(view, nu) {
+    const s = view?.state;
+    if (!s || !view.geo || !view.eigenaar) return;
+    begin(nu, !!view.doel?.plan, view);
+    if (this.state !== s || this.geo !== view.geo || this.eigenaar !== view.eigenaar || (view.terreinLaag?.basis && view.terreinLaag.basis !== this.basis)) this.laad(view);
+    if (!this.voorGen) {
+      const sig = this.sigVan(view);
+      if (sig === this.sig) { budget.werkBezig = false; return; }
+      // De allereerste keuze na laden op een zoom waar de laag tekent: die doet werkCache in één keer (tests).
+      if (this.sig === '' && !this.voorAan && view.zoom >= DREMPEL.grof - 0.4) { budget.werkBezig = false; return; }
+      const net = view.wegennet?.versie > 0 ? view.wegennet : null;
+      this.voorSig = sig;
+      this.voorGen = this.kiesStappen(view.infraLaag, view.natuurLaag, net && typeof net.wegen === 'function' ? net : null);
+    }
+    this.voorAan = true;
+    budget.werkBezig = true;
+    this.stapTijden ??= {};
+    while (budget.over > 0) {
+      const t = echtNu();
+      const r = this.voorGen.next();
+      const ms = echtNu() - t;
+      verbruik(ms);
+      if (r.value?.naam) this.stapTijden[r.value.naam] = Math.max(this.stapTijden[r.value.naam] ?? 0, ms);
+      if (r.done) {
+        const sch = r.value.klaar;
+        for (const k of Object.keys(sch)) this[k] = sch[k];
+        this.sig = this.voorSig;
+        this.voorGen = null;
+        budget.werkBezig = false;
+        break;
+      }
+    }
+  }
+
+  *kiesStappen(inf, nat, net) {
+    const sch = Object.create(Object.getPrototypeOf(this));
+    for (const k of ['state', 'geo', 'eigenaar', 'basis', 'tl', 'vorigPlan', 'zoekPas', 'zoekStempel', 'zoekVan', 'zoekRij', 'zoekErf', 'zoekWeg', 'zoekNr', 'zoekTegel']) sch[k] = this[k];
+    sch.net = net;
+    sch.raster = new Uint8Array(RW * RH);
+    const n = this.geo.tegels.length, B = 8;
+    sch.leeg(); sch.bouwSoorten();
+    yield { naam: 'soorten' };
+    sch.merkInfra(inf); yield { naam: 'infra' };
+    sch.merkGebouwen(inf); yield { naam: 'gebouwen' };
+    for (let i = 0; i < B; i++) { sch.merkGrens(Math.floor((RH * i) / B), Math.floor((RH * (i + 1)) / B)); yield { naam: 'grens' }; }
+    sch.merkNatuur(nat); yield { naam: 'natuur' };
+    sch.kiesGroeven(); sch.kiesJaknikkers(); sch.kiesZagerijen(); yield { naam: 'groeven' };
+    for (let i = 0; i < B; i++) { sch.kiesErven(Math.floor((n * i) / B), Math.floor((n * (i + 1)) / B)); yield { naam: 'erven' }; }
+    for (let i = 0; i < B * 2; i++) { sch.kiesVelden(Math.floor((n * i) / (B * 2)), Math.floor((n * (i + 1)) / (B * 2))); yield { naam: 'velden' }; }
+    const ctx = sch.routesBegin();
+    if (!sch.zoekKaart) { sch.maakZoekKaart(); yield { naam: 'zoekkaart' }; }
+    const PER = 12;
+    for (let i = 0; i < sch.velden.length; i += PER) { sch.routesBand(ctx, i, i + PER); yield { naam: 'routes' }; }
+    sch.routesAf(); yield { naam: 'plannen' };
+    sch.kiesErfritten(); yield { naam: 'erfritten' };
+    for (let i = 0; i < B; i++) { sch.kiesBos(Math.floor((n * i) / B), Math.floor((n * (i + 1)) / B)); if (i < B - 1) yield { naam: 'bos' }; }
+    return { naam: 'bos', klaar: sch };
   }
 
   kies(inf, nat) {
@@ -447,10 +519,10 @@ export class WerkLaag {
   }
 
   // Een strook langs elke landgrens blijft voor grens.js (hekken, posten, loopgraven).
-  merkGrens() {
+  merkGrens(c0 = 0, c1 = RH) {
     const e = this.eigenaar, g = this.raster;
     const op = (x, y) => (x < 0 || y < 0 || x >= W || y >= H ? -1 : e[y * W + x]);
-    for (let cy = 0; cy < RH; cy++) for (let cx = 0; cx < RW; cx++) {
+    for (let cy = c0; cy < Math.min(c1, RH); cy++) for (let cx = 0; cx < RW; cx++) {
       const x = cx * RC + 1, y = cy * RC + 1, a = op(x, y);
       if (a < 0) continue;
       for (let k = 0; k < 4; k++) {
@@ -568,9 +640,9 @@ export class WerkLaag {
   }
 
   // Boerderijen uit terrein.js: erfweg naar de dichtste weg, hooiberg, windmotor, kippen en hond.
-  kiesErven() {
+  kiesErven(t0 = 0, t1 = Infinity) {
     const geo = this.geo, Tw = geo.T, s = this.state, b = this.basis;
-    for (let t = 0; t < geo.tegels.length && this.erven.length < MAX_ERVEN; t++) {
+    for (let t = t0; t < Math.min(t1, geo.tegels.length) && this.erven.length < MAX_ERVEN; t++) {
       if (!b.akker[t] || s.bezet[t] || this.soort[t]) continue;
       const tg = geo.tegels[t], f = kenmerkenVoorTegel(tg, b);
       for (let p = 0; p < f.length; p += STAP) {
@@ -653,9 +725,9 @@ export class WerkLaag {
 
   // Percelen uit terrein.js met hun werk door het jaar. Alleen waar leven.js niets zet en waar geen weg, gebouw of
   // grens doorheen loopt.
-  kiesVelden() {
+  kiesVelden(t0 = 0, t1 = Infinity) {
     const geo = this.geo, Tw = geo.T, s = this.state, b = this.basis;
-    for (let t = 0; t < geo.tegels.length && this.velden.length < MAX_VELDEN; t++) {
+    for (let t = t0; t < Math.min(t1, geo.tegels.length) && this.velden.length < MAX_VELDEN; t++) {
       const tg = geo.tegels[t];
       if (tg.terrein === 'water' || tg.terrein === 'berg' || tg.eig < 0 || s.bezet[t] || this.soort[t]) continue;
       let akkerBuur = false;
@@ -837,6 +909,20 @@ export class WerkLaag {
   // het erf af, eventueel over de veldweg), anders van de dichtste weg (hij draait van de weg af het land op), en
   // pas als er niets in de buurt is vaagt hij in aan de kopakker.
   kiesRoutes() {
+    const ctx = this.routesBegin();
+    this.routesBand(ctx, 0, this.velden.length);
+    this.routesAf();
+  }
+
+  // kiesRoutes in stukken (C14d): begin, per band velden, af. Samen precies wat kiesRoutes in één keer doet.
+  routesBegin() {
+    const oud = this.vorigPlan, ervenT = this.ervenT ?? (this.ervenT = new Map());
+    ervenT.clear();
+    for (const e of this.erven) ervenT.set(e.t, e);
+    return { oud, ervenT };
+  }
+
+  routesBand(ctx, i0, i1) {
     const wegen = this.alleWegen ?? [], kand = [];
     const park = (v) => {
       if (!(v.rol & (R_PLUK | R_DRUIF | R_SPROEI))) return;
@@ -847,10 +933,9 @@ export class WerkLaag {
     };
     // Een perceel dat bij een nieuwe keuze (een nieuw gebouw ergens) precies zo blijft liggen, houdt zijn route en
     // werkplan: een machine die al onderweg is, springt of verdwijnt dan niet. Alleen als de route nog vrij is.
-    const oud = this.vorigPlan, ervenT = this.ervenT ?? (this.ervenT = new Map());
-    ervenT.clear();
-    for (const e of this.erven) ervenT.set(e.t, e);
-    for (const v of this.velden) {
+    const { oud, ervenT } = ctx;
+    for (let vi = i0; vi < Math.min(i1, this.velden.length); vi++) {
+      const v = this.velden[vi];
       v.vast = false;
       const c = oud && oud.get(v.id);
       if (c && c.x === v.x && c.y === v.y && c.rol === v.rol && c.olx === v.olx && c.oly === v.oly) {
@@ -957,6 +1042,9 @@ export class WerkLaag {
         T[o + 4] = kort ? 0.6 + terugPk / RIJ_V : (v.rlen + terugPk) / RIJ_V;
       }
     }
+  }
+
+  routesAf() {
     this.plannen();
     const nieuw = new Map();
     for (const v of this.velden) {
@@ -1326,9 +1414,9 @@ export class WerkLaag {
   }
 
   // Kaalslag of herplant op een open plek aan de bosrand, met een stapel stammen aan de rand van de plek.
-  kiesBos() {
+  kiesBos(t0 = 0, t1 = Infinity) {
     const geo = this.geo, Tw = geo.T, s = this.state, tl = this.tl;
-    for (let t = 0; t < geo.tegels.length && this.kaal.length < MAX_KAAL; t++) {
+    for (let t = t0; t < Math.min(t1, geo.tegels.length) && this.kaal.length < MAX_KAAL; t++) {
       const tg = geo.tegels[t];
       if (tg.terrein !== 'bos' || tg.eig < 0 || s.bezet[t] || this.soort[t] || this.levenHert(t)) continue;
       if (hash(t, 601) >= (this.houtkap[tg.eig] ? 0.45 : 0.16)) continue;
@@ -1404,6 +1492,7 @@ export class WerkLaag {
 
   // C12: alleen op gebakken grond (terrein knipt het canvas tot de gebakken brokken; niets gebakken: niets tekenen)
   teken(c, view, sc, nu, dt = 0, tempo = 0) {
+    this.voorwerk(view, nu);
     const klem = view?.terreinLaag?.klemOpGebakken?.(c) ?? 1;
     if (!klem) { if (tempo > 0) this.klok += dt; this.nul(); return; }
     try { return this.tekenOpGrond(c, view, sc, nu, dt, tempo); } finally { if (klem === 2) c.restore(); }

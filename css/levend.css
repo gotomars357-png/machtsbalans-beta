@@ -1,0 +1,43 @@
+/* Levende kaart (C14a): de tijdlijn met chips links in het kaartvenster en de voertuigkaart.
+   Geladen door src/ui/pings.js (een <link> in document.head); index.html en style.css blijven ongewijzigd. */
+
+#tijdlijn { position: absolute; left: 12px; top: 56px; z-index: 4; display: flex; flex-direction: column; pointer-events: none; }
+#tijdlijn .tl-chips { display: flex; flex-direction: column; gap: 8px; }
+#tijdlijn .tl-chip { pointer-events: auto; width: 36px; height: 36px; padding: 0; border-radius: 50%; display: grid; place-items: center;
+  background: rgba(13, 20, 28, .9); border: 2px solid var(--info); color: var(--info); cursor: pointer; opacity: .55;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .45); transition: opacity .3s, transform .15s; }
+#tijdlijn .tl-chip svg { width: 18px; height: 18px; display: block; }
+#tijdlijn .tl-chip:hover { transform: scale(1.08); opacity: 1; }
+#tijdlijn .tl-chip.goed { border-color: #5fd38d; color: #5fd38d; }
+#tijdlijn .tl-chip.slecht { border-color: #e5484d; color: #e5484d; }
+#tijdlijn .tl-chip.info { border-color: #8fb8ff; color: #8fb8ff; }
+#tijdlijn .tl-chip.ongezien { opacity: 1; }
+#tijdlijn .tl-chip.goed.ongezien { background: #5fd38d; color: #0d141c; }
+#tijdlijn .tl-chip.slecht.ongezien { background: #e5484d; color: #0d141c; }
+#tijdlijn .tl-chip.info.ongezien { background: #8fb8ff; color: #0d141c; }
+#tijdlijn .tl-chip.meer { border-color: var(--lijn); color: var(--zacht); opacity: .9; }
+#tijdlijn .tl-uitleg { position: absolute; left: 56px; transform: translateY(-50%); white-space: nowrap; max-width: calc(100vw - 90px); overflow: hidden;
+  text-overflow: ellipsis; background: rgba(13, 20, 28, .96); border: 1px solid var(--lijn); border-radius: 6px; padding: 6px 9px; font-size: 13px; pointer-events: none; }
+#kaart-wrap.bouwen #tijdlijn { display: none; } /* in bouwmodus staat de bouwbalk bovenin */
+
+/* Voertuigkaart: dezelfde opmaak als #context (class "context voertuig"), op de plek van de tik. */
+#voertuig { width: 280px; }
+#voertuig .vk-regels { display: grid; gap: 3px; margin: 4px 0 8px; }
+#voertuig .vk-regels .zacht { display: inline-block; min-width: 52px; }
+#voertuig .vk-land { font-size: 12px; }
+#voertuig .vk-knoppen { display: flex; gap: 6px; }
+#voertuig .vk-einde { color: var(--zacht); padding: 4px 0 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  #tijdlijn .tl-chip { transition: none; }
+}
+
+@media (max-width: 600px) {
+  #tijdlijn { left: 8px; top: 52px; }
+  #tijdlijn .tl-chips { gap: 8px; }
+  #tijdlijn .tl-chip { width: 44px; height: 44px; }
+  #tijdlijn .tl-chip svg { width: 22px; height: 22px; }
+  #tijdlijn .tl-uitleg { left: 52px; }
+  #voertuig { width: auto; }
+  body:has(#voertuig:not([hidden])) #toasts { bottom: calc(45svh + 8px); }
+}

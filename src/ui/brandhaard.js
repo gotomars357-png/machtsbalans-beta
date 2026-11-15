@@ -1,5 +1,6 @@
 // Brandhaarden in beeld (C13): een ring op de ankertegel en het blok in het contextpaneel.
 // De ring: de buitenboog is de resterende tijd (met de klok mee vanaf boven), de dikte van de binnenring de druk.
+// Een lopend overleg (vertraagde aanpak, C14) is een gestippelde binnenboog die vol loopt tot de effectdag.
 // Kleur per trap (geel, oranje, rood). Hij pulseert, sneller als er minder dan 15 dagen over zijn. Eigen haarden zijn
 // altijd zichtbaar, die van andere landen vanaf zoom 2 of als dat land geselecteerd is. Leest alleen de toestand;
 // een aanpak gaat als order 'brandhaard' via main.js (data-actie="brandhaard").
@@ -115,6 +116,29 @@ export class BrandhaardLaag {
     c.lineWidth = dik;
     c.beginPath(); c.arc(x, y, ri, 0, Math.PI * 2); c.stroke();
     c.globalAlpha = eigen ? 1 : 0.8;
+    // Lopend overleg (C14): een gestippelde binnenboog die vol loopt tot de effectdag.
+    const w = h.wacht?.[0];
+    if (w) {
+      const lengte = Math.max(1, soort.acties?.find((a) => a.id === w.actie)?.vertraging_dagen ?? 1);
+      const vol = Math.max(0, Math.min(1, 1 - (w.dag - s.dag) / lengte));
+      // Op het overzicht staat het pictogram in het midden en is de ring klein: daar loopt de boog buiten om de ring,
+      // met een donkere onderrand zodat hij ook op licht land leesbaar is; ingezoomd binnen de ring.
+      const rb = diep ? r * 0.66 : r + lw * 1.5 + 2;
+      const lb = diep ? Math.max(1.6, lw * 0.6) : Math.max(2.4, lw * 0.8);
+      if (!diep) {
+        c.strokeStyle = 'rgba(12,18,26,0.55)';
+        c.lineWidth = lb + 2;
+        c.beginPath(); c.arc(x, y, rb, 0, Math.PI * 2); c.stroke();
+      }
+      c.strokeStyle = '#9fd3ff';
+      c.lineWidth = lb;
+      c.setLineDash([Math.max(2, rb * 0.14), Math.max(2, rb * 0.11)]);
+      c.globalAlpha = 0.35 * (eigen ? 1 : 0.8);
+      c.beginPath(); c.arc(x, y, rb, 0, Math.PI * 2); c.stroke();
+      c.globalAlpha = eigen ? 1 : 0.8;
+      if (vol > 0) { c.beginPath(); c.arc(x, y, rb, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * vol); c.stroke(); }
+      c.setLineDash([]);
+    }
     // Pictogram: op het overzicht in het midden, ingezoomd in een plaatje rechts naast de ring (boven staat de naam
     // van een hoofdstad), zodat het gebouw zelf zichtbaar blijft.
     const pict = pictogramVan(s, soort);
@@ -273,12 +297,19 @@ export function brandhaardBlok(state, t) {
     return `<div class="bh-blok bh-vreemd" style="--bh:${kleur}" title="${esc(soort.naam)}"><span class="bh-stip"></span>Onrust ${esc(waar)}: nog ${dagen} ${dagen === 1 ? 'dag' : 'dagen'}</div>`;
   }
   const druk = Math.max(0, Math.min(100, h.druk));
+  // Lopende vertraagde aanpakken (praten, C14): wanneer de druk zakt.
+  const lopend = (h.wacht || []).map((w) => {
+    const n = Math.max(0, w.dag - state.dag);
+    const naam = soort.acties?.find((a) => a.id === w.actie)?.naam ?? 'Overleg';
+    return `<div class="bh-regel bh-loopt"><b>${esc(naam)} loopt:</b> nog ${n} ${n === 1 ? 'dag' : 'dagen'}, dan druk ${min(w.druk)}</div>`;
+  }).join('');
   const trappen = (soort.trappen || []).map((x) => `<i style="left:${x.vanaf}%"></i>`).join('');
   const u = soort.uitbarsting || {};
   const uitEff = [effectTekst(state, u.effect || {}), u.gebouw_uit_dagen > 0 ? `${ankerNaam(state, h)} ${u.gebouw_uit_dagen} dagen stil` : ''].filter(Boolean).join(', ');
   const acties = (soort.acties || []).map((a) => {
     const st = brandhaardStatus(state, state.speler, h.id, a.id);
-    const eff = [`druk ${min(a.druk)}`, effectTekst(state, a.effect || {})].filter(Boolean).join(', ');
+    const v = a.vertraging_dagen ?? 0;
+    const eff = [`druk ${min(a.druk)}${v > 0 ? `, werkt na ${v} dagen` : ''}`, effectTekst(state, a.effect || {})].filter(Boolean).join(', ');
     return `<div class="actie bh-actie${st.ok ? '' : ' kan-niet'}"><div><b>${esc(a.naam)}</b></div>
       <button class="knop klein" data-actie="brandhaard" data-doel="${h.id}" data-id="${esc(a.id)}" ${st.ok ? '' : 'disabled'} title="${esc(st.reden ?? a.tekst ?? '')}">${esc(kostenTekst(state, a.kosten))}</button>
       <div class="sub">${esc(a.tekst ?? '')} <span class="bh-eff">${esc(eff)}</span>${st.ok ? '' : ` <span class="reden">${esc(st.reden)}</span>`}</div></div>`;
@@ -289,6 +320,7 @@ export function brandhaardBlok(state, t) {
     <div class="bh-meter" title="Druk ${druk.toFixed(0)} van 100"><span style="width:${druk.toFixed(1)}%"></span>${trappen}</div>
     <div class="bh-regel">Druk <b>${druk.toFixed(0)}</b>/100, ${groeiPerDag(state, h).toFixed(1).replace('.', ',')} per dag · ${esc(versnellers(state, h))}</div>
     <div class="bh-regel zacht">Bij 100 of na de aftelling barst hij uit: ${esc(uitEff)}.</div>
+    ${lopend}
     ${acties}
   </div>`;
 }

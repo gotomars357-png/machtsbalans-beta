@@ -6,6 +6,8 @@
 import { tegelOp } from '../engine/geografie.js';
 import { woningCapaciteit } from '../engine/samenleving.js';
 import { tekenGebouwDetail } from './detail.js';
+import { OpleveringVolger } from './oplevering.js';
+import { kavelInfo, gebouwSoorten } from './detail.js';
 import { veer, vluchtPlan, nalopen, veegSnelheid, volgendeVerdieping, ankerMidden, begrensPunt, ZOOM_TAU, PIJL_SNELHEID, PIJL_TIK } from './camera.js';
 import { TerreinLaag } from './terrein.js';
 import { zoekPad } from '../engine/leger.js';
@@ -22,6 +24,7 @@ import { ZeeLaag } from './zee.js';
 import { WerkLaag } from './werk.js';
 import { HemelLaag } from './hemel.js';
 import { BrandhaardLaag } from './brandhaard.js';
+import { LevendeKaart } from './pings.js';
 import { Wegennet, KLASSE, KNOOP, PROFIEL, verkeersTijd } from './wegennet.js';
 
 // Vanaf deze zoom tekent de kaart vakjes als echte plekken: huizen, akkers, fabrieken, bomen.
@@ -72,10 +75,13 @@ export class KaartView {
     this.kustLaag = new KustLaag();
     this.grensLaag = new GrensLaag();
     this.stadLaag = new StadLaag();
+    this.oplevering = new OpleveringVolger(); // C14b: bouwstart, oprit en oplevering als kort feest op de kaart
+    this.bouwKandidaat = -1; // C14b: op touch eerst tikken om te zien, dan nog eens om te bouwen
     this.zeeLaag = new ZeeLaag();
     this.werkLaag = new WerkLaag();
     this.hemelLaag = new HemelLaag();
     this.brandLaag = new BrandhaardLaag();
+    this.levend = new LevendeKaart(this);
     this.wegennet = new Wegennet();
     this.wegennetDebug = false; // tekent klassen, knopen en poorten van het net over alles heen
     this.bron = document.createElement('canvas');
@@ -537,14 +543,25 @@ export class KaartView {
   }
 
   klik(e, shift) {
+    if (this.levend?.klikVoor(e, this)) return;
     const [wx, wy] = this.muisWereld(e);
     const t = tegelOp(this.geo, wx, wy);
-    if (this.bouwModus) { this.opties.onPlaats(t); return; }
+    if (this.bouwModus) { this.bouwKlik(e, t); return; }
     const eigen = this.eenheidOp(wx, wy, this.state.speler);
     if (eigen != null) { this.opties.onKlikEenheid(eigen, shift); return; }
+    if (this.levend?.klikVoertuig(e, this, wx, wy)) return;
     if (this.selectie?.size && !shift) { this.selectie.clear(); }
     const r = this.wrap.getBoundingClientRect();
     this.opties.onSelect(this.landOp(wx, wy), t, e.clientX - r.left, e.clientY - r.top);
+  }
+
+  // C14b: in bouwmodus plaatst een muisklik meteen; op touch toont de eerste tik het voorbeeld en de tooltip (die zet
+  // de beweeg-aanroep na de tik in pointerup) en plaatst pas een tweede tik op hetzelfde vakje.
+  bouwKlik(e, t) {
+    // buiten de kaart (t < 0) plaatst een tik nooit, ook niet als tweede tik
+    if (e.pointerType === 'touch' && (t < 0 || t !== this.bouwKandidaat)) { this.bouwKandidaat = t; this.hoverTegel = t; return; }
+    this.bouwKandidaat = -1;
+    this.opties.onPlaats(t);
   }
 
   // ---------- tekenen ----------
@@ -631,6 +648,7 @@ export class KaartView {
     this.animTijd += dt * Math.min(tempo, 4);
 
     this.cameraStap(dt);
+    this.levend?.volgStap(this, dt);
 
     const c = this.canvas.getContext('2d');
     c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
@@ -660,11 +678,15 @@ export class KaartView {
     this.zeeLaag.teken(c, this, sc, nu, dt, tempo);
     this.tekenKoopvaardij(c, sc, nu);
     this.stadLaag.teken(c, this, sc, nu, dt, tempo);
+    this.bouwFrac = tempo > 0 ? frac : (this.bouwFrac ?? 0);
+    if (this.bouwModus !== this._bouwModusVorig) { this._bouwModusVorig = this.bouwModus; this.bouwKandidaat = -1; }
     this.tekenGebouwen(c, sc, detail);
+    this.oplevering.volg(s, nu); this.oplevering.teken(c, this);
     this.grensLaag.teken(c, this, sc, nu, dt, tempo);
     this.levenLaag.teken(c, this, sc, nu, dt, tempo);
     this.werkLaag.teken(c, this, sc, nu, dt, tempo);
     this.natuurLaag.teken(c, this, sc, nu, dt, tempo);
+    if (this.bouwModus) this.tekenBouwVoorbeeld(c, sc);
     this.sfeerLaag.tekenGrond(c, this, sc, nu, frac);
     this.tekenEenheden(c, sc, detail, frac);
     this.infraLaag.tekenLucht(c, this, sc, nu);
@@ -683,6 +705,7 @@ export class KaartView {
     if (this.wegennetDebug) this.tekenNetDebug(c, sc);
     this.tekenStrategisch(c, sc);
     this.tekenMarkeringen(c);
+    this.levend?.teken(c, this);
   }
 
   eenheidPositie(u, frac) {
@@ -1107,23 +1130,88 @@ export class KaartView {
         c.fillRect(x - T / 2 + 1, y - T / 2 + 1, T - 2, T - 2);
       }
     }
-    const ht = this.geo.tegels[this.hoverTegel];
-    if (ht) {
-      const [x, y] = this.naarScherm(ht.x, ht.y);
-      const ok = this.bouwStatus?.get(ht.i)?.ok;
-      c.strokeStyle = ok ? '#ffffff' : '#f2706a';
-      c.lineWidth = 2;
+  }
+
+  // C14b: het voorbeeld van het gebouw op het vakje onder de muis (of de eerste tik), boven bomen, akkers, wegdek en
+  // verkeer. Vanaf MINI de echte tekening op de kavel die het zou krijgen, half doorzichtig, met een gestippeld kader
+  // en de oprit; is er geen poort mogelijk, dan een streepjeslijn naar de dichtstbijzijnde weg (oranje als die ver
+  // is). Daaronder een vectorsilhouet. Geen tekst of emoji.
+  tekenBouwVoorbeeld(c, sc) {
+    const s = this.state, ht = this.geo.tegels[this.hoverTegel];
+    if (!ht || !this.zichtbaar(ht)) return;
+    const T = this.geo.T * sc, [x, y] = this.naarScherm(ht.x, ht.y);
+    const ok = this.bouwStatus?.get(ht.i)?.ok;
+    c.save();
+    if (!ok) {
+      c.strokeStyle = '#f2706a'; c.lineWidth = 2;
       c.strokeRect(x - T / 2, y - T / 2, T, T);
-      if (ok) {
-        const g = s.pack.gebouwIndex[this.bouwModus];
-        c.globalAlpha = 0.7;
-        c.font = `${Math.round(T * 0.6)}px ${EMOJI}`;
-        c.textAlign = 'center';
-        c.textBaseline = 'middle';
-        c.fillText(g.icoon ?? '■', x, y + 1);
-        c.globalAlpha = 1;
-      }
+      c.restore();
+      return;
     }
+    const g = s.pack.gebouwIndex[this.bouwModus];
+    // eerst de schatting uit het huidige net, na een paar beelden het exacte voorbeeld uit een hulpnet
+    this.wegennet?.voorbeeldWerk?.(this, ht.i, g.id, 2);
+    const kc = this.kavelCtx(ht.i, g.id, verkeersTijd(this.nu), true), o = kc.omgeving;
+    const wit = '#ffffff', oranje = '#f0b429';
+    // de lijn naar de weg als er geen poort kan komen (scherm)
+    const aansluiting = o && (o.poort < 0 || o.nieuweWeg) && o.aansluiting ? { p: this.naarScherm(o.aansluiting.x, o.aansluiting.y), ver: o.aansluiting.d > 2 * this.geo.T } : null;
+    if (this.zoom >= MINI) {
+      const soort = g.tekening ?? TEKENING_ALIAS[g.id] ?? g.id, land = s.landen[s.speler];
+      c.globalAlpha = 0.62;
+      const gelukt = tekenGebouwDetail(c, soort, x, y, T, { ...kc, dock: null, // kavelCtx(
+        regime: land.regime, kleur: oranje, tijd: this.nu / 1000, seed: ht.i, actief: false, voorbeeld: true, voortgang: null,
+        eff: 1, aantal: (land.gebouwen[g.id] ?? 0) + 1, niveau: null, L: land.L, capaciteit: this.woningenVan(land), basis: land.basisWoningen, uit: false, nacht: this.nacht ?? 0, dag: s.dag, stab: land.stab, welvaart: land.Y / Math.max(1, s.wereldY / s.landen.length),
+      });
+      c.globalAlpha = 1;
+      let zv = [-0.42, -0.42, 0.42, 0.42];
+      if (o && gelukt) { try { zv = kavelInfo(o, (this._soorten ??= new Set(gebouwSoorten())).has(g.id) ? g.id : soort).zicht; } catch (err) { /* geen kavel */ } }
+      c.strokeStyle = wit;
+      c.lineWidth = Math.max(1, T * 0.012);
+      c.setLineDash([Math.max(2, T * 0.04), Math.max(2, T * 0.03)]);
+      c.strokeRect(x + zv[0] * T, y + zv[1] * T, (zv[2] - zv[0]) * T, (zv[3] - zv[1]) * T);
+      c.lineWidth = Math.max(1.2, T * 0.02);
+      if (o && o.poort >= 0) {
+        c.beginPath(); c.moveTo(x + o.oprit[0] * T, y + o.oprit[1] * T); c.lineTo(x + o.oprit[2] * T, y + o.oprit[3] * T); c.stroke();
+      }
+      if (aansluiting) {
+        c.strokeStyle = aansluiting.ver ? oranje : wit;
+        c.beginPath(); c.moveTo(x, y); c.lineTo(aansluiting.p[0], aansluiting.p[1]); c.stroke();
+      }
+      c.setLineDash([]);
+      if (!gelukt) this.bouwSilhouet(c, x, y, T, o);
+    } else {
+      c.strokeStyle = wit; c.lineWidth = 2;
+      c.strokeRect(x - T / 2, y - T / 2, T, T);
+      if (aansluiting) {
+        c.strokeStyle = aansluiting.ver ? oranje : wit; c.lineWidth = 1.2; c.setLineDash([3, 3]);
+        c.beginPath(); c.moveTo(x, y); c.lineTo(aansluiting.p[0], aansluiting.p[1]); c.stroke();
+        c.setLineDash([]);
+      }
+      this.bouwSilhouet(c, x, y, T, o);
+    }
+    c.restore();
+  }
+
+  // Vectorsilhouet van een gebouw: donker afgerond vierkant van 0,5 T met een streepje naar de poortzijde.
+  bouwSilhouet(c, x, y, T, o) {
+    const h = T * 0.25, r = T * 0.08;
+    c.globalAlpha = 0.85;
+    c.fillStyle = '#141c26'; c.strokeStyle = '#ffffff'; c.lineWidth = Math.max(1, T * 0.03);
+    c.beginPath();
+    c.moveTo(x - h + r, y - h); c.lineTo(x + h - r, y - h); c.quadraticCurveTo(x + h, y - h, x + h, y - h + r);
+    c.lineTo(x + h, y + h - r); c.quadraticCurveTo(x + h, y + h, x + h - r, y + h);
+    c.lineTo(x - h + r, y + h); c.quadraticCurveTo(x - h, y + h, x - h, y + h - r);
+    c.lineTo(x - h, y - h + r); c.quadraticCurveTo(x - h, y - h, x - h + r, y - h);
+    c.closePath(); c.fill(); c.stroke();
+    let dx = 0, dy = 0;
+    if (o && o.poort >= 0) [dx, dy] = [[0, -1], [1, 0], [0, 1], [-1, 0]][o.poort];
+    else if (o?.aansluiting) { const ax = o.aansluiting.x - this.geo.tegels[o.t].x, ay = o.aansluiting.y - this.geo.tegels[o.t].y, l = Math.hypot(ax, ay) || 1; dx = ax / l; dy = ay / l; }
+    if (dx || dy) {
+      c.lineWidth = Math.max(1.5, T * 0.06); c.lineCap = 'round';
+      c.beginPath(); c.moveTo(x + dx * h, y + dy * h); c.lineTo(x + dx * T * 0.48, y + dy * T * 0.48); c.stroke();
+      c.lineCap = 'butt';
+    }
+    c.globalAlpha = 1;
   }
 
   // Het wegennet. Op zoom 1,5 tot 4,4 als overzichtslijnen; daarna eenvoudig asfalt op de breedte uit PROFIEL, zolang
@@ -1383,14 +1471,22 @@ export class KaartView {
         this.tekenGebouw(c, land, p.t, p.g, T, rand, detail, null, p.eff, p);
         if ((p.uit ?? 0) > s.dag && p.t >= 0 && this.zichtbaar(this.geo.tegels[p.t])) tekenUitval(c, ...this.naarScherm(this.geo.tegels[p.t].x, this.geo.tegels[p.t].y), Math.max(4, T), this.nu, this.zoom >= MINI);
       }
-      for (const b of land.bouw) this.tekenGebouw(c, land, b.tegel, b.gebouw, T, rand, detail, (s.dag - b.start) / Math.max(1, b.klaar - b.start), 1);
+      // C14b: vloeiende voortgang uit dag + dagfractie (bij pauze blijft de fractie staan); oude saves zonder start
+      for (const b of land.bouw) {
+        const start = b.start ?? b.klaar - (P.gebouwIndex[b.gebouw]?.bouwtijd ?? 5);
+        this.tekenGebouw(c, land, b.tegel, b.gebouw, T, rand, detail, clamp((s.dag + (this.bouwFrac ?? 0) - start) / Math.max(1, b.klaar - start), 0, 0.999), 1);
+      }
     }
   }
 
   // Wat een gebouw van zijn kavel weet: de omgeving uit het net, de stand van zijn dock, de verkeersklok en de echte
   // gebouw-id (de tekening kan een alias zijn).
-  kavelCtx(t, gebouw, u) {
-    return { omgeving: this.wegennet?.omgeving(t) ?? null, dock: this.levenLaag?.dockStand?.(t, u) ?? null, u, gebouw };
+  kavelCtx(t, gebouw, u, voorbeeld = false) {
+    let omgeving = this.wegennet?.omgeving(t) ?? null;
+    // C14b: een nieuwe bouwplaats waarvoor het net nog niet opnieuw gebouwd is, staat al op de kavel die hij krijgt; het
+    // voorbeeld in bouwmodus op de kavel die hij zou krijgen
+    if (!omgeving && (voorbeeld || this.state.bezet[t]?.bouw)) omgeving = this.wegennet?.voorbeeldOmgeving?.(t, gebouw, this.state.pack) ?? null;
+    return { omgeving, dock: this.levenLaag?.dockStand?.(t, u) ?? null, u, gebouw };
   }
 
   // Het merkje van een gebouw op de middenzoom: een rond schildje midden op de kavel, klein genoeg dat de grond, de
@@ -1411,10 +1507,10 @@ export class KaartView {
   vakjeMaat(T) { return clamp(T * 0.26, 6, 20); }
 
   // Klein merkje op een verkleinde tekening (MINI tot DIEP): wat er staat en van wie, verdwijnt bij verder inzoomen.
-  merk(c, x, y, T, rand, icoon, voortgang = null) {
+  merk(c, x, y, T, rand, icoon, voortgang = null, pop = 1) {
     const a = 1 - smooth(3.3, DIEP, this.zoom);
     if (a <= 0.02) return;
-    const m = clamp(T * 0.15, 6, 12);
+    const m = clamp(T * 0.15, 6, 12) * pop; // pop: C14b, kort groter bij een oplevering
     c.globalAlpha = a;
     c.fillStyle = 'rgba(10,15,21,0.78)'; c.strokeStyle = rand; c.lineWidth = Math.max(1.2, m * 0.18);
     c.beginPath(); c.arc(x, y, m, 0, Math.PI * 2); c.fill(); c.stroke();
@@ -1434,14 +1530,16 @@ export class KaartView {
     const [x, y] = this.naarScherm(tegel.x, tegel.y);
     if (this.zoom >= MINI) {
       const soort = g.tekening ?? TEKENING_ALIAS[g.id] ?? g.id;
+      let kc;
       const gelukt = tekenGebouwDetail(c, soort, x, y, T, {
-        ...this.kavelCtx(t, g.id, verkeersTijd(this.nu)),
+        ...(kc = this.kavelCtx(t, g.id, verkeersTijd(this.nu))),
         regime: land.regime, kleur: rand, tijd: this.nu / 1000, seed: t,
         actief: voortgang == null && (eff ?? 1) > 0, voortgang: voortgang == null ? null : clamp(voortgang, 0, 1),
         eff: eff ?? 1, aantal: land.gebouwen[gebouwId] ?? 1, niveau: p?.niveau ?? null, L: land.L, capaciteit: this.woningenVan(land), basis: land.basisWoningen, uit: (p?.uit ?? 0) > this.state.dag, nacht: this.nacht ?? 0, dag: this.state.dag, stab: land.stab, welvaart: land.Y / Math.max(1, this.state.wereldY / this.state.landen.length),
       });
       if (gelukt) {
-        if (this.zoom < DIEP) { this.merk(c, x, y, T, rand, g.icoon ?? '■', voortgang); return; }
+        if (this.zoom < DIEP) { this.merk(c, x, y, T, rand, g.icoon ?? '■', voortgang, voortgang == null ? this.oplevering?.popVan(t) ?? 1 : 1); return; }
+        if (voortgang != null && land.idx === this.state.speler) this.voortgangsBoog(c, x, y, T, kc.omgeving, soort, g.id, voortgang);
         if (voortgang == null && eff < 0.95 && land.idx === this.state.speler) {
           c.font = `600 ${Math.max(9, Math.round(T * 0.13))}px -apple-system, sans-serif`;
           c.fillStyle = eff < 0.7 ? '#f2706a' : '#f0b429';
@@ -1478,6 +1576,19 @@ export class KaartView {
       c.fillStyle = eff < 0.7 ? '#f2706a' : '#f0b429';
       c.fillText(`${Math.round(eff * 100)}%`, x, y - this.vakjeMaat(T) - Math.max(5, T * 0.12));
     }
+  }
+
+  // C14b: voortgangsboog op een bouwplaats van de speler (vanaf DIEP): donker schijfje op de zuidoosthoek van de kavel
+  // met een gouden boog over de voortgang, zonder tekst.
+  voortgangsBoog(c, x, y, T, o, soort, id, v) {
+    let hx = 0.42, hy = 0.42;
+    if (o) { try { const k = kavelInfo(o, (this._soorten ??= new Set(gebouwSoorten())).has(id) ? id : soort); hx = k.x1; hy = k.y1; } catch (err) { /* geen kavel */ } }
+    const r = clamp(T * 0.035, 5, 11), bx = x + hx * T - r - 2, by = y + hy * T - r - 2;
+    c.fillStyle = 'rgba(12,19,27,0.82)';
+    c.beginPath(); c.arc(bx, by, r, 0, Math.PI * 2); c.fill();
+    c.strokeStyle = '#f0b429'; c.lineWidth = Math.max(1.5, r * 0.32); c.lineCap = 'round';
+    c.beginPath(); c.arc(bx, by, r * 0.66, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * clamp(v, 0, 1)); c.stroke();
+    c.lineCap = 'butt';
   }
 
   tekenStrategisch(c, sc) {

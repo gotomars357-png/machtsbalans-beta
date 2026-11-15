@@ -24,7 +24,7 @@
       "tab": "volk",
       "doel": { "soort": "tegel", "gebouw": "woonwijk", "bij": "hoofdstad" },
       "klaar": { "gebouw": "woonwijk", "minimaal": 1 },
-      "hint": "Kies Woonwijk in Volk en klik op een vrije tegel naast je hoofdstad."
+      "hint": "Kies Woonwijk in Volk en klik op een vrije tegel naast je hoofdstad. Op een telefoon tik je het vakje twee keer aan."
     },
     {
       "id": "tijd",

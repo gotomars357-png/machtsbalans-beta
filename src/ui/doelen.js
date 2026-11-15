@@ -180,8 +180,11 @@ export function brandhaardDoel(s) {
   const soort = brandhaardSoort(s, h.soort);
   const a = goedkoopsteActie(s, h) ?? goedkoopsteActie(s, h, false);
   const geld = s.pack.rollen.geld;
-  const waarom = a
-    ? `Goedkoopste aanpak: ${a.naam.toLowerCase()} voor ${a.kosten?.[geld] ?? 0} ${(s.pack.resIndex[geld]?.naam ?? geld).toLowerCase()}.`
+  const loopt = h.wacht?.[0];
+  const waarom = loopt
+    ? `${(soort?.acties?.find((x) => x.id === loopt.actie)?.naam ?? 'Overleg')} loopt: nog ${Math.max(0, loopt.dag - s.dag)} dagen, dan druk ${loopt.druk}.`
+    : a
+    ? `Goedkoopste aanpak: ${a.naam.toLowerCase()} voor ${a.kosten?.[geld] ?? 0} ${(s.pack.resIndex[geld]?.naam ?? geld).toLowerCase()}.${(a.vertraging_dagen ?? 0) > 0 ? ` Praat op tijd: na ${a.vertraging_dagen} dagen.` : ''}`
     : 'Alle aanpakken zijn gebruikt: houd de stabiliteit op peil tot hij voorbij is.';
   return { id: `brandhaard:${h.id}`, soort: 'dreiging', titel: `${soort?.naam ?? 'Brandhaard'}: nog ${n} ${n === 1 ? 'dag' : 'dagen'}`, waarom, voortgang: 1 - Math.max(0, Math.min(100, h.druk)) / 100, naar: { tegel: h.tegel } };
 }

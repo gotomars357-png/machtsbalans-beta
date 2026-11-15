@@ -20,6 +20,8 @@ export const DEFAULT_FILES = {
   eenheden: 'military/eenheden.json',
   regimes: 'actors/regimes.json',
   brandhaarden: 'events/brandhaarden.json',
+  krant: 'story/krant.json',
+  rivalen: 'actors/rivalen.json',
 };
 
 export const TOEGESTANE_LICENTIES = ['CC-BY-4.0', 'CC-BY-SA-4.0', 'CC0-1.0', 'MIT'];
@@ -117,6 +119,78 @@ export const DEFAULT_REGIMES = {
     effecten: { stabiliteit: 3, handel_bonus: 0.1, productiviteit: 0.02 },
     beschrijving: 'Gematigd en stabiel: kleine voordelen overal, geen grote zwaktes.' },
 };
+
+// C14 De Krant: koppen per soort moment, voor packs zonder story/krant.json. Alleen de weergave (src/ui/krant.js)
+// leest dit; de engine niet. Plaatshouders: {land} {blok} {speler} {spelerblok} {leider} {rivaal} {rivaalland}
+// {fase} {aandeel} {haard} {jaar}.
+export const DEFAULT_KRANT = {
+  naam: 'Het Kaartblad',
+  koppen: {
+    start: { goed: ['{speler} begint aan een nieuw hoofdstuk', 'Nieuwe regering in {speler} aan de slag'], slecht: [],
+      sub: ['De buurlanden wachten de eerste besluiten af', 'Wie nu bouwt, oogst later', '{rivaal} van {rivaalland} heeft van de vorige keer geleerd', 'In {rivaalland} wacht {rivaal} op zijn kans'] },
+    aansluiting: { goed: ['{land} sluit zich aan bij {spelerblok}', '{spelerblok} groeit: ook {land} doet mee'], slecht: [],
+      sub: ['Nieuwe handelsafspraken volgen snel', 'De andere blokken reageren koel'] },
+    afvallig: { goed: [], slecht: ['{land} verlaat {spelerblok}', 'Breuk tussen {land} en {spelerblok}'],
+      sub: ['Wie het land terugwint, is nog open', 'Ministers spreken van een tegenvaller'] },
+    aandeel: { goed: ['{spelerblok} levert nu {aandeel} van de wereldproductie', 'Groei houdt aan: {spelerblok} op {aandeel}'], slecht: [],
+      sub: ['De fabrieken draaien op volle toeren', 'Concurrenten kijken met argwaan naar de cijfers'] },
+    bijna: { goed: ['Overwicht binnen bereik voor {spelerblok}', 'Nog even en {spelerblok} heeft de overhand'],
+      slecht: ['{blok} nadert het overwicht', 'Zorgen in {speler}: {blok} staat op winst'],
+      sub: ['De komende maanden zijn beslissend', 'Wie nu aarzelt, raakt achterop'] },
+    fase: { goed: ['Een nieuwe tijd breekt aan: {fase}', 'De wereld gaat door naar {fase}'], slecht: [],
+      sub: ['Nieuwe kansen, nieuwe risico\'s', 'De blokken zoeken hun plek opnieuw'] },
+    oorlog: { goed: [], slecht: ['Oorlog: {speler} in gevecht', '{spelerblok} trekt ten strijde'],
+      sub: ['Rekruten melden zich bij de kazernes', 'De handel komt stil te liggen'] },
+    vrede: { goed: ['De wapens zwijgen: vrede voor {speler}', 'Vredesakkoord getekend'], slecht: [],
+      sub: ['Soldaten keren terug naar huis', 'De wederopbouw kan beginnen'] },
+    haard_opgelost: { goed: ['Onrust bezworen: {haard} opgelost', 'Regering van {speler} grijpt op tijd in'], slecht: [],
+      sub: ['De rust keert terug in de straten', 'Bewoners zijn opgelucht'] },
+    haard_uitgebarsten: { goed: [], slecht: ['Uit de hand gelopen: {haard} in {speler}', 'Te laat: onrust slaat om in chaos'],
+      sub: ['De regering staat onder druk', 'Herstel gaat maanden duren'] },
+    verkiezing: { goed: ['Verkiezingen gewonnen: nieuw mandaat', 'Kiezers geven {speler} vertrouwen'], slecht: [],
+      sub: ['De opkomst was hoog', 'De oppositie belooft scherpe controle'] },
+    hervorming: { goed: ['Staatshervorming: {speler} kiest een nieuwe bestuursvorm', 'Nieuwe grondregels voor {speler}'], slecht: [],
+      sub: ['Niet iedereen is blij met de koerswijziging', 'Partners vragen om uitleg'] },
+    kolonie: { goed: ['Kolonie gesticht: {speler} vestigt zich overzee', 'Eerste kolonisten van {speler} gaan aan land'], slecht: [],
+      sub: ['Het nieuwe gebied heeft nog alles nodig', 'Het centrum werkt als nieuw knooppunt'] },
+    einde_winst: { goed: ['{spelerblok} wint de strijd om de wereld', 'Historische dag voor {speler}'], slecht: [],
+      sub: ['Een tijdperk is ten einde', 'In de hoofdstad wordt gefeest'] },
+    einde_verlies: { goed: [], slecht: ['Het spel is uit voor {speler}', 'Nederlaag voor {spelerblok}'],
+      sub: ['Een volgende generatie krijgt een nieuwe kans', 'De lessen worden al opgeschreven'] },
+  },
+};
+
+// C14 Rivalen met geheugen: wat een AI-blokleider leerde van jouw vorige potje. 'na' zegt wanneer (eerste die past
+// geldt), 'effecten' telt op bij zijn regime (zelfde velden als doctrines, binnen de halve doctrinegrenzen), en elke
+// les heeft een voordeel en een nadeel. Na jouw verlies krijgt de rivaal vooral een zwakke plek: het volgende potje
+// wordt dan niet zwaarder.
+export const DEFAULT_RIVALEN = [
+  { id: 'bewapening', naam: 'Rust zich uit', na: { winst_oorlog: true },
+    effecten: { leger_korting: 0.06, stabiliteit: -2 },
+    tekst: '{leider} van {land} zag jou winnen met wapens in de hand. Hij rust zich nu uit.',
+    tegenzet: 'Dus probeer hem te verslaan zonder oorlog: zijn volk is onrustig van alle kazernes.',
+    kop: '{rivaal} van {rivaalland} bouwt zijn leger op' },
+  { id: 'markt', naam: 'Beschermt zijn markt', na: { winst_route: 'aandeel_productie' },
+    effecten: { handel_bonus: 0.06, bouw_korting: -0.04 },
+    tekst: '{leider} van {land} zag jouw economie winnen. Hij beschermt nu zijn markt.',
+    tegenzet: 'Dus probeer hem via landen en coalities te omsingelen: bouwen is voor hem duurder.',
+    kop: '{rivaal} van {rivaalland} schermt zijn markt af' },
+  { id: 'afscherming', naam: 'Schermt zijn volk af', na: { winst_route: 'aantal_landen' },
+    effecten: { informatiecontrole: 3, productiviteit: -0.03 },
+    tekst: '{leider} van {land} zag landen naar jou overlopen. Hij schermt zijn volk nu af.',
+    tegenzet: 'Dus probeer hem economisch voorbij te groeien: zijn fabrieken werken trager.',
+    kop: '{rivaal} van {rivaalland} houdt de pers aan de lijn' },
+  { id: 'kennis', naam: 'Koopt kennis in', na: { winst_route: 'tech_factor' },
+    effecten: { tech_groei: 0.000008, handel_bonus: -0.05 },
+    tekst: '{leider} van {land} zag jouw techniek winnen. Hij koopt nu kennis in.',
+    tegenzet: 'Dus probeer hem via de handel te raken: zijn handel levert minder op.',
+    kop: '{rivaal} van {rivaalland} investeert in laboratoria' },
+  { id: 'overmoedig', naam: 'Overmoedig', na: { verlies: true },
+    effecten: { complot_gevoeligheid: 0.12, stabiliteit: -1, productiviteit: 0.01 },
+    tekst: '{leider} van {land} versloeg jou en is overmoedig geworden.',
+    tegenzet: 'Dus probeer zijn volk te bespelen met media en netwerken: hij is vatbaar voor complotten.',
+    kop: '{rivaal} van {rivaalland} voelt zich onaantastbaar' },
+];
 
 export const DEFAULT_RESOURCES = [
   { id: 'energie', naam: 'Energie', rol: 'energie', icoon: '⚡', kleur: '#f2c14e', start: 120, opslag_max: 500,
@@ -321,8 +395,8 @@ export const ZWEVEND = { id: 'zwevend', naam: 'Zwevend', kleur: '#7d8590' };
 export const DEFAULT_DOCTRINES = [
   { id: 'bouwer', naam: 'De Bouwer', tekst: 'Je bouwt 8% goedkoper. Het tempo vraagt veel van je mensen: stabiliteit −1.',
     effecten: { bouw_korting: 0.08, stabiliteit: -1 }, ontgrendel: { start: true }, embleem: 'kraan' },
-  { id: 'handelsvorst', naam: 'De Handelsvorst', tekst: '11% meer inkomsten uit handel. Je leger is 10% duurder, want het geld zit in schepen en contracten.',
-    effecten: { handel_bonus: 0.11, leger_korting: -0.1 }, ontgrendel: { start: true }, embleem: 'schip' },
+  { id: 'handelsvorst', naam: 'De Handelsvorst', tekst: '11% meer inkomsten uit handel. Je leger is 6% duurder, want het geld zit in schepen en contracten.',
+    effecten: { handel_bonus: 0.11, leger_korting: -0.06 }, ontgrendel: { start: true }, embleem: 'schip' },
   { id: 'omroepbaas', naam: 'De Omroepbaas', tekst: 'Meer grip op wat je volk ziet: informatiecontrole +4. Wie alles stuurt, wekt argwaan: 25% vatbaarder voor complotten.',
     effecten: { informatiecontrole: 4, complot_gevoeligheid: 0.25 }, ontgrendel: { orders: { type: 'media', minimaal: 12 } }, embleem: 'mast' },
   { id: 'fluisteraar', naam: 'De Fluisteraar', tekst: 'Je hoort de geruchten voordat ze rondgaan: 12% minder vatbaar voor complotten. In een oorlog vertrouwt je volk je minder: strijdbereidheid −4.',
@@ -330,5 +404,5 @@ export const DEFAULT_DOCTRINES = [
   { id: 'veldheer', naam: 'De Veldheer', tekst: 'Je leger is 12% goedkoper. Een land dat in de kazerne leeft, mort: stabiliteit −3.',
     effecten: { leger_korting: 0.12, stabiliteit: -3 }, ontgrendel: { potjes: 3 }, embleem: 'schild' },
   { id: 'hervormer', naam: 'De Hervormer', tekst: 'Je technologie groeit sneller. Niet iedereen vertrouwt al dat nieuwe: 10% vatbaarder voor complotten.',
-    effecten: { tech_groei: 0.000006, complot_gevoeligheid: 0.1 }, ontgrendel: { winst_route: 'aantal_landen' }, embleem: 'kolf' },
+    effecten: { tech_groei: 0.000009, complot_gevoeligheid: 0.1 }, ontgrendel: { winst_route: 'aantal_landen' }, embleem: 'kolf' },
 ];

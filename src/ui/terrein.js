@@ -38,6 +38,15 @@
 //   seizoenswissel niet hapert; geheugen ruim onder de grens (lege maskers worden niet bewaard).
 
 import { seizoen, wind } from './seizoen.js';
+import { budget, begin as beginBeeld, verbruik, echtNu, MIN_STAP } from './bakbudget.js';
+
+const OPKOMST_MS = 180; // een vers gebakken brok die een terugval vervangt, komt in zoveel ms op (C14d)
+const GROOT_STAP = 4; // een stap die zoveel ms kost, gaat niet door als er dit beeld al gebakken is
+let stilBeeld = null;
+const geenBeweging = () => {
+  if (stilBeeld == null) { try { stilBeeld = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { stilBeeld = false; } }
+  return stilBeeld;
+};
 
 const W = 1000, H = 620;
 const CH = 64; // brok in wereldeenheden (4x4 vakjes)
@@ -56,6 +65,7 @@ const POOL_BYTES = 5 * 1024 * 1024; // herbruikbare canvassen
 const BAK_BUDGET = 1.5; // werk per frame aan bakken, in geschatte milliseconden; één stap gaat altijd door
 const MAX_PRIMITIEVEN = 1500; // scherpe kenmerken per frame
 const GROF_PER_FRAME = 6; // werk aan nieuwe terugvalversies per frame: 1 per stuk (~0,3 ms), 3 als de grondgegevens nog ontbreken (~2,5 ms)
+const GROF_MS = { rust: 3, vlucht: 1.5 }; // C14d: daarnaast een echte tijdgrens per beeld; de eerste gaat altijd door
 const PATROON_SPAN = CH / 6; // wereldeenheden per herhaling van een detailpatroon; 6 passen precies in een brok
 
 // Terreinsoorten in de gewichten.
@@ -2841,6 +2851,9 @@ export class TerreinLaag {
     this.grofBytes = 0;
     this.klaar = null; // per brok in de laatste frame: 2 actueel gebakken, 1 echte (oudere) grond, 0 alleen de terugval
     this.klaarFrame = -1;
+    this.factor = [1, 1, 1, 1, 1, 1]; // per bakstap: glijdend gemiddelde van echte tegen geschatte duur (C14d)
+    this.limiet = 1.5; // werkbudget van dit beeld (ms), uit bakbudget.js
+    this.klaarLog = []; // per beeld [klaar 0, 1, 2] van de zichtbare brokken (de laatste 240), voor kijk.mjs
     this.paletten = new Map(); // seizoensstap -> palet, hooguit 3
     this.optBak = { schaduw: true, zwaai: null, pal: null, wind: null, emmers: nieuweEmmers(), fase: 0, atlas: null };
     this.optScherp = { schaduw: false, zwaai: 0, pal: null, wind: null, emmers: nieuweEmmers(), atlas: null };
@@ -3185,11 +3198,17 @@ export class TerreinLaag {
   werkAan(view) {
     const tk = this.taak;
     this._dag = view.state.dag;
+    const limiet = this.limiet ?? BAK_BUDGET;
     while (tk.stap < 6) {
-      const kost = this.stapKosten(tk);
-      if (this.werk > 0 && this.werk + kost > BAK_BUDGET) return null;
-      this.werk += kost;
+      // C14d: de schatting bijgesteld met de echte duur van eerdere stappen (nooit onder een kwart, zodat een nepklok
+      // die 0 meet hem niet naar nul trekt); een grote stap alleen in een beeld waarin nog niets gebakken is.
+      const geschat = this.stapKosten(tk), st = tk.stap, kost = geschat * this.factor[st];
+      if (this.werk > 0 && (kost >= GROOT_STAP || this.werk + kost > limiet)) return null;
+      const t0 = echtNu();
       this.bakStap(view, tk);
+      const echt = echtNu() - t0;
+      this.factor[st] = Math.max(0.25, this.factor[st] * 0.8 + 0.2 * (echt / Math.max(0.01, geschat)));
+      this.werk += Math.max(MIN_STAP, echt, kost * 0.25);
       tk.stap++;
     }
     const { R, ck, cr } = tk, S = CH * R, sleutel = `${R}:${ck}:${cr}`, oud = this.cache.get(sleutel);
@@ -3451,12 +3470,27 @@ export class TerreinLaag {
 
   // ---- elke frame ----
 
+  // Aandeel brokken per klaar-soort over de laatste n beelden (kijk.mjs drukt het af na --meet).
+  ongebakken(n = 120) {
+    const L = this.klaarLog.slice(-n);
+    if (!L.length) return null;
+    let a = 0, b = 0, c = 0, ergst = 0;
+    for (const [x, y, z] of L) { const t = x + y + z || 1; a += x / t; b += y / t; c += z / t; ergst = Math.max(ergst, x / t); }
+    const p = (v) => `${Math.round((100 * v) / L.length)}%`;
+    return `${L.length} beelden met grond: gemiddeld alleen terugval ${p(a)}, oudere grond ${p(b)}, actueel ${p(c)}; ergste beeld ${Math.round(100 * ergst)}% terugval`;
+  }
+
   teken(c, view, sc, nu) {
     if (!this.basis || view.geo !== this.geo) return;
     this.frame += 1;
+    // C14d: terrein tekent als eerste van de gebakken lagen en zet het gedeelde budget van dit beeld
+    const vlucht = !!view.doel?.plan;
+    beginBeeld(nu, vlucht, view);
     zetNet(this.basis, view.wegennet);
     const zoom = view.zoom;
-    if (zoom < 1.9) return;
+    if (zoom < 1.9) { if (vlucht) this.grondVooruit(view); return; }
+    this.limiet = Math.max(0, budget.over);
+    const bakStart = echtNu();
     const a = this.dekking(zoom);
     const s = view.state, dpr = view.dpr || 1;
     const [wx0, wy0] = view.naarWereld(0, 0), [wx1, wy1] = view.naarWereld(view.w, view.h);
@@ -3478,6 +3512,7 @@ export class TerreinLaag {
     this.werk = 0;
     const tk = this.taak;
     let taakGeldig = false;
+    let nieuwBeste = null, nd = Infinity; // tijdens een vlucht: de dichtste zichtbare brok die nog nergens bestaat
     for (let cr = r0; cr <= r1; cr++) {
       for (let ck = k0; ck <= k1; ck++) {
         this.brokSig(s, ck, cr);
@@ -3492,6 +3527,10 @@ export class TerreinLaag {
         // ontbreekt hij nog, dan dezelfde brok op een andere resolutie; anders schijnt de kaart eronder door
         if (!br) for (const l of LODS) { br = this.cache.get(`${l}:${ck}:${cr}`); if (br) break; }
         if (br) { br.gebruikt = this.frame; getekend.push(br); } else ontbreekt.push(ck, cr);
+        if (!br && vlucht) {
+          const d = (ck * CH + CH / 2 - mx) ** 2 + (cr * CH + CH / 2 - my) ** 2;
+          if (d < nd) { nd = d; nieuwBeste = { ck, cr, R: 3, sig, polSig, z: this._z }; }
+        }
         // 2 actueel gebakken; 1 echte grond van een vorig seizoen, oude wegen of een andere resolutie (daarop mogen
         // natuur, werk, kust en zee gewoon doortekenen, anders verdwijnt alles om de 12 dagen); 0 alleen de terugval
         this.klaar[cr * this.kolC + ck] = !br ? 0 : br.R === R && br.sig === sig ? 2 : 1;
@@ -3502,7 +3541,15 @@ export class TerreinLaag {
     // werk is, gaat weg. Een brok dat nog nooit gebakken is, krijgt eerst een frame voor zijn grondgegevens.
     const pal = this.palVoor(s.dag);
     if (!pal.atlas || pal.atlas.klaar < BOOM_TOTAAL) this.bouwAtlasStuk(pal, 12);
-    if (tk && !taakGeldig) {
+    // Tijdens een vlucht (C14d): eerst de brokken van het doel, vanuit het doelmidden; dan een zichtbare brok die nog op
+    // geen enkele resolutie bestaat, op R 3 (echte grond in plaats van de terugval). Een brok die al op een andere
+    // resolutie bestaat, wordt tijdens de vlucht niet opnieuw gebakken. Na de landing alles zoals altijd.
+    if (vlucht) beste = this.doelBrok(view, glob, stap) ?? nieuwBeste;
+    if (tk && !taakGeldig && vlucht) {
+      // een taak voor het doel of een nieuwe brok mag doorlopen zolang hij nog klopt
+      this.brokSig(s, tk.ck, tk.cr);
+      if (tk.sig !== `${glob}${this._e}|${this._z}|${stap}`) this.breekAf();
+    } else if (tk && !taakGeldig) {
       const buiten = tk.ck < k0 || tk.ck > k1 || tk.cr < r0 || tk.cr > r1;
       if (!buiten || beste) this.breekAf();
       else {
@@ -3514,19 +3561,26 @@ export class TerreinLaag {
       if (beste) {
         if (!this.basis.grond[beste.cr * this.kolC + beste.ck]) { this.grondVan(beste.ck, beste.cr); this.werk += 2.5; }
         else this.begin(view, beste);
-      } else this.voorbak(view, k0, k1, r0, r1, R, glob, mx, my);
+      } else if (!vlucht) this.voorbak(view, k0, k1, r0, r1, R, glob, mx, my);
     }
-    if (this.taak && this.werk < BAK_BUDGET) {
+    if (this.taak && this.werk < this.limiet) {
       const br = this.werkAan(view);
       if (br) {
         getekend.push(br);
         if (br.sig && br.ck >= k0 && br.ck <= k1 && br.cr >= r0 && br.cr <= r1) {
           this.klaar[br.cr * this.kolC + br.ck] = br.R === R ? 2 : Math.max(1, this.klaar[br.cr * this.kolC + br.ck]);
-          for (let q = 0; q < ontbreekt.length; q += 2) if (ontbreekt[q] === br.ck && ontbreekt[q + 1] === br.cr) { ontbreekt.splice(q, 2); break; }
+          for (let q = 0; q < ontbreekt.length; q += 2) if (ontbreekt[q] === br.ck && ontbreekt[q + 1] === br.cr) { ontbreekt.splice(q, 2); br.opT = nu; break; }
         }
       }
     }
+    verbruik(echtNu() - bakStart);
     this.klaarFrame = this.frame;
+    {
+      let n0 = 0, n1 = 0, n2 = 0;
+      for (let cr = r0; cr <= r1; cr++) for (let ck = k0; ck <= k1; ck++) { const v = this.klaar[cr * this.kolC + ck]; if (v === 2) n2++; else if (v === 1) n1++; else n0++; }
+      this.klaarLog.push([n0, n1, n2]);
+      if (this.klaarLog.length > 240) this.klaarLog.splice(0, this.klaarLog.length - 240);
+    }
     this._naar = { cx: view.cx, cy: view.cy, sc, w: view.w, h: view.h, dpr };
     if (a <= 0) return;
 
@@ -3545,19 +3599,32 @@ export class TerreinLaag {
     }
     // nog nooit gebakken: de grove terugvalversie (hooguit GROF_PER_FRAME nieuwe per frame; de grondgegevens zijn
     // daarna ook klaar voor het echte bakken)
-    let budget = GROF_PER_FRAME;
+    let grofBudget = GROF_PER_FRAME, grofEerste = true;
+    const grofT0 = echtNu(), grofMs = vlucht ? GROF_MS.vlucht : GROF_MS.rust;
     for (let q = 0; q < ontbreekt.length; q += 2) {
       const ck = ontbreekt[q], cr = ontbreekt[q + 1], ci = cr * this.kolC + ck;
       const vers = this.grof.get(ci)?.stap !== stap, duur = !this.basis.grond[ci];
-      const cv = this.grofVan(view, ck, cr, budget > 0);
-      if (vers && budget > 0) budget -= duur ? 3 : 1;
+      const mag = grofBudget > 0 && (grofEerste || echtNu() - grofT0 < grofMs);
+      const cv = this.grofVan(view, ck, cr, mag);
+      if (vers && mag) { grofBudget -= duur ? 3 : 1; grofEerste = false; }
       if (!cv) continue;
       const x = naarX(ck * CH), y = naarY(cr * CH);
       c.drawImage(cv, MARGE, MARGE, CH, CH, x, y, naarX(ck * CH + CH) - x, naarY(cr * CH + CH) - y);
     }
     for (const br of getekend) {
-      const x = naarX(br.ck * CH), y = naarY(br.cr * CH);
-      c.drawImage(br.grond, x, y, naarX(br.ck * CH + CH) - x, naarY(br.cr * CH + CH) - y);
+      const x = naarX(br.ck * CH), y = naarY(br.cr * CH), bw = naarX(br.ck * CH + CH) - x, bh = naarY(br.cr * CH + CH) - y;
+      // C14d: een vers gebakken brok die de terugval vervangt, komt in OPKOMST_MS op over die terugval
+      const op = br.opT != null && !geenBeweging() ? (nu - br.opT) / OPKOMST_MS : 1;
+      if (op < 1 && op >= 0) {
+        const cv = this.grofVan(view, br.ck, br.cr, false);
+        if (cv) c.drawImage(cv, MARGE, MARGE, CH, CH, x, y, bw, bh);
+        c.globalAlpha = a * Math.max(0, op);
+        c.drawImage(br.grond, x, y, bw, bh);
+        c.globalAlpha = a;
+        continue;
+      }
+      br.opT = null;
+      c.drawImage(br.grond, x, y, bw, bh);
     }
     // bewegend water en aanrollend schuim
     if (zoom >= 3) this.tekenWater(c, view, sc, nu, a, getekend, naarX, naarY);
@@ -3597,6 +3664,53 @@ export class TerreinLaag {
       }
     }
     c.restore();
+  }
+
+  // Tijdens een vlucht onder zoom 1.9 (C14d): die beelden zijn goedkoop, dus alvast de grondgegevens van het doel
+  // uitrekenen (de duurste stap van een eerste terugval en van het bakken), dichtst bij het doelmidden eerst, één per beeld.
+  grondVooruit(view) {
+    const d = view.doel;
+    if (!d?.plan || d.zoom < 1.9 || !(budget.over > 0)) return;
+    const sd = Math.min(view.w / 1000, view.h / 620) * d.zoom;
+    const hw = view.w / 2 / sd, hh = view.h / 2 / sd;
+    const k0 = Math.max(0, Math.floor((d.x - hw) / CH)), k1 = Math.min(this.kolC - 1, Math.floor((d.x + hw) / CH));
+    const r0 = Math.max(0, Math.floor((d.y - hh) / CH)), r1 = Math.min(this.rijC - 1, Math.floor((d.y + hh) / CH));
+    let beste = -1, bd = Infinity;
+    for (let cr = r0; cr <= r1; cr++) for (let ck = k0; ck <= k1; ck++) {
+      if (this.basis.grond[cr * this.kolC + ck]) continue;
+      const dd = (ck * CH + CH / 2 - d.x) ** 2 + (cr * CH + CH / 2 - d.y) ** 2;
+      if (dd < bd) { bd = dd; beste = cr * this.kolC + ck; }
+    }
+    if (beste < 0) return;
+    const t = echtNu();
+    this.grondVan(beste % this.kolC, Math.floor(beste / this.kolC));
+    verbruik(echtNu() - t);
+  }
+
+  // De brok van het vluchtdoel die als eerste gebakken moet worden: in het doelkader, op de resolutie van de doelzoom,
+  // de dichtste bij het doelmidden die nog niet actueel gebakken is (C14d). null als het doel klaar is of er geen is.
+  doelBrok(view, glob, stap) {
+    const d = view.doel;
+    if (!d?.plan) return null;
+    const dpr = view.dpr || 1, sd = Math.min(view.w / 1000, view.h / 620) * d.zoom;
+    let R = LODS.find((l) => l >= sd * dpr * 0.6) ?? 12;
+    const hw = view.w / 2 / sd, hh = view.h / 2 / sd;
+    const k0 = Math.max(0, Math.floor((d.x - hw) / CH)), k1 = Math.min(this.kolC - 1, Math.floor((d.x + hw) / CH));
+    const r0 = Math.max(0, Math.floor((d.y - hh) / CH)), r1 = Math.min(this.rijC - 1, Math.floor((d.y + hh) / CH));
+    const zichtbaar = (k1 - k0 + 1) * (r1 - r0 + 1);
+    while (R > 3 && zichtbaar * (CH * R * CH * R * 4 + 3 * MN * MN * 4) > DOEL_BYTES) R /= 2;
+    if (d.zoom < 1.9) return null;
+    const s = view.state;
+    let beste = null, bd = Infinity;
+    for (let cr = r0; cr <= r1; cr++) for (let ck = k0; ck <= k1; ck++) {
+      this.brokSig(s, ck, cr);
+      const polSig = `${glob}${this._e}`, sig = `${polSig}|${this._z}|${stap}`;
+      const br = this.cache.get(`${R}:${ck}:${cr}`);
+      if (br && br.sig === sig) { br.gebruikt = this.frame; continue; }
+      const dd = (ck * CH + CH / 2 - d.x) ** 2 + (cr * CH + CH / 2 - d.y) ** 2;
+      if (dd < bd) { bd = dd; beste = { ck, cr, R, sig, polSig, z: this._z }; }
+    }
+    return beste;
   }
 
   voorbak(view, k0, k1, r0, r1, R, glob, mx, my) {

@@ -1403,6 +1403,7 @@ export class Wegennet {
     this.D = D;
     for (const k of ['nK', 'kx', 'ky', 'kSoort', 'kLand', 'kLicht', 'nT', 'tA', 'tB', 'tKlasse', 'tLand', 'tLen', 'tP0', 'tNP', 'tZaad', 'tBouw', 'tBox', 'punten', 'cum', 'adj0', 'adj', 'lichten', 'poorten', 'haltes', 'parkeerstroken', 'zebras', 'grensovergangen']) this[k] = D[k];
     this._omg = [];
+    this._vb = null; // C14b: voorbeeldOmgeving
     this._wegen = null;
     this._water = D.water;
     this.versie++;
@@ -1678,6 +1679,208 @@ export class Wegennet {
     };
     this._omg[t] = o;
     return o;
+  }
+
+  // C14b: de omgeving die omgeving(t) zou geven als op de vrije droge tegel t gebouw gebouwId kwam te staan, voor de
+  // voorbeeldtekening in bouwmodus en voor een bouwplaats waarvoor het net nog niet opnieuw gebouwd is. Zelfde vorm en
+  // zelfde sleutelformule als omgeving(t); alleen de cache (this._vb) is apart. De zone volgt dezelfde regel als bouw();
+  // de klassen per zijde zijn die van nu, met de rasterstraten die er in een stad bij zouden komen; de poort komt op de
+  // zijde die stap 5 zou kiezen (hoogste klasse, doorgaand gaat voor een stompje). Geen poort mogelijk: poort = -1 en
+  // aansluiting = { x, y, d } (wereldeenheden), het dichtstbijzijnde punt van een straat of hoger binnen 6 T, of null.
+  voorbeeldOmgeving(t, gebouwId, pack = null) {
+    const D = this.D;
+    if (!D || t < 0 || t >= D.blk.length) return null;
+    if (D.blk[t] === 1) return this.omgeving(t); // al bebouwd of in aanbouw: de echte omgeving
+    const geo = this.geo;
+    if (!geo.tegels[t] || geo.tegels[t].terrein === 'water') return null;
+    const vb = this._vb ??= new Map(), ck = `${t}|${gebouwId}`;
+    let o = vb.get(ck);
+    if (o) return o;
+    const T = geo.T, kol = geo.kol, rij = geo.rij, k = t % kol, r = (t / kol) | 0, tg = geo.tegels[t];
+    const { zijK, zoneT, gebT, blk, blkLand, groep, stad, R, netK } = D;
+    const g = pack?.gebouwIndex?.[gebouwId];
+    const zone = g?.zone ?? ZONE[gebouwId] ?? (g?.woningen ? 'woon' : 'werk');
+    const L = D.eigenaar ? D.eigenaar[t] : -1;
+    const buurT = (z) => { const [dk, dr] = ZN[z], kk = k + dk, rr = r + dr; return kk >= 0 && rr >= 0 && kk < kol && rr < rij ? rr * kol + kk : -1; };
+    // stadsdeel: hoort t na de bouw bij een stad (een 8-buur in een stad van hetzelfde land, of samen met zijn buren
+    // drie tegels), dan kern, wijk of rand zoals in de bouw; anders buiten
+    let inStad = false, groepGrootte = 1;
+    for (let dr = -1; dr <= 1 && !inStad; dr++) for (let dk = -1; dk <= 1; dk++) {
+      const kk = k + dk, rr = r + dr;
+      if ((!dk && !dr) || kk < 0 || rr < 0 || kk >= kol || rr >= rij) continue;
+      const w = rr * kol + kk;
+      if (!blk[w] || blkLand[w] !== L || groep[w] >= 0) continue;
+      if (stad[w] >= 0) { inStad = true; break; }
+      groepGrootte++;
+    }
+    if (!inStad && groepGrootte >= 3) inStad = true;
+    const h = L >= 0 ? geo.hoofdstad[L] : -1, hLevend = h != null && h >= 0 && D.eigenaar && D.eigenaar[h] === L;
+    let sd = 3;
+    if (inStad) {
+      if (hLevend && Math.max(Math.abs(h % kol - k), Math.abs(((h / kol) | 0) - r)) <= 1) sd = 0;
+      else { let rand = false; for (let z = 0; z < 4; z++) { const w = buurT(z); if (w < 0 || !blk[w]) rand = true; } sd = rand ? 2 : 1; }
+    }
+    // klasse per zijde (en per halve rand): wat er nu ligt, plus de rasterstraten van de stad op deze tegel
+    const halfK = new Int8Array(8);
+    for (let z = 0; z < 4; z++) { const zd = zijdeVan(R, t, z); halfK[z * 2] = netK[zd.e0]; halfK[z * 2 + 1] = netK[zd.e1]; }
+    if (inStad && hLevend) {
+      const ak = h % kol, ar = (h / kol) | 0;
+      const isLijn = (a, q) => (q <= a ? (a - q) % 2 === 0 : (q - a - 1) % 2 === 0);
+      const WERKBLOK = { werk: 1, logistiek: 1, energie: 1, delf: 1 };
+      for (let z = 0; z < 4; z++) {
+        const zd = zijdeVan(R, t, z), w = buurT(z);
+        const blok = w >= 0 && w !== h && blkLand[w] === L && WERKBLOK[zone] && WERKBLOK[zoneT[w]] && hash(Math.min(t, w), Math.max(t, w), 41) < 0.35;
+        if (blok) continue;
+        [zd.e0, zd.e1].forEach((e, j) => {
+          const l = R.eLijn[e];
+          if (l < 0 || (R.eNat[e])) return;
+          if (!(l >= 10000 ? isLijn(ak, l - 10000) : isLijn(ar, l))) return;
+          if (halfK[z * 2 + j] < KLASSE.STRAAT) halfK[z * 2 + j] = KLASSE.STRAAT;
+        });
+      }
+    }
+    const zk = (z) => Math.max(halfK[z * 2], halfK[z * 2 + 1], zijK[t * 4 + z]);
+    // watermasker 8×8, buren, helling: als in omgeving()
+    const wf = this._water;
+    const wm = new Uint8Array(64);
+    for (let j = 0; j < 8; j++) for (let i = 0; i < 8; i++) wm[j * 8 + i] = wf ? wf(k * T + (i + 0.5) * T / 8, r * T + (j + 0.5) * T / 8) : 0;
+    const buren = new Array(8);
+    for (let i = 0; i < 8; i++) {
+      const [dk, dr] = BUUR8[i], kk = k + dk, rr = r + dr;
+      if (kk < 0 || rr < 0 || kk >= kol || rr >= rij) { buren[i] = '~'; continue; }
+      const w = rr * kol + kk;
+      buren[i] = blk[w] ? (zoneT[w] || 'werk') : geo.tegels[w].terrein === 'water' ? '~' : '';
+    }
+    let straat = 0, naad = 0, haag = 0, rand = 0, wat = 0, bos = 0;
+    const klasse = new Int8Array(4).fill(-1), inzet = new Float32Array(4);
+    for (let z = 0; z < 4; z++) {
+      const bit = 1 << z, kz = zk(z);
+      let nat = 0;
+      for (let i = 0; i < 8; i++) {
+        const c = z === 0 ? wm[i] : z === 2 ? wm[56 + i] : z === 3 ? wm[i * 8] : wm[i * 8 + 7];
+        if (c) nat++;
+      }
+      const buur = buren[z * 2], w = buurT(z);
+      if (w >= 0 && !blk[w] && geo.tegels[w].terrein === 'bos') bos |= bit;
+      if (kz >= 0 && kz !== KLASSE.OPRIT) { straat |= bit; klasse[z] = kz; inzet[z] = PROFIEL[kz].inzet; }
+      else if (nat >= 4 || buur === '~') { wat |= bit; inzet[z] = INZET.water; }
+      else if (buur && buur !== '~') {
+        if (NAAD[buur] === NAAD[zone] && NAAD[zone] != null) { naad |= bit; inzet[z] = INZET.naad; } else { haag |= bit; inzet[z] = INZET.haag; }
+      } else { rand |= bit; inzet[z] = INZET.rand; }
+    }
+    // poort: zoals poortZijde() in stap 5 (vaste beginzijde uit de hash, doorgaand gaat voor een stompje)
+    let poort = -1, bk = -2;
+    const start = Math.floor(hash(t, 77) * 4);
+    for (let i = 0; i < 4; i++) {
+      const z = (start + i) & 3, zd = zijdeVan(R, t, z);
+      if (R.eNat[zd.e0] && R.eNat[zd.e1] && halfK[z * 2] < 0 && halfK[z * 2 + 1] < 0) continue;
+      const kz = Math.max(halfK[z * 2], halfK[z * 2 + 1]);
+      if (kz < 0) continue;
+      const score = kz + 10 + (halfK[z * 2] >= 0 && halfK[z * 2 + 1] >= 0 ? 4 : 0);
+      if (score > bk) { bk = score; poort = z; }
+    }
+    const poortKlasse = poort >= 0 ? zk(poort) : -1;
+    const oprit = new Float32Array(4);
+    let parkeer = new Float32Array(0), aansluiting = null;
+    if (poort >= 0) {
+      const [ox, oy] = ZN[poort];
+      oprit[0] = ox * 0.5; oprit[1] = oy * 0.5; oprit[2] = ox * (0.5 - OPRIT); oprit[3] = oy * (0.5 - OPRIT);
+      parkeer = this.parkeerVan(zone, poort, t);
+    } else {
+      // dichtstbijzijnde punt van een tak met klasse straat of hoger binnen 6 T (lineair, per tegel onthouden)
+      const ak = `a${t}`;
+      if (vb.has(ak)) aansluiting = vb.get(ak);
+      else {
+        const cx = tg.x, cy = tg.y, m = 6 * T, P = D.punten, B = D.tBox;
+        let bd = m, bx = 0, by = 0;
+        for (let i = 0; i < D.nT; i++) {
+          const kl = D.tKlasse[i];
+          if (kl < KLASSE.STRAAT || kl === KLASSE.OPRIT) continue;
+          if (cx < B[i * 4] - bd || cx > B[i * 4 + 2] + bd || cy < B[i * 4 + 1] - bd || cy > B[i * 4 + 3] + bd) continue;
+          const p0 = D.tP0[i], np = D.tNP[i];
+          for (let j = 0; j + 1 < np; j++) {
+            const ax = P[(p0 + j) * 2], ay = P[(p0 + j) * 2 + 1], dx = P[(p0 + j) * 2 + 2] - ax, dy = P[(p0 + j) * 2 + 3] - ay, l2 = dx * dx + dy * dy;
+            const f = l2 > 0 ? clamp(((cx - ax) * dx + (cy - ay) * dy) / l2, 0, 1) : 0;
+            const qx = ax + dx * f, qy = ay + dy * f, d = Math.hypot(qx - cx, qy - cy);
+            if (d < bd) { bd = d; bx = qx; by = qy; }
+          }
+        }
+        aansluiting = bd < m ? { x: bx, y: by, d: bd } : null;
+        vb.set(ak, aansluiting);
+      }
+    }
+    // zonder poort: de zijde die naar de aansluiting wijst (daar komt de nieuwe weg het waarschijnlijkst uit)
+    let richting = poort;
+    if (poort < 0 && aansluiting) {
+      let best = -Infinity;
+      for (let z = 0; z < 4; z++) { const d = ZN[z][0] * (aansluiting.x - tg.x) + ZN[z][1] * (aansluiting.y - tg.y); if (d > best) { best = d; richting = z; } }
+    }
+    let hmax = 0, laag = -1, hl = tg.hoogte;
+    for (let z = 0; z < 4; z++) {
+      const [dk, dr] = ZN[z], kk = k + dk, rr = r + dr;
+      if (kk < 0 || rr < 0 || kk >= kol || rr >= rij) continue;
+      const hh = geo.tegels[rr * kol + kk].hoogte;
+      if (geo.tegels[rr * kol + kk].terrein === 'water') continue;
+      hmax = Math.max(hmax, Math.abs(hh - tg.hoogte));
+      if (hh < hl) { hl = hh; laag = z; }
+    }
+    const helling = clamp(hmax * 8, 0, 1);
+    if (laag < 0) laag = 2;
+    // variant: zoals de gulzige keuze in verrijk() (N en W zijn al gekozen); zo valt de sleutel gelijk uit
+    const verboden = [];
+    for (const z of [0, 3]) { const w = buurT(z); if (w >= 0 && D.variant[w] >= 0 && gebT[w] === gebouwId) verboden.push(D.variant[w]); }
+    const v0 = Math.floor(hash(t, 91) * 3);
+    let variant = v0;
+    for (let q = 0; q < 3; q++) { const v = (v0 + q) % 3; if (!verboden.includes(v)) { variant = v; break; } }
+    let wsig = 0; for (let i = 0; i < 64; i++) wsig = (Math.imul(wsig, 3) + wm[i]) | 0;
+    const stadsdeel = sd;
+    const sleutel = `${zone}${stadsdeel}s${straat}n${naad}h${haag}r${rand}w${wat}b${bos}k${klasse.join('')}p${poort}${poortKlasse}m${(wsig >>> 0).toString(36)}g${Math.round(helling * 4)}l${laag}${tg.terrein[0]}v${variant}`;
+    o = {
+      t, zone, stadsdeel, straat, naad, haag, rand, water: wat, bos, klasse, inzet, poort, poortKlasse, oprit, parkeer,
+      waterMasker: wm, helling, laag, terrein: tg.terrein, hoogte: tg.hoogte, buren, variant, sleutel, gebouw: gebouwId,
+      voorbeeld: true, aansluiting, richting,
+    };
+    vb.set(ck, o);
+    return o;
+  }
+
+  // C14b: rekent in plakken (budget in ms) het net uit dat er zou liggen als op t gebouw gebouwId in aanbouw kwam, in
+  // een eigen hulpnet met hetzelfde rooster; is het klaar, dan geeft voorbeeldOmgeving(t, gebouwId) voortaan precies de
+  // omgeving die het gebouw na de bouw krijgt (zelfde sleutel, dus de kavel springt niet). Tot dan de schatting
+  // hierboven. Wacht zolang het eigen net bouwt; een ander vakje begint opnieuw. Geeft true als het exacte voorbeeld
+  // klaarligt.
+  voorbeeldWerk(view, t, gebouwId, budgetMs = 2) {
+    const D = this.D;
+    if (!D || !this.rooster || this.bouwer || !view?.state || t < 0 || t >= D.blk.length || D.blk[t] === 1) return false;
+    const vb = this._vb ??= new Map(), ck = `${t}|${gebouwId}`;
+    if (vb.get(ck)?.exact) return true;
+    let w = this._vbWerk;
+    if (!w || w.ck !== ck || w.versie !== this.versie) {
+      const s = view.state, bezet = s.bezet.slice();
+      bezet[t] = { land: s.eigenaar[t], gebouw: gebouwId, bouw: true }; // wat de bouworder zet (sim.js bouw())
+      const st = Object.create(s); st.bezet = bezet;
+      const v2 = Object.create(view); v2.state = st;
+      const hulp = this._vbNet ??= new Wegennet();
+      hulp.geo = this.geo; hulp.rooster = this.rooster; hulp.zoetBron = this.zoetBron;
+      w = this._vbWerk = { ck, versie: this.versie, net: hulp, gen: hulp.bouw(v2) };
+    }
+    const klok = typeof view.tijdMs === 'function' ? () => view.tijdMs() : null, t0 = klok ? klok() : 0;
+    for (;;) {
+      const r = w.gen.next();
+      if (r.done) {
+        this._vbWerk = null;
+        w.net.zet(r.value);
+        const echt = w.net.omgeving(t);
+        if (!echt) return false;
+        // de schatting levert de lijn naar de weg als de poortzijde nu nog geen weg heeft
+        const schat = this.voorbeeldOmgeving(t, gebouwId, view.state.pack);
+        const nieuw = echt.poort >= 0 && D.zijK[t * 4 + echt.poort] < 0;
+        vb.set(ck, { ...echt, voorbeeld: true, exact: true, richting: echt.poort, aansluiting: nieuw ? schat?.aansluiting ?? null : null, nieuweWeg: nieuw });
+        return true;
+      }
+      if (budgetMs <= 0 || (klok && klok() - t0 >= budgetMs)) return false;
+      if (!klok && budgetMs < Infinity) return false;
+    }
   }
 
   // Wat ligt er op een wereldpunt: GROND.*

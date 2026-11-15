@@ -185,8 +185,9 @@ function berekenDichtheid(state, idx) {
   }
   const jaarDag = ((state.dag % 365) + 365) % 365;
   const oorlog = oorlogenVan(state, c).length > 0;
-  // C13c: een bloeiend land (welvaart boven de drempel van straatstand.js en groei) heeft tot 25 % meer auto's
-  const bloei = welvaart > STRAAT.bloei_welvaart && (c.groei ?? 0) > 0;
+  // C13c: een bloeiend land heeft de helft meer auto's (C14d). Eén definitie van bloei: die van straatstand.js.
+  straatBijwerken(state);
+  const bloei = !!landStand(idx)?.bloei;
   return {
     stab: c.stab,
     // groeiende wijken: de woningen raken vol, dus er wordt gebouwd
@@ -216,6 +217,11 @@ function berekenDichtheid(state, idx) {
 // rekent straatstand.js uit (straatVerkeer). Komt een volger te dicht bij een ander voertuig, dan vervaagt hij
 // (vanaf VOLG_RUIM tegel tussenruimte, weg bij VOLG_KRAP), en nooit sneller dan VOLG_SNEL per milliseconde.
 const VOLG = 9, MAX_VOLG = 48, VOLG_AFSTAND = 0.145, PULS_ALFA = 0.35, VOLG_RUIM = 0.15, VOLG_KRAP = 0.02, VOLG_SNEL = 1 / 250;
+// C14d: onder zoom 3 is de onrustpuls groter en sterker (PULS_ALFA_VER); de tekort-merkjes blijven tot zoom 6,6 (vervagen
+// vanaf 5,8) en staan boven ZOOM_BLOK_UIT op de dakhoek; de bloeigloed is warmgoud, zonder puls.
+const PULS_ALFA_VER = 0.5, TEKORT_VAAG = 5.8, TEKORT_UIT = 6.6, BLOEI_ALFA = 0.22, BLOEI_STRAAL = 0.9;
+// Op een aanraakscherm is een tekort-merkje minstens 10 px (C14d).
+const AANRAAK = typeof globalThis.matchMedia === 'function' && !!globalThis.matchMedia('(pointer: coarse)').matches;
 
 // Pictogram voor de rol van het ontbrekende goed (via pack.rollen): 1 bliksem (energie), 2 blokje (grondstof),
 // 3 aar (voedsel), 4 chip (tech), anders 0 (driehoek).
@@ -766,7 +772,8 @@ export class LevenLaag {
     if (z >= 2.5) this.tekenLucht(c, nu);
     // C13c: onrust al op de middenzoom (het protest neemt het tussen zoom 4 en 5 over) en de tekort-merkjes
     if (z < 5) this.tekenOnrustPuls(c, nu, 1 - smooth(4, 5, z));
-    if (z >= 2.5 && z < ZOOM_BLOK_UIT) this.tekenTekorten(c, smooth(2.5, 2.9, z) * (1 - smooth(ZOOM_VRACHT, ZOOM_BLOK_UIT, z)));
+    this.tekenBloei(c, nu, z >= 2 && z < 5.5 ? 1 - smooth(4.5, 5.5, z) : 0);
+    if (z >= 2.5 && z < TEKORT_UIT) this.tekenTekorten(c, smooth(2.5, 2.9, z) * (1 - smooth(TEKORT_VAAG, TEKORT_UIT, z)), z);
     c.restore();
   }
 
@@ -1020,13 +1027,15 @@ export class LevenLaag {
 
   // C13c tekort: een rood kwartrondje rechtsboven op de kavel van een stilstaand gebouw van de speler, met een
   // pictogram van wat ontbreekt (bliksem, blokje, aar, chip of anders een driehoek). Geen tekst; de cijfers staan in
-  // de panelen. Middenzoom, vervaagt zoals de vrachtblokjes.
-  tekenTekorten(c, a) {
+  // de panelen. Middenzoom tot 6,6 (C14d), straal 8-16 px (op een aanraakscherm minstens 10); boven zoom 4,4 schuift
+  // het merkje van de kavelhoek naar de dakhoek (het gebouw staat achter de voorstrook aan de poortzijde, zie detail.js).
+  tekenTekorten(c, a, z = 0) {
     this.n.tekorten = 0;
     const st = straatStand(), s = this.state;
     if (!st || a <= 0.01 || !st.stilT.length) return;
     const geo = this.geo, Tw = geo.T, net = this.net, P = s.pack;
-    const r = clamp(this.T * 0.3, 7, 15);
+    const r = Math.max(clamp(this.T * 0.3, 8, 16), AANRAAK ? 10 : 0);
+    const dak = smooth(ZOOM_BLOK_UIT - 0.2, ZOOM_BLOK_UIT + 0.2, z), VOOR = 0.265, IN = 0.06;
     let n = 0;
     const X = this.tekortX;
     for (let i = 0; i < st.stilT.length && n < PLAFOND.tekorten; i++) {
@@ -1034,7 +1043,12 @@ export class LevenLaag {
       const t = st.stilT[i], tg = geo.tegels[t];
       if (!tg || !this.inBeeld(tg.x, tg.y, Tw)) continue;
       const o = net?.omgeving?.(t) ?? null;
-      const ux = o ? 0.5 - o.inzet[1] : 0.5, uy = o ? -0.5 + o.inzet[0] : -0.5;
+      let ux = o ? 0.5 - o.inzet[1] : 0.5, uy = o ? -0.5 + o.inzet[0] : -0.5;
+      if (dak > 0) {
+        const p = o?.poort ?? -1;
+        const dx = (p === 1 ? Math.min(ux, VOOR) : ux) - IN, dy = (p === 0 ? Math.max(uy, -VOOR) : uy) + IN;
+        ux += (dx - ux) * dak; uy += (dy - uy) * dak;
+      }
       X[n * 2] = (tg.x + ux * Tw) * this.sc + this.ox; X[n * 2 + 1] = (tg.y + uy * Tw) * this.sc + this.oy;
       this.tekortT[n] = t; this.tekortIcoon[n] = icoonVan(P, st.stilRes[i]);
       n++;
@@ -1068,8 +1082,10 @@ export class LevenLaag {
       const tg = geo.tegels[h];
       if (!tg || !this.inBeeld(tg.x, tg.y, Tw)) continue;
       const ernst = clamp((STRAAT.onrust_stab - (s.landen[i].stab ?? 0)) / STRAAT.onrust_stab, 0, 1);
-      const x = tg.x * this.sc + this.ox, y = tg.y * this.sc + this.oy, R0 = Math.max(7, 0.6 * this.T);
-      const sterk = a * PULS_ALFA * (0.75 + 0.25 * ernst);
+      // C14d: onder zoom 3 groter (minstens 14 px) en sterker, anders is hij op zoom 2 niet te zien
+      const ver = this.zoom < 3;
+      const x = tg.x * this.sc + this.ox, y = tg.y * this.sc + this.oy, R0 = Math.max(ver ? 14 : 7, 0.6 * this.T);
+      const sterk = a * (ver ? PULS_ALFA_VER : PULS_ALFA) * (0.75 + 0.25 * ernst);
       const r = R0 * (0.8 + 0.2 * f), al = sterk * (0.5 + 0.5 * f);
       const g = c.createRadialGradient(x, y, r * 0.1, x, y, r);
       g.addColorStop(0, `rgba(226,92,24,${al.toFixed(3)})`);
@@ -1086,6 +1102,35 @@ export class LevenLaag {
         c.beginPath(); c.arc(x, y, rr, 0, TAU); c.stroke();
       }
       this.nPuls++;
+    }
+  }
+
+  // C14d bloei: een rustige warmgouden gloed rond de hoofdstad van een bloeiend land (zoom 2 tot 5, zonder puls, straal
+  // BLOEI_STRAAL tegel, alfa hooguit BLOEI_ALFA); niet bij een land dat ook onrust heeft (dan de puls).
+  tekenBloei(c, nu, a) {
+    this.nBloei = 0;
+    if (a <= 0.01) return;
+    const s = this.state, geo = this.geo, Tw = geo.T;
+    for (let i = 0; i < s.landen.length; i++) {
+      const L = landStand(i);
+      if (!L || !L.bloei || L.onrust) continue;
+      const h = geo.hoofdstad?.[i];
+      if (h == null || h < 0) continue;
+      const tg = geo.tegels[h];
+      if (!tg || !this.inBeeld(tg.x, tg.y, Tw)) continue;
+      const x = tg.x * this.sc + this.ox, y = tg.y * this.sc + this.oy, r = Math.max(12, BLOEI_STRAAL * this.T), al = a * BLOEI_ALFA;
+      // vlak tot 60 % van de straal, dan zacht weg: zo leest hij als een warme plek en niet als een vlekje
+      const g = c.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, `rgba(244,196,92,${al.toFixed(3)})`);
+      g.addColorStop(0.6, `rgba(244,196,92,${(al * 0.9).toFixed(3)})`);
+      g.addColorStop(1, 'rgba(244,196,92,0)');
+      c.fillStyle = g;
+      c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill();
+      // een rustige gouden rand (geen puls), zodat de plek ook op een drukke stad leesbaar is
+      c.strokeStyle = `rgba(250,206,104,${Math.min(1, al * 2.2).toFixed(3)})`;
+      c.lineWidth = Math.max(2, r * 0.05);
+      c.beginPath(); c.arc(x, y, r * 0.78, 0, TAU); c.stroke();
+      this.nBloei++;
     }
   }
 

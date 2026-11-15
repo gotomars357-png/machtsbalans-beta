@@ -3,7 +3,7 @@
 
 import {
   DEFAULT_FILES, DEFAULT_MODEL, DEFAULT_RESOURCES, DEFAULT_GEBOUWEN, DEFAULT_PERSOONLIJKHEDEN,
-  DEFAULT_ACTIES, DEFAULT_VERHAAL, DEFAULT_EENHEDEN, DEFAULT_REGIMES, ZWEVEND, DEFAULT_DOCTRINES,
+  DEFAULT_ACTIES, DEFAULT_VERHAAL, DEFAULT_EENHEDEN, DEFAULT_REGIMES, ZWEVEND, DEFAULT_DOCTRINES, DEFAULT_KRANT, DEFAULT_RIVALEN,
 } from './defaults.js';
 import { validatePack } from './validate.js';
 
@@ -21,8 +21,8 @@ export async function loadPack(basePath, readText) {
   // Met een 'bestanden'-lijst laadt de engine alleen die bestanden; zonder lijst probeert hij de standaardpaden.
   const files = meta.bestanden ? { ...meta.bestanden } : { ...DEFAULT_FILES };
   const raw = {};
-  // De tutorial is stil optioneel: een pack zonder tutorial krijgt daar geen melding over.
-  const stil = new Set(['tutorial']);
+  // De tutorial, de krant en de rivalen zijn stil optioneel: een pack zonder krijgt daar geen melding over.
+  const stil = new Set(['tutorial', 'krant', 'rivalen']);
   for (const key of Object.keys(DEFAULT_FILES)) {
     if (!(key in files) && !stil.has(key)) info.push(`Geen '${key}' in het pack: standaardwaarden gebruikt.`);
   }
@@ -78,6 +78,11 @@ export function normalizePack(meta, raw, info = []) {
   p.regimes = raw.regimes ?? clone(DEFAULT_REGIMES);
   p.doctrines = raw.doctrines ?? clone(DEFAULT_DOCTRINES);
   p.doctrineIndex = Object.fromEntries((Array.isArray(p.doctrines) ? p.doctrines : []).filter((d) => d?.id).map((d) => [d.id, d]));
+  // De Krant (C14): alleen de weergave leest dit. Eigen koppen per soort vullen de standaardkoppen aan.
+  p.krant = { naam: raw.krant?.naam ?? DEFAULT_KRANT.naam, koppen: { ...clone(DEFAULT_KRANT.koppen), ...(raw.krant?.koppen || {}) } };
+  // Rivalen met geheugen (C14): lessen die een AI-blokleider na jouw vorige potje meeneemt.
+  p.rivalen = raw.rivalen ?? clone(DEFAULT_RIVALEN);
+  p.rivaalIndex = Object.fromEntries((Array.isArray(p.rivalen) ? p.rivalen : []).filter((r) => r?.id).map((r) => [r.id, r]));
 
   p.rollen = {};
   for (const r of p.resources) {

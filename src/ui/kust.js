@@ -15,6 +15,7 @@
 
 import { seizoen, weer, wind } from './seizoen.js';
 import { maakBasis, TerreinLaag, ijsVan } from './terrein.js';
+import { budget, begin, verbruik, echtNu } from './bakbudget.js';
 
 // ---------- gedeelde hulpjes (eigen kopie, zie inzoom-spec §0) ----------
 
@@ -841,6 +842,7 @@ export class KustLaag {
     this.cache.clear();
     this.laatste.clear();
     this.bytes = 0;
+    this.voorGen = null; this.voorAan = false; this.voorSig = '';
   }
 
   // ---------- opzoeken ----------
@@ -906,7 +908,7 @@ export class KustLaag {
 
   // ---------- kiezen (alleen als de toestand iets verandert) ----------
 
-  werkCache(view) {
+  sigVan(view) {
     const s = this.state;
     let nP = 0, somT = 0;
     for (let i = 0; i < s.landen.length; i++) {
@@ -915,10 +917,73 @@ export class KustLaag {
       for (let j = 0; j < l.plaatsingen.length; j++) somT += l.plaatsingen[j].t;
     }
     const inf = view.infraLaag;
-    const sig = `${s.grensVersie}|${nP}|${somT}|${s.landen.length}|${inf ? inf.sig : '-'}`;
+    return `${s.grensVersie}|${nP}|${somT}|${s.landen.length}|${inf ? inf.sig : '-'}`;
+  }
+
+  // Kiezen in één keer: alleen de eerste keer na laad() (en in tests). Daarna doet voorwerk() het in stappen.
+  werkCache(view) {
+    if (this.voorGen || (this.voorAan && this.sig !== '')) return;
+    const sig = this.sigVan(view);
     if (sig === this.sig) return;
     this.sig = sig;
-    this.kies(inf);
+    this.kies(view.infraLaag);
+  }
+
+  // ---------- voorwerk (C14d) ----------
+  // Zoals in werk.js: elk beeld een stukje kiezen op een schaduwobject met wat er van het gedeelde budget over is.
+  // werk.js gaat voor: had die het vorige beeld nog voorwerk, dan wacht de kust.
+  voorwerk(view, nu) {
+    const s = view?.state;
+    if (!s || !view.geo || !view.w || !view.eigenaar) return;
+    begin(nu, !!view.doel?.plan, view);
+    if (this.state !== s || this.geo !== view.geo || this.eigenaar !== view.eigenaar || (view.terreinLaag?.basis && view.terreinLaag.basis !== this.basis)) this.laad(view);
+    if (!this.voorGen) {
+      const sig = this.sigVan(view);
+      if (sig === this.sig) return;
+      if (this.sig === '' && !this.voorAan && view.zoom >= DREMPEL.groot - 0.4) return;
+      this.voorSig = sig;
+      this.voorGen = this.kiesStappen(view.infraLaag);
+    }
+    this.voorAan = true;
+    if (budget.werkBezig) return;
+    this.stapTijden ??= {};
+    while (budget.over > 0) {
+      const t = echtNu();
+      const r = this.voorGen.next();
+      const ms = echtNu() - t;
+      verbruik(ms);
+      if (r.value?.naam) this.stapTijden[r.value.naam] = Math.max(this.stapTijden[r.value.naam] ?? 0, ms);
+      if (r.done) {
+        const sch = r.value.klaar;
+        for (const k of Object.keys(sch)) this[k] = sch[k];
+        this.sig = this.voorSig;
+        this.voorGen = null;
+        break;
+      }
+    }
+  }
+
+  *kiesStappen(inf) {
+    const sch = Object.create(Object.getPrototypeOf(this));
+    for (const k of ['state', 'geo', 'eigenaar', 'basis', 'tl', 'wereld']) sch[k] = this[k];
+    sch.raster = new Uint8Array(RW * RH);
+    sch.leeg(); sch.bouwSoorten();
+    yield { naam: 'soorten' };
+    sch.merkInfra(inf); yield { naam: 'infra' };
+    sch.merkGebouwen(inf); sch.merkLeven(); yield { naam: 'gebouwen' };
+    sch.kiesHavens(inf); sch.kiesVuurtorens(); yield { naam: 'havens' };
+    sch.kiesPieren(); yield { naam: 'pieren' };
+    sch.kiesJachthavens(inf); sch.kiesStuwen(); sch.kiesDammen(); yield { naam: 'jachthavens' };
+    sch.kiesKades(); sch.kiesAken(); yield { naam: 'kades' };
+    sch.kiesWindparken(); sch.kiesBooreilanden(); sch.kiesViskwekerijen(); yield { naam: 'windparken' };
+    sch.kiesRotsenRollers(); sch.kiesHengelplekken(); yield { naam: 'rotsen' };
+    sch.kiesVissershavens(inf); yield { naam: 'vissershavens' };
+    const F = sch.wereld.veer, nv = Math.ceil(F.length / 6), uit = [], PER = 4;
+    for (let i = 0; i < Math.max(1, nv); i += PER) { sch.kiesVeerstoepen(inf, i, i + PER, uit); yield { naam: 'veerstoepen' }; }
+    const ns = sch.wereld.strand.n, B = 6;
+    for (let i = 0; i < B; i++) { sch.strandPv(Math.floor((ns * i) / B), Math.floor((ns * (i + 1)) / B)); yield { naam: 'strandpunten' }; }
+    sch.kiesStrand(true);
+    return { naam: 'strand', klaar: sch };
   }
 
   kies(inf) {
@@ -1639,10 +1704,10 @@ export class KustLaag {
 
   // Waar de veerboten van leven.js aanleggen: een veerstoep van de achtersteven naar de wal, met een rij wachtende
   // auto's. De boot zelf blijft van leven.js; hier alleen de stoep en de auto's die eraf en erop rijden.
-  kiesVeerstoepen(inf) {
+  kiesVeerstoepen(inf, i0 = 0, i1 = Infinity, uit = []) {
     const wegen = inf?.wegen ?? [];
-    const F = this.wereld.veer, L = this.wereld.leven, Tw = this.geo.T, uit = [];
-    for (let i = 0; i * 6 < F.length; i++) {
+    const F = this.wereld.veer, L = this.wereld.leven, Tw = this.geo.T;
+    for (let i = i0; i * 6 < F.length && i < i1; i++) {
       const ax = F[i * 6], ay = F[i * 6 + 1], bx = F[i * 6 + 2], by = F[i * 6 + 3], e0 = F[i * 6 + 4], e1 = F[i * 6 + 5];
       const len = Math.hypot(bx - ax, by - ay);
       if (len < 1) continue;
@@ -1707,17 +1772,26 @@ export class KustLaag {
   // schermen en handdoeken, zandkastelen en gaten vooraan); lopers langs de waterlijn; duinpaden met een fietsenrek;
   // helm en konijnen in de duinen; dijken met schapen op laag land; zandbanken met zeehonden. Wie er is en wat er
   // staat hangt per beeld af van seizoen, weer en tijd van de dag (zie tekenStrand); hier alleen de plekken.
-  kiesStrand() {
+  // Per strandpunt of het vrij is en hoe druk (in banden te doen, C14d); i0 = 0 maakt de lijsten leeg.
+  strandPv(i0 = 0, i1 = Infinity) {
     const A = this.wereld.strand, n = A.n;
-    if (!this.pv || this.pv.length !== n) { this.pv = new Uint8Array(n); this.isDijk = new Uint8Array(n); }
-    const pv = this.pv, isDijk = this.isDijk;
-    pv.fill(0); isDijk.fill(0);
-    for (let i = 0; i < n; i++) {
+    if (i0 === 0) {
+      if (!this.pv || this.pv.length !== n) { this.pv = new Uint8Array(n); this.isDijk = new Uint8Array(n); }
+      this.pv.fill(0); this.isDijk.fill(0);
+    }
+    const pv = this.pv;
+    for (let i = i0; i < Math.min(i1, n); i++) {
       if (!(A.f[i] & S_DROOG)) continue;
       const bx = A.x[i] - A.nx[i] * 1.3, by = A.y[i] - A.ny[i] * 1.3;
       if (!this.landVrij(bx, by, 0.4) || this.grensBij(bx, by)) continue;
       pv[i] = P_VRIJ | (this.drukBij(bx, by) << 4);
     }
+  }
+
+  kiesStrand(pvKlaar = false) {
+    if (!pvKlaar) this.strandPv();
+    const A = this.wereld.strand;
+    const pv = this.pv, isDijk = this.isDijk;
     const D = [], merk = [], lopers = [], paden = [], konijn = [], dijken = [], schaap = [];
     this.postXY = []; this.pavXY = [];
     for (let k = 0; k < A.ks.length; k++) {
@@ -2002,6 +2076,7 @@ export class KustLaag {
   // Na de infralaag: alles op en aan het water. Hoge dingen (turbines, booreilanden, vuurtorens) als laatste.
   // C12: alleen op gebakken grond (terrein knipt het canvas tot de gebakken brokken; niets gebakken: niets tekenen)
   teken(c, view, sc, nu, dt = 0, tempo = 0) {
+    this.voorwerk(view, nu);
     const klem = view?.terreinLaag?.klemOpGebakken?.(c) ?? 1;
     if (!klem) { this.klok = nu / 1000; this.nul(); return; }
     try { return this.tekenOpGrond(c, view, sc, nu, dt, tempo); } finally { if (klem === 2) c.restore(); }

@@ -7,16 +7,17 @@ import { KaartView } from './map.js';
 import { tekenGrafiek } from './chart.js';
 import { woningCapaciteit, voorziening, campagneStatus, netwerkStatus } from '../engine/samenleving.js';
 import * as leger from '../engine/leger.js';
-import { hervormingStatus } from '../engine/regimes.js';
+import { hervormingStatus, regimeVan, doctrineVan } from '../engine/regimes.js';
 import { mediaStatus, overnameStatus, vijandigeMedia, mediaCapaciteit } from '../engine/media.js';
 import { CONTRACT, contractenVan } from '../engine/contracten.js';
 import { maakDoelen } from './doelen.js';
 import { toonEindoverzicht, startSessie, kaartGeklikt, gezondSpelen } from './einde.js';
 import { toonUitdaging } from './uitdaging.js';
-import { toonHuis, gekozenDoctrine, doctrineKort } from './huis.js';
+import { toonHuis, gekozenDoctrine, doctrineKort, rivaalInstelling } from './huis.js';
 import { extraEffectTekst, keuzeKnop } from './dilemma.js';
 import { cyberBlok, cyberTrede } from './cyber.js';
 import { brandhaardBlok, brandhaardBij } from './brandhaard.js';
+import { maakKrant } from './krant.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -42,6 +43,16 @@ const ui = {
   state: null, tempo: 0, vorigTempo: 1, kaart: null, tab: 'economie', sel: -1,
   selectie: new Set(), dirty: true, modal: null, eindGetoond: false, ontgrendeldGezien: new Set(), grafiekLen: -1,
 };
+
+// De Krant (C14): kaartje linksonder bij grote momenten, archief bovenaan het logboek. Nooit achter een venster,
+// het contextpaneel of de voertuigkaart, en de start-editie pas na de eerste tutorialstap (of na 20 s).
+const zichtbaar = (sel) => { const el = document.querySelector(sel); return !!el && !el.hidden; };
+const krant = maakKrant({
+  openModal: (html, bind) => openModal(html, bind),
+  sluitModal: () => sluitModal(),
+  magTonen: () => !ui.modal && !zichtbaar('#context') && !zichtbaar('#voertuig'),
+  startVrij: () => !ui.tutorial || ui.tutorial.idx >= 1,
+});
 
 // ---------- startscherm ----------
 
@@ -91,7 +102,7 @@ function kiesPack(p) {
     ${r.fouten.length ? `<div class="fout">Dit pack kan niet starten:</div>${lijst(r.fouten, 'fout')}` : '<div class="goed">Klaar om te spelen.</div>'}
     ${lijst(r.waarschuwingen, 'waarsch')}
     ${r.info.length ? `<details><summary class="inf">Aangevuld met standaardwaarden (${r.info.length})</summary>${lijst(r.info, 'inf')}</details>` : ''}`;
-  toonHuis(p.pack);
+  toonHuis(p.pack, ui.gekozenLand);
   renderLanden();
 }
 
@@ -109,7 +120,7 @@ function renderLanden() {
       <p>${p.regimes[l.regime]?.icoon ?? ''} ${esc(p.regimes[l.regime]?.naam ?? '')} · ${esc(l.beschrijving || `Kernland, ${pers.toLowerCase()} buitenlandbeleid.`)} Bevolking ${l.bevolking} mln.</p></span>
     </button>`;
   }).join('');
-  for (const b of document.querySelectorAll('[data-land]')) b.onclick = () => { ui.gekozenLand = b.dataset.land; renderLanden(); };
+  for (const b of document.querySelectorAll('[data-land]')) b.onclick = () => { ui.gekozenLand = b.dataset.land; renderLanden(); toonHuis(p, ui.gekozenLand); };
 }
 
 function leesInstellingen() {
@@ -120,10 +131,13 @@ function leesInstellingen() {
     moeilijkheid: $('#opt-moeilijkheid').value,
     onboarding: $('#opt-onboarding').checked,
     systemen: { events: $('#opt-events').checked, schokken: $('#opt-schokken').checked, escalatie: $('#opt-escalatie').checked, brandhaarden: $('#opt-brandhaarden').checked },
+    // Rivalen met geheugen (C14): de engine kent alleen deze lijst, nooit het Huis of localStorage.
+    rivalen: $('#opt-rivalen').checked ? rivaalInstelling(ui.gekozenPack?.pack) : [],
   };
 }
 
 $('#start-knop').onclick = () => startSpel(ui.gekozenPack.pack, leesInstellingen());
+$('#opt-rivalen').onchange = () => toonHuis(ui.gekozenPack?.pack, ui.gekozenLand);
 
 $('#replay-bestand').onchange = async (e) => {
   const f = e.target.files[0];
@@ -181,9 +195,16 @@ function autoOpslaan() {
   try { localStorage.setItem(AUTO_SLEUTEL, JSON.stringify(sim.maakOpslag(s))); } catch { /* geen opslag beschikbaar: spel gaat gewoon door */ }
 }
 
+// Een opslag weet met welke pack-versie hij gemaakt is (zoals een replay). Wijkt die af, dan kan het potje anders lopen.
+function opslagUitOudereVersie(opslag, pack) {
+  const v = opslag?.pack?.versie;
+  return v != null && v !== pack?.meta?.versie;
+}
+
 function laadSpel(opslag) {
   const p = ui.packs.find((x) => x.pack?.meta.id === opslag.pack?.id);
   if (!p) { toast(`Laden mislukt: wereld '${opslag.pack?.id}' is niet geïnstalleerd.`, 'slecht'); return; }
+  if (opslagUitOudereVersie(opslag, p.pack)) toast('Deze opslag komt uit een oudere versie van het spel en kan anders verlopen.', 'slecht');
   const res = sim.laadOpslag(p.pack, opslag);
   if (!res.ok) toast(`Let op: ${res.reden}`, 'slecht');
   startSpel(p.pack, opslag.instellingen, null, res.state);
@@ -210,6 +231,7 @@ function downloadOpslag() {
 
 function startSpel(pack, inst, replay = null, geladen = null) {
   ui.state = geladen ?? sim.createGame(pack, inst);
+  krant.reset(ui.state, performance.now());
   ui.autoDag = null; // nieuwe of geladen partij: de autosave-teller begint opnieuw
   startSessie();
   if (replay) {
@@ -311,6 +333,7 @@ function frame(now) {
     if (s.pendingEvent && !s.replay && !ui.modal) toonEvent();
     if (s.uitkomst && !ui.eindGetoond && !ui.modal) toonEinde();
     for (const m of s.meldingen.splice(0)) toast(m.tekst, m.soort);
+    krant.tick(s, now);
     tutorialTick(now);
     doelbalk.tick(now);
     if (ui.dirty && now - laatsteUI > 140) {
@@ -383,6 +406,8 @@ document.addEventListener('pointerdown', (e) => {
     case 'selecteer-leger': selecteerLeger(); break;
     case 'leger-thuis': stuurEenheden(ui.state.pack.geo.hoofdstad[ui.state.speler]); break;
     case 'brandhaard': geef({ type: 'brandhaard', id: +d.doel, actie: d.id }); break;
+    case 'krant-editie': krant.openEditie(+d.id); break;
+    case 'krant-aan': krant.zetAan(true); ui.dirty = true; renderUI(); break;
   }
 });
 
@@ -472,7 +497,7 @@ function berekenBouwStatus() {
   $('#bouwbalk').hidden = false;
   schikBouwbalk();
   $('#bouwbalk').innerHTML = `<span class="groot">${g.icoon ?? ''}</span><span><b>${esc(g.naam)}</b> · ${kostenTekst(kosten)} · ${g.terrein ? `op ${g.terrein.join(' of ')}` : 'op elk land'}<br>
-    <span class="zacht">${vrij} vrije plekken. Groen = vol rendement, oranje/rood = ver van hoofdstad of depot. Esc of rechtsklik om te stoppen.</span></span>`;
+    <span class="zacht">${TELEFOON.matches ? 'Tik een vakje om het te zien, tik nog eens om te bouwen. Lang drukken stopt.' : `${vrij} vrije plekken. Groen = vol rendement, oranje/rood = ver van hoofdstad of depot. Esc of rechtsklik om te stoppen.`}</span></span>`;
 }
 
 function plaatsOp(t) {
@@ -662,7 +687,7 @@ function renderEconomie() {
     ['Basis', M.stab_basis],
     ['Sociale verdeling', M.stab_verdeling * c.verdeling],
     ['Belasting', -M.stab_belasting * (c.belasting - M.belasting_neutraal)],
-    ...(c.stabFactoren || []),
+    ...metDoctrine(c.stabFactoren || [], s, c, 'stabiliteit'),
   ];
   zet('stabiliteit', `<div class="factoren">
     <div><b>Stabiliteit ${c.stab.toFixed(0)} → doel ${c.stabDoel.toFixed(0)}</b><span class="zacht">onder 50 remt de groei</span></div>
@@ -752,9 +777,15 @@ function sluitContext() {
   $('#context').hidden = true;
 }
 
+// Rivalen met geheugen (C14): de les die deze blokleider uit je vorige potje meenam, of ''.
+function lesRegel(c) {
+  const les = c?.rivaalLes ? ui.state.pack.rivaalIndex?.[c.rivaalLes] : null;
+  return les ? `<div class="doctrine-regel">Les uit je vorige potje: <b>${esc(doctrineKort(les))}</b></div>` : '';
+}
+
 function moraalBlok(c, eigen) {
   const s = ui.state;
-  const factoren = (c.moraalFactoren || []).filter(([, v]) => Math.abs(v) >= 0.5);
+  const factoren = metDoctrine(c.moraalFactoren || [], s, c, 'moraal').filter(([, v]) => Math.abs(v) >= 0.5);
   return `<div style="font-size:12px;margin-top:6px">Strijdbereidheid <b class="${c.moraal < 35 ? 'slecht' : c.moraal > 65 ? 'goed' : ''}">${c.moraal.toFixed(0)}</b> → ${c.moraalDoel?.toFixed(0) ?? '–'}
     <span class="zacht">— bepaalt hoe hard het leger vecht (×${(0.5 + c.moraal / 100).toFixed(2)})${eigen ? '' : ' en of ze zich overgeven'}</span></div>
     ${meter(c.moraal / 100, c.moraal < 35 ? '#f2706a' : '#5fd38d', 1)}
@@ -875,6 +906,7 @@ function renderContext() {
     h += `<div class="kern-grid" style="margin:6px 0"><div><span class="l">Productie</span><span class="w">${fmt(land.Y)}</span></div><div><span class="l">Stabiliteit</span><span class="w">${land.stab.toFixed(0)}</span></div><div><span class="l">Leger</span><span class="w">${s.eenheden.filter((u) => u.land === land.idx).length}</span></div></div>`;
     h += moraalBlok(land, eigen);
     if (eigen && land.doctrine) h += `<div class="doctrine-regel">Doctrine: <b>${esc(doctrineKort(P.doctrineIndex?.[land.doctrine]))}</b></div>`;
+    h += lesRegel(land);
     if (eigen) {
       h += `<h3 style="margin-top:10px">Thuisfront</h3>${mediaActies(land, ['propaganda', 'verdediging'])}
         <div style="display:flex;gap:6px;margin-top:6px"><button class="knop klein" data-actie="naar-tab" data-id="volk">Regime en samenleving</button><button class="knop klein" data-actie="naar-tab" data-id="leger">Leger</button></div>`;
@@ -1138,6 +1170,23 @@ function meter(waarde, kleur, max = 100) {
 }
 function clampPct(v) { return `${Math.max(0, Math.min(100, v * 100)).toFixed(0)}%`; }
 
+// De engine telt regime, doctrine en de les van een rivaal op tot één regel 'Regime'. Voor de speler splitsen we
+// die regel weer uit, zodat zichtbaar is wat de doctrine doet. De som blijft gelijk aan het engine-getal; vallen de
+// delen tegen elkaar weg, dan staat er in de engine geen 'Regime'-regel en voegen we de delen alsnog toe.
+function metDoctrine(lijst, state, c, veld) {
+  const d = doctrineVan(state, c);
+  const delen = [
+    ['Regime', regimeVan(state, c)?.effecten?.[veld] ?? 0],
+    [`Doctrine: ${d?.naam ?? ''}`, d?.effecten?.[veld] ?? 0],
+    ['Les van de rivaal', c.rivaalLes ? state.pack.rivaalIndex?.[c.rivaalLes]?.effecten?.[veld] ?? 0 : 0],
+  ].filter(([, v]) => v);
+  if (!delen.length) return lijst.filter(([n]) => n !== 'Regime');
+  const i = lijst.findIndex(([n]) => n === 'Regime');
+  const zonder = lijst.filter(([n]) => n !== 'Regime');
+  const plek = i >= 0 ? i : zonder.length;
+  return [...zonder.slice(0, plek), ...delen, ...zonder.slice(plek)];
+}
+
 function regimeEffecten(r) {
   const namen = {
     productiviteit: ['productiviteit', (v) => `${plus(v * 100, 0)}%`], handel_bonus: ['handelsinkomen', (v) => `${plus(v * 100, 0)}%`],
@@ -1317,7 +1366,7 @@ function renderInvloed() {
     if (!isSpeler) {
       h += `<section class="blok"><h3>Media en strijdbereidheid</h3>
         <div style="font-size:12px">Jouw media-invloed: <b>${(t.media[s.spelerBlok] ?? 0).toFixed(0)}</b>${Object.entries(t.media).filter(([b]) => b !== s.spelerBlok && t.media[b] > 1).map(([b, w]) => ` · <span style="color:${blokKleur(b)}">${esc(blokNaam(b))} ${w.toFixed(0)}</span>`).join('')}</div>
-        ${moraalBlok(t, false)}
+        ${moraalBlok(t, false)}${lesRegel(t)}
         ${mediaActies(t, ['belang', 'nepnieuws'])}
       </section>
       <section class="blok"><h3>Overname <span class="uitleg" title="Twee wegen zonder oorlog: een land dat je vertrouwt, jouw media volgt en niet meer wil vechten, sluit zich aan. Of: overweldigende militaire overmacht plus lage strijdbereidheid, en ze geven zich over.">ⓘ</span></h3>${overnameBlok(t)}</section>`;
@@ -1383,6 +1432,13 @@ function renderInvloed() {
 
 // ----- blokken -----
 
+// Bij het blok van je rivaal: wat hij uit je vorige potje leerde (C14).
+function rivaalDossier(b) {
+  const r = ui.state.rivaal;
+  const les = r && r.blok === b.id ? ui.state.pack.rivaalIndex?.[r.les] : null;
+  return les ? `<br><span class="rivaal-regel">Dossier: ${esc(doctrineKort(les))}</span>` : '';
+}
+
 function renderBlokken() {
   const s = ui.state;
   const P = s.pack;
@@ -1391,7 +1447,7 @@ function renderBlokken() {
     const leider = s.landen[b.leider];
     return `<div class="blok-rij"><span class="kleur" style="background:${b.kleur}"></span><b>${esc(b.naam)}${b.id === s.spelerBlok ? ' (jij)' : ''}</b><span class="num">${pct(b.aandeel)}</span>
       <div class="aandeel"><div style="width:${pct(b.aandeel)};height:100%;background:${b.kleur}"></div></div>
-      <span class="sub">Leider ${esc(leider?.naam ?? '–')} · ${b.leden} landen · cohesie ${b.cohesie?.toFixed(0) ?? '–'} · spanning ${b.spanning.toFixed(0)}<br>${esc(leden.join(', '))}</span></div>`;
+      <span class="sub">Leider ${esc(leider?.naam ?? '–')} · ${b.leden} landen · cohesie ${b.cohesie?.toFixed(0) ?? '–'} · spanning ${b.spanning.toFixed(0)}<br>${esc(leden.join(', '))}${rivaalDossier(b)}</span></div>`;
   }).join('')}
   <div class="blok-rij"><span class="kleur" style="background:${P.zwevend.kleur}"></span><b>Zwevend</b><span class="num">${s.landen.filter((l) => l.alignment === 'zwevend').length} landen</span>
     <span class="sub">${esc(s.landen.filter((l) => l.alignment === 'zwevend').map((l) => l.naam).join(', ') || '–')}</span></div></section>`);
@@ -1455,7 +1511,9 @@ function renderCommandanten() {
 
 function renderLog() {
   const s = ui.state;
-  zet('log', `<section class="blok">${s.log.slice(-200).reverse().map((l) => `<div class="log-item ${l.soort}"><span class="d">dag ${l.dag}</span><span class="t">${esc(l.tekst)}</span></div>`).join('')}</section>`);
+  const archief = krant.archiefHtml(); // eerst tonen (met stip bij ongelezen), dan als gelezen markeren
+  krant.gelezen(performance.now());
+  zet('log', `${archief}<section class="blok">${s.log.slice(-200).reverse().map((l) => `<div class="log-item ${l.soort}"><span class="d">dag ${l.dag}</span><span class="t">${esc(l.tekst)}</span></div>`).join('')}</section>`);
 }
 
 // ---------- tooltip ----------
@@ -1477,7 +1535,7 @@ function toonTip(idx, t, x, y) {
     const c = speler();
     const d = s.eigenaar[t] === s.speler ? sim.afstandTotKnooppunt(s, c, t) : null;
     plaatsTip(`<b>${esc(tegel.terrein)}</b>${d != null ? ` · ${d.toFixed(1)} vakjes van knooppunt` : ''}<br>${st.ok
-      ? `<span class="goed">Bouwen kan.</span> Rendement <b>${pct(st.rendement)}</b>`
+      ? `<span class="goed">Bouwen kan.</span> Rendement <b>${pct(st.rendement)}</b>${((pr) => (pr ? `<br><span class="zacht">${pr} per dag</span>` : ''))(Object.entries(s.pack.gebouwIndex[ui.bouwModus]?.productie || {}).map(([r, v]) => `+${(v * st.rendement).toFixed(1)} ${res(r)?.naam.toLowerCase()}`).join(', '))}`
       : `<span class="slecht">${esc(st.reden)}</span>`}`);
     return;
   }
@@ -1496,7 +1554,7 @@ function toonTip(idx, t, x, y) {
     const p = land.plaatsingen.find((x) => x.t === t);
     const prod = Object.entries(g.productie || {}).map(([r, v]) => `+${(v * (p?.eff ?? 1)).toFixed(1)} ${res(r)?.naam.toLowerCase()}`).join(', ');
     const uitnodiging = bezet.land !== s.speler && !bezet.bouw ? `<br><span style="color:var(--accent)">Klik voor ${g.informatiecontrole || g.id === 'omroep' ? 'media inkopen bij de bron' : s.pack.eenheden.some((e) => e.gebouw === g.id) ? 'inlichtingen' : 'acties'}</span>` : '';
-    plaatsTip(`<b>${g.icoon ?? ''} ${esc(g.naam)}</b> · ${esc(land.naam)}<br>${bezet.bouw ? '<span class="zacht">In aanbouw</span>' : `Rendement ${pct(p?.eff ?? 1)}${prod ? `<br><span class="zacht">${prod} per dag</span>` : ''}`}${uitnodiging}`);
+    plaatsTip(`<b>${g.icoon ?? ''} ${esc(g.naam)}</b> · ${esc(land.naam)}<br>${bezet.bouw ? `<span class="zacht">${((b, n = b ? Math.max(1, b.klaar - s.dag) : 0) => (b ? `In aanbouw · nog ${n} ${n === 1 ? 'dag' : 'dagen'} (klaar op dag ${b.klaar})` : 'In aanbouw'))(bezet.land === s.speler ? land.bouw.find((x) => x.tegel === t) : null)}</span>` : `Rendement ${pct(p?.eff ?? 1)}${prod ? `<br><span class="zacht">${prod} per dag</span>` : ''}`}${uitnodiging}`);
     return;
   }
   if (idx === -2) { plaatsTip('<b>Onbewoond land</b><br><span class="zacht">Stuur een kolonistenschip hierheen (tabblad Leger) om een kolonie te stichten.</span>'); return; }
@@ -1587,7 +1645,7 @@ function toonIntro() {
 function toonEinde() {
   ui.eindGetoond = true;
   zetTempo(0);
-  toonEindoverzicht(ui.state, { openModal, sluitModal, naarStart, download, toast });
+  toonEindoverzicht(ui.state, { openModal, sluitModal, naarStart, download, toast, krant });
 }
 
 function toonMenu() {
@@ -1626,6 +1684,7 @@ function download(data, naam) {
 
 function naarStart() {
   sluitModal();
+  krant.verberg();
   zetTempo(0);
   autoOpslaan();
   stopTutorial(false);
@@ -2000,7 +2059,7 @@ function toast(tekst, soort = 'info') {
 const doelbalk = maakDoelen({ ui, zetTab, selecteer });
 
 // Handig bij playtests en debuggen vanuit de console.
-window.machtsbalans = { ui, sim };
+window.machtsbalans = { ui, sim, krant };
 
 // Installeerbare webapp: de service worker houdt het spel offline speelbaar.
 if ('serviceWorker' in navigator && window.isSecureContext) {

@@ -10,11 +10,13 @@ export function regimeVan(state, c) {
   return state.pack.regimes[c.regime];
 }
 
-// Een leiderdoctrine (C13) telt op bij het regime-effect. Zonder doctrine is dat + 0: exact hetzelfde getal.
+// Een leiderdoctrine (C13) en de les van een rivaal (C14) tellen op bij het regime-effect. Zonder doctrine of les is
+// dat + 0: exact hetzelfde getal.
 export function regimeEffect(state, c, veld, standaard = 0) {
   const basis = regimeVan(state, c)?.effecten?.[veld] ?? standaard;
   const d = c.doctrine ? state.pack.doctrineIndex?.[c.doctrine]?.effecten?.[veld] ?? 0 : 0;
-  return basis + d;
+  const r = c.rivaalLes ? state.pack.rivaalIndex?.[c.rivaalLes]?.effecten?.[veld] ?? 0 : 0;
+  return basis + d + r;
 }
 
 // De doctrine van een land (alleen de speler kan er een hebben), of null.

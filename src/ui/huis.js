@@ -19,7 +19,30 @@ let geheugen = null; // laatste bekende huis, voor als localStorage ontbreekt of
 let keuze; // gekozen doctrine-id op het startscherm (undefined = nog niet gekozen: laatsteKeuze geldt)
 
 export function leegHuis() {
-  return { versie: 1, ontgrendeld: [], generaties: [], geteld: [], laatsteKeuze: null, aantal: 0 };
+  return { versie: 1, ontgrendeld: [], generaties: [], geteld: [], laatsteKeuze: null, aantal: 0, rivalen: {} };
+}
+
+const tekst80 = (x) => (typeof x === 'string' ? x.slice(0, 80) : null);
+// Kroniek van een generatie (C14): hooguit 5 regels { dag, tekst }, platte tekst van hooguit 80 tekens.
+function netteKroniek(k) {
+  if (!Array.isArray(k)) return undefined;
+  return k.filter((r) => r && Number.isFinite(r.dag) && typeof r.tekst === 'string').slice(-5).map((r) => ({ dag: r.dag, tekst: tekst80(r.tekst), ...(r.eind ? { eind: true } : {}) }));
+}
+function netteRivaal(r) {
+  if (!r || typeof r !== 'object' || typeof r.blok !== 'string') return undefined;
+  return { blok: r.blok, les: typeof r.les === 'string' ? r.les : null, leiderNaam: tekst80(r.leiderNaam), landNaam: tekst80(r.landNaam) };
+}
+function netteRivalen(v) {
+  const uit = {};
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return uit;
+  for (const [pack, r] of Object.entries(v)) {
+    if (!r || typeof r !== 'object' || typeof r.blok !== 'string' || typeof r.les !== 'string') continue;
+    uit[pack] = {
+      blok: r.blok, les: r.les, keer: Number.isInteger(r.keer) && r.keer > 0 ? r.keer : 1,
+      generatie: Number.isInteger(r.generatie) ? r.generatie : null, leiderNaam: tekst80(r.leiderNaam), landNaam: tekst80(r.landNaam), winst: !!r.winst,
+    };
+  }
+  return uit;
 }
 
 function netjes(v) {
@@ -28,9 +51,17 @@ function netjes(v) {
   const h = {
     versie: 1,
     ontgrendeld: lijst(v.ontgrendeld).filter((x) => typeof x === 'string'),
-    generaties: lijst(v.generaties).filter((g) => g && typeof g === 'object').slice(-MAX),
+    generaties: lijst(v.generaties).filter((g) => g && typeof g === 'object').slice(-MAX).map((g) => {
+      const n = { ...g };
+      const k = netteKroniek(g.kroniek);
+      if (k) n.kroniek = k; else delete n.kroniek;
+      const r = netteRivaal(g.rivaal);
+      if (r) n.rivaal = r; else delete n.rivaal;
+      return n;
+    }),
     geteld: lijst(v.geteld).filter((x) => typeof x === 'string').slice(-MAX),
     laatsteKeuze: typeof v.laatsteKeuze === 'string' ? v.laatsteKeuze : null,
+    rivalen: netteRivalen(v.rivalen),
   };
   h.aantal = Number.isInteger(v.aantal) && v.aantal >= h.generaties.length ? v.aantal : h.generaties.length;
   return h;
@@ -156,7 +187,7 @@ export function evalueerOntgrendeling(pack, huis, potje) {
 
 // Na een echt potje (niet bij een replay): telt één keer per potje-id, voegt een generatie toe en speelt vrij.
 // Geeft { nieuw: [doctrines], generatie: N, alGeteld } terug; bij een tweede keer hetzelfde potje dezelfde uitkomst.
-export function registreerPotje(state, score) {
+export function registreerPotje(state, score, extra = {}) {
   if (!state?.uitkomst || state.replayDoel) return { nieuw: [], generatie: null, alGeteld: false };
   const pack = state.pack;
   const potje = potjeUit(state, score);
@@ -173,6 +204,20 @@ export function registreerPotje(state, score) {
     winst: potje.winst, reden: potje.reden, score: score.totaal, dag: state.uitkomst.dag ?? state.dag,
     datum: datumSleutel(), nieuw: [], // lokale datum, zoals de uitdaging (UTC is in Nederland rond middernacht een dag eerder)
   };
+  const kroniek = netteKroniek(extra.kroniek);
+  if (kroniek?.length) generatie.kroniek = kroniek;
+  const rivaal = extra.rivaal === undefined ? bepaalRivaal(state, score) : extra.rivaal;
+  if (rivaal) {
+    generatie.rivaal = netteRivaal(rivaal);
+    // Het geheugen per wereld: wie jou onthoudt in het volgende potje. Hetzelfde blok opnieuw: 'voor de 2e keer'.
+    if (rivaal.les) {
+      const oud = huis.rivalen[pack.meta.id];
+      huis.rivalen[pack.meta.id] = {
+        blok: rivaal.blok, les: rivaal.les, keer: oud && oud.blok === rivaal.blok ? (oud.keer ?? 1) + 1 : 1, generatie: huis.aantal,
+        leiderNaam: rivaal.leiderNaam, landNaam: rivaal.landNaam, winst: potje.winst,
+      };
+    }
+  }
   huis.generaties.push(generatie);
   huis.generaties = huis.generaties.slice(-MAX);
   huis.geteld.push(potje.id);
@@ -182,6 +227,43 @@ export function registreerPotje(state, score) {
   for (const id of nieuw) if (!huis.ontgrendeld.includes(id)) huis.ontgrendeld.push(id);
   bewaarHuis(huis);
   return { nieuw: naarDoctrines(nieuw), generatie: huis.aantal, alGeteld: false };
+}
+
+// ---------- rivalen met geheugen (C14) ----------
+
+// Wie onthoudt jou na dit potje, en welke les neemt hij mee? Puur. Winst: het blok met het grootste aandeel na het
+// jouwe. Verlies: de winnaar, of bij regeringsval en capitulatie het grootste andere blok. De les is de eerste uit
+// pack.rivalen waarvan 'na' past (winst met oorlog gaat voor de route). Geeft null als er geen rivaal te bepalen is.
+export function bepaalRivaal(state, score) {
+  const u = state?.uitkomst;
+  if (!u) return null;
+  const pack = state.pack;
+  const winst = !!u.spelerWint;
+  const anderen = (state.blokken ?? []).filter((b) => b.id !== state.spelerBlok && b.leider >= 0);
+  if (!anderen.length) return null;
+  const grootste = [...anderen].sort((a, b) => b.aandeel - a.aandeel)[0];
+  const blok = winst ? grootste : (anderen.find((b) => b.id === u.winnaar) ?? grootste);
+  // Winst aan het einde van de tijdlijn heeft geen eigen route: dat telt als economische winst.
+  const route = (pack.verhaal?.overwinning ?? []).find((v) => v.naam === u.reden)?.type ?? (winst ? 'aandeel_productie' : null);
+  const oorlog = !(score?.zonderOorlog ?? true);
+  const les = (pack.rivalen ?? []).find((l) => {
+    const na = l?.na ?? {};
+    if (na.winst_oorlog) return winst && oorlog;
+    if (na.winst_route) return winst && route === na.winst_route;
+    if (na.verlies) return !winst;
+    return false;
+  });
+  const leider = state.landen[blok.leider];
+  return { blok: blok.id, les: les?.id ?? null, leiderNaam: leider?.leider ?? null, landNaam: leider?.naam ?? null, winst };
+}
+
+// De rivaal voor het volgende potje als instelling voor de engine: [{ blok, les }] of [] (geen geheugen, onbekend
+// blok of onbekende les).
+export function rivaalInstelling(pack) {
+  if (!pack) return [];
+  const r = leesHuis().rivalen?.[pack.meta?.id];
+  if (!r || !pack.blokken?.some((b) => b.id === r.blok) || !pack.rivaalIndex?.[r.les]) return [];
+  return [{ blok: r.blok, les: r.les }];
 }
 
 // ---------- keuze op het startscherm ----------
@@ -232,7 +314,47 @@ export function embleemSvg(naam, grootte = 28) {
 
 const datumKort = (iso) => { const [j, m, d] = String(iso ?? '').split('-'); return d ? `${d}-${m}-${j}` : ''; };
 
-export function toonHuis(pack) {
+let openGen = null; // id van de uitgeklapte generatie in de strook
+let laatsteLand = null; // gekozen land op het startscherm (voor "geldt niet" in het dossier)
+
+// Het rivaaldossier boven de generaties (C14): wie jou onthoudt, wat hij leerde, en hoe je hem aanpakt.
+export function dossierHtml(pack, huis, landId) {
+  const r = huis.rivalen?.[pack?.meta?.id];
+  const les = r && pack.rivaalIndex?.[r.les];
+  if (!les || !pack.blokken?.some((b) => b.id === r.blok)) return '';
+  const vul = (t) => String(t ?? '').replace(/\{leider\}/g, r.leiderNaam ?? 'De leider').replace(/\{land\}/g, r.landNaam ?? 'zijn land');
+  const regels = effectRegels(les);
+  const sterk = regels.filter((x) => x.goed).map((x) => x.tekst);
+  const zwak = regels.filter((x) => !x.goed).map((x) => x.tekst);
+  const zelf = !!landId && pack.landen?.find((l) => l.id === landId)?.blok === r.blok;
+  const keer = r.keer > 1 ? ` <span class="rd-keer">voor de ${r.keer}e keer</span>` : '';
+  return `<div class="rivaal-dossier${zelf ? ' geldt-niet' : ''}">
+      <div class="rd-kop"><b>Dossier: ${esc(les.naam)}</b>${keer}</div>
+      <p class="rd-tekst">${esc(vul(les.tekst))}</p>
+      ${sterk.length ? `<p class="rd-regel"><span class="zacht">Zijn sterke punt:</span> <span class="${zelf ? '' : 'slecht'}">${esc(sterk.join(', '))}</span></p>` : ''}
+      ${zwak.length ? `<p class="rd-regel"><span class="zacht">Zijn zwakke plek:</span> <span class="${zelf ? '' : 'goed'}">${esc(zwak.join(', '))}</span></p>` : ''}
+      ${les.tegenzet ? `<p class="rd-tegenzet">${esc(les.tegenzet)}</p>` : ''}
+      ${zelf ? '<p class="rd-niet">Geldt niet: je speelt nu zelf in dit blok.</p>' : ''}
+    </div>`;
+}
+
+// Het vinkje 'Rivalen onthouden je' op het startscherm (standaard aan; zonder vinkje, zoals in node, ook aan).
+function rivalenAan() {
+  const v = typeof document !== 'undefined' ? document.getElementById('opt-rivalen') : null;
+  return !v || v.checked;
+}
+
+export function kroniekPaneel(g) {
+  const k = Array.isArray(g?.kroniek) ? g.kroniek : [];
+  const regels = k.length
+    ? `<ol class="hk-regels">${k.map((r) => `<li class="${r.eind ? 'hk-eind' : ''}"><span class="num zacht">dag ${esc(r.dag)}</span><span>${esc(r.tekst)}</span></li>`).join('')}</ol>`
+    : '<p class="zacht hk-leeg">Nog geen kroniek (gespeeld vóór de krant).</p>';
+  const riv = g?.rivaal?.leiderNaam ? `<p class="hk-rivaal"><span class="zacht">Rivaal:</span> ${esc(g.rivaal.leiderNaam)} van ${esc(g.rivaal.landNaam ?? '?')}</p>` : '';
+  return `<div class="hk-kop"><b>Generatie ${esc(g?.generatie ?? '')}</b> <span class="zacht">${esc(g?.landNaam ?? '')} · ${g?.winst ? 'gewonnen' : 'verloren'}${g?.reden ? ` · ${esc(g.reden)}` : ''}</span></div>${regels}${riv}`;
+}
+
+export function toonHuis(pack, landId = laatsteLand) {
+  laatsteLand = landId;
   const el = typeof document !== 'undefined' ? document.getElementById('huis') : null;
   if (!el) return;
   const lijst = pack?.doctrines ?? [];
@@ -254,10 +376,12 @@ export function toonHuis(pack) {
     </button>`;
   };
   const gens = huis.generaties.slice(-STROOK).reverse();
+  const open = openGen != null ? gens.find((g) => g.id === openGen) : null;
+  if (!open) openGen = null;
   const strook = gens.length
     ? `<ol class="huis-strook">${gens.map((g) => {
       const d = g.doctrine ? lijst.find((x) => x.id === g.doctrine) : null;
-      return `<li class="${g.winst ? 'gewonnen' : 'verloren'}" title="${esc(d?.naam ?? 'Geen doctrine')}${g.reden ? ` · ${esc(g.reden)}` : ''}">
+      return `<li class="${g.winst ? 'gewonnen' : 'verloren'}" role="button" tabindex="0" data-gen="${esc(g.id ?? '')}" aria-expanded="${openGen != null && g.id === openGen}" title="${esc(d?.naam ?? 'Geen doctrine')}${g.reden ? ` · ${esc(g.reden)}` : ''}">
         <span class="hs-embleem">${embleemSvg(d?.embleem ?? 'geen', 18)}</span>
         <span class="hs-land">${esc(g.landNaam ?? g.land ?? '?')}</span>
         <span class="hs-nr zacht num">${g.generatie ? `#${esc(g.generatie)}` : ''}</span>
@@ -271,9 +395,16 @@ export function toonHuis(pack) {
   el.innerHTML = `<div class="huis-kop"><span>Je huis</span><span class="zacht">${huis.aantal} ${huis.aantal === 1 ? 'generatie' : 'generaties'} · ${vrij} van ${lijst.length} doctrines vrij</span></div>
     <p class="zacht huis-uitleg">Kies wat voor leider je dit potje bent. Elke doctrine maakt één route sterker en een andere zwakker. De rest speel je vrij door anders te spelen.</p>
     <div class="doctrine-rij">${kaart(null)}${lijst.map(kaart).join('')}</div>
+    ${rivalenAan() ? dossierHtml(pack, huis, landId) : ''}
     <h3 class="huis-sub">Generaties</h3>
-    ${strook}`;
+    ${strook}
+    <div class="huis-kroniek" ${open ? '' : 'hidden'}>${open ? kroniekPaneel(open) : ''}</div>`;
   for (const b of el.querySelectorAll('[data-doctrine]')) {
     b.onclick = () => { if (!b.disabled) kies(pack, b.dataset.doctrine || null); };
+  }
+  for (const li of el.querySelectorAll('[data-gen]')) {
+    const wissel = () => { openGen = openGen === li.dataset.gen ? null : li.dataset.gen; toonHuis(pack, landId); };
+    li.onclick = wissel;
+    li.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); wissel(); } };
   }
 }

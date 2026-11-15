@@ -155,19 +155,21 @@ function tint(hex, f) {
   return v;
 }
 
-// C13c: het dak van een stilstaand gebouw (tekort aan wat het verbruikt): 15 % ontzadigd en 6 % donkerder. Geeft weer
-// #rrggbb, zodat tint() er daarna nog op werkt; het resultaat wordt onthouden.
-const STIL_DAK = new Map();
+// C13c: het dak van een stilstaand gebouw (tekort aan wat het verbruikt): ontzadigd en donkerder volgens STIL_DAK (C14d:
+// 40 % en 15 %). Geeft weer #rrggbb, zodat tint() er daarna nog op werkt; het resultaat wordt onthouden.
+const STIL_DAK = { ontzadig: 0.4, donker: 0.15 };
+const STIL_DAK_CACHE = new Map();
 function stilDak(hex) {
-  let v = STIL_DAK.get(hex);
+  let v = STIL_DAK_CACHE.get(hex);
   if (v) return v;
   if (typeof hex !== 'string' || hex[0] !== '#' || hex.length < 7) return hex;
   const n = parseInt(hex.slice(1, 7), 16);
   let r = n >> 16, g = (n >> 8) & 255, b = n & 255;
   const grijs = 0.299 * r + 0.587 * g + 0.114 * b;
-  r = (r + (grijs - r) * 0.15) * 0.94; g = (g + (grijs - g) * 0.15) * 0.94; b = (b + (grijs - b) * 0.15) * 0.94;
+  const oz = STIL_DAK.ontzadig, dk = 1 - STIL_DAK.donker;
+  r = (r + (grijs - r) * oz) * dk; g = (g + (grijs - g) * oz) * dk; b = (b + (grijs - b) * oz) * dk;
   v = '#' + ((1 << 24) | (Math.round(r) << 16) | (Math.round(g) << 8) | Math.round(b)).toString(16).slice(1);
-  STIL_DAK.set(hex, v);
+  STIL_DAK_CACHE.set(hex, v);
   return v;
 }
 // Staat het gebouw dat nu getekend wordt stil? Gezet door tekenGebouwDetail, gelezen door zetB en tekenLevend.
@@ -5474,6 +5476,10 @@ export function tekenGebouwDetail(c, soort, x, y, s, ctx) {
   }
   VORIGE_MAAT.set(vast, s);
 
+  // C14b: een bouwplaats toont de bitmap steeds voller (eerst put en fundering, dan een casco dat dichter wordt);
+  // alfa bij het tonen, dus geen nieuwe cachesleutel
+  const bouwV = ctx.voortgang != null ? klem(ctx.voortgang) : -1;
+  if (bouwV >= 0) c.globalAlpha *= glij((bouwV - 0.18) / 0.54);
   if (e) {
     if (e.px === echt) {
       // exacte maat: op hele apparaatpixels, dan kopieert de browser zonder herbemonstering
@@ -5495,14 +5501,23 @@ export function tekenGebouwDetail(c, soort, x, y, s, ctx) {
   // ramen en levende delen in het vak van het gebouw; kavellichten en dock in de hele tegel
   const ks = e.kavel ? e.kavel.k * s : s, kx = e.kavel ? x + e.kavel.bx * s : x, ky = e.kavel ? y + e.kavel.by * s : y;
   const tijd = ctx.tijd ?? 0;
-  tekenRamen(c, kx, ky, ks, e, ctx, tijd * 1000);
-  tekenLevend(c, kx, ky, ks, e, st, ctx, tijd, sz);
-  if (e.kavel) tekenKavelLevend(c, x, y, s, e, ctx, tijd);
+  if (!ctx.voorbeeld) {
+    tekenRamen(c, kx, ky, ks, e, ctx, tijd * 1000);
+    tekenLevend(c, kx, ky, ks, e, st, ctx, tijd, sz);
+    if (e.kavel) tekenKavelLevend(c, x, y, s, e, ctx, tijd);
+  }
 
   if (ctx.voortgang != null) {
     // de bouw blijft zichtbaar aan het casco, de steigers, de kraan en (op een kavel) het bouwhek
     const r = e.kavel ? e.kavelRand : null;
     if (r) { c.save(); c.beginPath(); c.rect(x + r[0] * s, y + r[1] * s, (r[2] - r[0]) * s, (r[3] - r[1]) * s); c.clip(); }
+    // C14b: tussen 25 en 70 % een grijze waas van stof en beton over het zichtvak, die met het werk wegtrekt
+    const waas = 0.45 * (1 - glij((bouwV - 0.45) / 0.35)) * glij((bouwV - 0.2) / 0.1);
+    if (bouwV >= 0.2 && bouwV <= 0.7 && waas > 0.01) {
+      const zv = kv ? [Math.max(kv.bx - kv.k / 2, kv.knip[0]), Math.max(kv.by - kv.k / 2, kv.knip[1]), Math.min(kv.bx + kv.k / 2, kv.knip[2]), Math.min(kv.by + kv.k / 2, kv.knip[3])] : [-0.42, -0.42, 0.42, 0.42];
+      c.fillStyle = rgba('150,148,142', waas);
+      c.fillRect(x + zv[0] * s, y + zv[1] * s, (zv[2] - zv[0]) * s, (zv[3] - zv[1]) * s);
+    }
     bouwfase(c, kx, ky, ks, ctx.voortgang);
     if (e.lod >= 1) steigers(c, kx, ky, ks, ctx.voortgang);
     if (r) c.restore();
@@ -5588,7 +5603,7 @@ function raamIndeling(e, seed) {
 function tekenRamen(c, x, y, s, e, ctx, nu) {
   const nacht = ctx.nacht ?? 0;
   const R = e.ramen;
-  if (!(nacht > 0.05) || e.uit || ctx.uit || R.length === 0) return;
+  if (!(nacht > 0.05) || e.uit || ctx.uit || R.length === 0 || stilNu) return;
   const w = ctx.welvaart ?? 1;
   const wn = w <= 0.4 ? 0 : w >= 1.6 ? 1 : (w - 0.4) / 1.2;
   const p = (0.45 + 0.4 * wn) * (e.verwaarloosd ? 0.4 : 1);
@@ -6079,4 +6094,26 @@ export function tekenTerreinDetail(c, terrein, x, y, s, seed) {
       c.beginPath(); c.moveTo(x - s * 0.35, wy); c.quadraticCurveTo(x - s * 0.18, wy - s * 0.06, x, wy); c.quadraticCurveTo(x + s * 0.18, wy + s * 0.06, x + s * 0.35, wy); c.stroke();
     }
   }
+}
+
+// C14b: de afbouw bij een oplevering (f van 0 tot 1): steigers en kraan vervagen en de steigers schuiven iets naar
+// buiten. Zelfde vak als de bouwplaats in tekenGebouwDetail; geeft false zonder detailtekening.
+export function tekenAfbouw(c, x, y, s, ctx, f) {
+  const o = ctx.omgeving ?? null;
+  let naam = ctx.gebouw && TEKEN[ctx.gebouw] ? ctx.gebouw : TEKEN[ctx.alias] ? ctx.alias : null;
+  if (!naam) return false;
+  const andere = soortOpKavel(naam, o);
+  if (TEKEN[andere]) naam = andere;
+  const kv = o ? kavelVan(o, naam) : null;
+  const ks = kv ? kv.k * s : s, kx = kv ? x + kv.bx * s : x, ky = kv ? y + kv.by * s : y;
+  const a0 = c.globalAlpha, a = klem(1 - f);
+  if (a <= 0.01) return true;
+  c.globalAlpha = a0 * a;
+  if (lodVan(s) >= 1) {
+    const uit = 1 + 0.12 * glij(f);
+    steigers(c, kx, ky, ks * uit, 0.95);
+    bouwkraan(c, kx, ky, ks, ctx.tijd ?? 0, ctx.seed ?? 0);
+  }
+  c.globalAlpha = a0;
+  return true;
 }

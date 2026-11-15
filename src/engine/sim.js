@@ -109,6 +109,19 @@ export function createGame(pack, settings = {}) {
   });
   speler.vast = true;
 
+  // Rivalen met geheugen (C14): de leider van een ander blok neemt een les mee uit jouw vorige potje. Alleen de eerste
+  // geldige rivaal telt; zonder (geldige) rivalen verandert er niets. Geen toeval, geen tick-logica.
+  state.rivaal = null;
+  const rivalen = Array.isArray(s.rivalen) ? s.rivalen : [];
+  for (let i = 0; i < rivalen.length; i++) {
+    const r = rivalen[i];
+    const b = state.blokken.find((x) => x.id === r?.blok);
+    if (!b || b.id === state.spelerBlok || b.leider < 0 || !pack.rivaalIndex?.[r.les]) continue;
+    state.landen[b.leider].rivaalLes = r.les;
+    state.rivaal = { blok: b.id, les: r.les, leider: b.leider };
+    break;
+  }
+
   for (const c of state.landen) {
     c.Y = productie(state, c, {}, 1);
     c.alignment = bepaalAlignment(state, c);

@@ -1,0 +1,194 @@
+{
+  "naam": "De Drie Zeeën Courant",
+  "koppen": {
+    "start": {
+      "goed": [
+        "{speler} kiest een nieuwe koers aan de Drie Zeeën",
+        "Nieuwe regering in {speler} belooft groei en rust",
+        "{spelerblok} kijkt hoopvol naar het nieuwe bestuur in {speler}"
+      ],
+      "slecht": [],
+      "sub": [
+        "Havens en fabrieken wachten op de eerste besluiten",
+        "Zwevende buurlanden houden de hoofdstad nauwlettend in de gaten",
+        "Analisten: wie nu bouwt, oogst over een jaar",
+        "Oude rivaal {rivaal} van {rivaalland} heeft zijn lesje geleerd",
+        "In {rivaalland} bereidt {rivaal} zich voor op een nieuwe ronde"
+      ]
+    },
+    "aansluiting": {
+      "goed": [
+        "{land} sluit zich aan bij {spelerblok}",
+        "Akkoord getekend: {land} kiest voor {spelerblok}",
+        "{spelerblok} groeit: ook {land} doet mee"
+      ],
+      "slecht": [],
+      "sub": [
+        "Handelsroutes worden de komende weken omgelegd",
+        "Diplomaten spreken van een verschuiving in de regio",
+        "Andere blokken reageren gereserveerd op het nieuws"
+      ]
+    },
+    "afvallig": {
+      "goed": [],
+      "slecht": [
+        "{land} keert {spelerblok} de rug toe",
+        "Breuk: {land} verlaat {spelerblok}",
+        "{spelerblok} verliest {land} aan de concurrentie"
+      ],
+      "sub": [
+        "Ministers spreken van een gemiste kans",
+        "Wie het land terugwint, is nog open",
+        "Handelaars vrezen hogere tarieven op de oude routes"
+      ]
+    },
+    "aandeel": {
+      "goed": [
+        "{spelerblok} levert nu {aandeel} van de wereldproductie",
+        "Economie van {spelerblok} groeit door: {aandeel} van de wereld"
+      ],
+      "slecht": [],
+      "sub": [
+        "Fabrieken draaien op volle toeren",
+        "Concurrenten kijken met argwaan naar de cijfers",
+        "Economen waarschuwen voor oververhitting"
+      ]
+    },
+    "bijna": {
+      "goed": [
+        "Overwicht binnen bereik voor {spelerblok}",
+        "Nog even en {spelerblok} heeft de overhand"
+      ],
+      "slecht": [
+        "{blok} nadert het overwicht aan de Drie Zeeën",
+        "Alarm in {speler}: {blok} staat op het punt te winnen"
+      ],
+      "sub": [
+        "De komende maanden zijn beslissend",
+        "Waarnemers verwachten een felle eindsprint",
+        "Wie nu aarzelt, raakt achterop"
+      ]
+    },
+    "fase": {
+      "goed": [
+        "Een nieuwe tijd breekt aan: {fase}",
+        "De wereld schuift door naar {fase}"
+      ],
+      "slecht": [],
+      "sub": [
+        "Nieuwe mogelijkheden, nieuwe risico's",
+        "De blokken zoeken hun positie opnieuw",
+        "In de hoofdsteden wordt tot laat vergaderd"
+      ]
+    },
+    "oorlog": {
+      "goed": [],
+      "slecht": [
+        "Oorlog aan de Drie Zeeën: {speler} in gevecht",
+        "Kanonnen spreken: {spelerblok} in oorlog",
+        "Het is oorlog, en {speler} staat midden in het vuur"
+      ],
+      "sub": [
+        "Rekruten melden zich bij de kazernes",
+        "De handel over zee komt stil te liggen",
+        "Gezinnen bereiden zich voor op zware maanden"
+      ]
+    },
+    "vrede": {
+      "goed": [
+        "De wapens zwijgen: vrede voor {speler}",
+        "Vredesakkoord getekend, opluchting in {speler}"
+      ],
+      "slecht": [],
+      "sub": [
+        "Soldaten keren terug naar huis",
+        "Wederopbouw kan beginnen",
+        "De havens gaan weer open voor handel"
+      ]
+    },
+    "haard_opgelost": {
+      "goed": [
+        "Onrust bezworen: {haard} opgelost",
+        "Regering van {speler} grijpt op tijd in"
+      ],
+      "slecht": [],
+      "sub": [
+        "Bewoners zijn opgelucht",
+        "Critici vragen zich af waarom het zo ver kwam",
+        "De rust keert terug in de straten"
+      ]
+    },
+    "haard_uitgebarsten": {
+      "goed": [],
+      "slecht": [
+        "Uit de hand gelopen: {haard} in {speler}",
+        "Te laat: onrust slaat om in chaos"
+      ],
+      "sub": [
+        "De regering staat onder druk",
+        "Herstel gaat maanden duren",
+        "Buurlanden volgen de beelden met zorg"
+      ]
+    },
+    "verkiezing": {
+      "goed": [
+        "Verkiezingen gewonnen: nieuw mandaat voor de regering",
+        "Kiezers geven {speler} vertrouwen voor de volgende jaren"
+      ],
+      "slecht": [],
+      "sub": [
+        "De opkomst was hoog",
+        "De oppositie belooft een scherpe controle",
+        "Beurzen reageren rustig op de uitslag"
+      ]
+    },
+    "hervorming": {
+      "goed": [
+        "Staatshervorming: {speler} kiest een nieuwe bestuursvorm",
+        "Nieuwe grondregels voor {speler}"
+      ],
+      "slecht": [],
+      "sub": [
+        "Niet iedereen is blij met de koerswijziging",
+        "De ambtenarij moet wennen aan de nieuwe regels",
+        "Buitenlandse partners vragen om uitleg"
+      ]
+    },
+    "kolonie": {
+      "goed": [
+        "Kolonie gesticht: {speler} vestigt zich overzee",
+        "Eerste kolonisten van {speler} gaan aan land"
+      ],
+      "slecht": [],
+      "sub": [
+        "Het nieuwe gebied heeft nog alles nodig",
+        "Andere landen kijken jaloers naar de zee",
+        "Het centrum werkt als nieuw knooppunt"
+      ]
+    },
+    "einde_winst": {
+      "goed": [
+        "{spelerblok} wint de strijd om de Drie Zeeën",
+        "Historische dag: {speler} aan de top"
+      ],
+      "slecht": [],
+      "sub": [
+        "Een tijdperk is ten einde",
+        "Historici zullen nog lang over deze jaren schrijven",
+        "In de hoofdstad wordt tot diep in de nacht gefeest"
+      ]
+    },
+    "einde_verlies": {
+      "goed": [],
+      "slecht": [
+        "Het spel is uit voor {speler}",
+        "Nederlaag: {spelerblok} moet de wereld laten gaan"
+      ],
+      "sub": [
+        "Een volgende generatie krijgt een nieuwe kans",
+        "De lessen worden nu al opgeschreven",
+        "Stilte in de regeringsgebouwen"
+      ]
+    }
+  }
+}

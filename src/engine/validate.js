@@ -90,6 +90,8 @@ export function validatePack(p) {
     if (r.revolutie_naar && !p.regimes[r.revolutie_naar]) waarschuwingen.push(`Regime '${id}': revolutie naar onbekend regime '${r.revolutie_naar}'.`);
   }
   checkDoctrines(p, fouten);
+  checkRivalen(p, fouten);
+  checkKrant(p, waarschuwingen);
   for (const o of p.verhaal.overwinning || []) {
     if (!OVERWINNING_TYPES.includes(o.type)) fouten.push(`Onbekende overwinningsvoorwaarde '${o.type}'.`);
   }
@@ -201,6 +203,21 @@ const DOCTRINE_GRENZEN = {
 const DOCTRINE_OMGEKEERD = ['complot_gevoeligheid', 'oorlog_moeheid'];
 const ONTGRENDEL_SLEUTELS = ['start', 'potjes', 'winst_route', 'winst_zonder_oorlog', 'orders'];
 
+// Effecten van een doctrine of rivaalles: bekende regimevelden, getallen, binnen de grenzen. Geeft terug of er een
+// voordeel en een nadeel tussen zitten.
+function checkEffecten(waar, effecten, grenzen, fouten) {
+  let voordeel = false, nadeel = false;
+  const eff = effecten && typeof effecten === 'object' ? effecten : {};
+  for (const [k, v] of Object.entries(eff)) {
+    if (!(k in grenzen)) { fouten.push(`${waar}: onbekend effectveld '${k}' (kies uit ${Object.keys(grenzen).join(', ')}).`); continue; }
+    if (typeof v !== 'number' || !Number.isFinite(v)) { fouten.push(`${waar}: '${k}' is geen getal.`); continue; }
+    if (Math.abs(v) > grenzen[k]) fouten.push(`${waar}: '${k}' = ${v} ligt buiten de grens van ${grenzen[k]}.`);
+    const goed = DOCTRINE_OMGEKEERD.includes(k) ? v < 0 : v > 0;
+    if (v !== 0) { if (goed) voordeel = true; else nadeel = true; }
+  }
+  return { voordeel, nadeel };
+}
+
 function checkDoctrines(p, fouten) {
   const lijst = p.doctrines;
   if (!Array.isArray(lijst)) { fouten.push('Doctrines moeten een lijst zijn.'); return; }
@@ -213,15 +230,7 @@ function checkDoctrines(p, fouten) {
     else if (ids.has(d.id)) fouten.push(`${waar} komt dubbel voor.`);
     ids.add(d.id);
     if (!d.naam) fouten.push(`${waar} mist een naam.`);
-    let voordeel = false, nadeel = false;
-    const eff = d.effecten && typeof d.effecten === 'object' ? d.effecten : {};
-    for (const [k, v] of Object.entries(eff)) {
-      if (!(k in DOCTRINE_GRENZEN)) { fouten.push(`${waar}: onbekend effectveld '${k}' (kies uit ${Object.keys(DOCTRINE_GRENZEN).join(', ')}).`); continue; }
-      if (typeof v !== 'number' || !Number.isFinite(v)) { fouten.push(`${waar}: '${k}' is geen getal.`); continue; }
-      if (Math.abs(v) > DOCTRINE_GRENZEN[k]) fouten.push(`${waar}: '${k}' = ${v} ligt buiten de grens van ${DOCTRINE_GRENZEN[k]}.`);
-      const goed = DOCTRINE_OMGEKEERD.includes(k) ? v < 0 : v > 0;
-      if (v !== 0) { if (goed) voordeel = true; else nadeel = true; }
-    }
+    const { voordeel, nadeel } = checkEffecten(waar, d.effecten, DOCTRINE_GRENZEN, fouten);
     if (!voordeel || !nadeel) fouten.push(`${waar} heeft niet zowel een voordeel als een nadeel (elke doctrine heeft een tegenzet).`);
     const o = d.ontgrendel && typeof d.ontgrendel === 'object' ? d.ontgrendel : {};
     for (const k of Object.keys(o)) if (!ONTGRENDEL_SLEUTELS.includes(k)) fouten.push(`${waar}: onbekende ontgrendelvoorwaarde '${k}' (kies uit ${ONTGRENDEL_SLEUTELS.join(', ')}).`);
@@ -231,6 +240,48 @@ function checkDoctrines(p, fouten) {
     if (o.orders != null && !(o.orders && typeof o.orders.type === 'string' && Number.isInteger(o.orders.minimaal) && o.orders.minimaal > 0)) fouten.push(`${waar}: 'orders' vraagt een type en een positief 'minimaal'.`);
   }
   if (lijst.length && !start) fouten.push('Geen enkele doctrine is vanaf het begin vrij (zet bij minstens één ontgrendel.start: true).');
+}
+
+// Rivaallessen (C14): de halve doctrinegrenzen, altijd een voordeel én een nadeel, en precies één 'na'-voorwaarde.
+const RIVAAL_GRENZEN = Object.fromEntries(Object.entries(DOCTRINE_GRENZEN).map(([k, v]) => [k, v / 2]));
+const RIVAAL_NA = ['winst_route', 'winst_oorlog', 'verlies'];
+function checkRivalen(p, fouten) {
+  const lijst = p.rivalen;
+  if (!Array.isArray(lijst)) { fouten.push('Rivalen moeten een lijst zijn.'); return; }
+  const ids = new Set();
+  for (let i = 0; i < lijst.length; i++) {
+    const r = lijst[i] || {};
+    const waar = `Rivaalles '${r.id ?? `#${i + 1}`}'`;
+    if (!r.id) fouten.push(`Rivaalles #${i + 1} mist een id.`);
+    else if (ids.has(r.id)) fouten.push(`${waar} komt dubbel voor.`);
+    ids.add(r.id);
+    if (!r.naam) fouten.push(`${waar} mist een naam.`);
+    const { voordeel, nadeel } = checkEffecten(waar, r.effecten, RIVAAL_GRENZEN, fouten);
+    if (!voordeel || !nadeel) fouten.push(`${waar} heeft niet zowel een voordeel als een nadeel (elke les heeft een zwakke plek).`);
+    const na = r.na && typeof r.na === 'object' ? Object.keys(r.na) : [];
+    if (na.length !== 1 || !RIVAAL_NA.includes(na[0])) fouten.push(`${waar}: 'na' moet precies één van ${RIVAAL_NA.join(', ')} hebben.`);
+    else if (na[0] === 'winst_route' && !OVERWINNING_TYPES.includes(r.na.winst_route)) fouten.push(`${waar}: winst_route '${r.na.winst_route}' is geen overwinningstype (kies uit ${OVERWINNING_TYPES.join(', ')}).`);
+  }
+}
+
+// De Krant (C14): alleen waarschuwingen, de krant kan het spel nooit tegenhouden.
+export const KRANT_SOORTEN = ['start', 'aansluiting', 'afvallig', 'aandeel', 'bijna', 'fase', 'oorlog', 'vrede', 'haard_opgelost', 'haard_uitgebarsten', 'verkiezing', 'hervorming', 'kolonie', 'einde_winst', 'einde_verlies'];
+export const KRANT_PLAATSHOUDERS = ['land', 'blok', 'speler', 'spelerblok', 'leider', 'rivaal', 'rivaalland', 'fase', 'aandeel', 'haard', 'jaar'];
+function checkKrant(p, waarschuwingen) {
+  const koppen = p.krant?.koppen;
+  if (!koppen || typeof koppen !== 'object') return;
+  for (const [soort, v] of Object.entries(koppen)) {
+    if (!KRANT_SOORTEN.includes(soort)) { waarschuwingen.push(`Krant: onbekende soort '${soort}' wordt niet gebruikt.`); continue; }
+    for (const toon of ['goed', 'slecht', 'sub']) {
+      for (const kop of Array.isArray(v?.[toon]) ? v[toon] : []) {
+        if (typeof kop !== 'string') { waarschuwingen.push(`Krant '${soort}': een kop is geen tekst.`); continue; }
+        if (kop.length > 80) waarschuwingen.push(`Krant '${soort}': kop langer dan 80 tekens: '${kop.slice(0, 40)}…'.`);
+        for (const m of kop.matchAll(/\{([^}]*)\}/g)) {
+          if (!KRANT_PLAATSHOUDERS.includes(m[1])) waarschuwingen.push(`Krant '${soort}': onbekende plaatshouder '{${m[1]}}'.`);
+        }
+      }
+    }
+  }
 }
 
 function cmpVersie(a = '0', b = '0') {
@@ -280,6 +331,8 @@ function checkBrandhaarden(p, resIds, gebIds, fouten, waarschuwingen) {
       for (const r of Object.keys(a.kosten || {})) if (!resIds.has(r)) fouten.push(`${aw} kost onbekende resource '${r}'.`);
       if (a.vereist_gebouw != null && !gebIds.has(a.vereist_gebouw)) fouten.push(`${aw} vraagt onbekend gebouw '${a.vereist_gebouw}'.`);
       if (!(a.druk < 0)) fouten.push(`${aw} moet de druk verlagen ('druk' negatief).`);
+      if (a.vertraging_dagen != null && !(Number.isInteger(a.vertraging_dagen) && a.vertraging_dagen >= 0 && a.vertraging_dagen <= 40 && a.vertraging_dagen < b.deadline_dagen)) fouten.push(`${aw}: 'vertraging_dagen' moet een geheel getal van 0 tot 40 zijn en kleiner dan 'deadline_dagen'.`);
+      if (a === b.acties[b.acties.length - 1] && b.acties.every((x) => (x.vertraging_dagen ?? 0) > 0)) waarschuwingen.push(`${waar}: elke aanpak heeft vertraging; geef er minstens één die meteen werkt.`);
       checkEffect(aw, a.effect || {}, resIds, waarschuwingen, fouten, p);
     }
     if ((b.acties || []).length && b.acties.every((a) => a.vereist_gebouw)) waarschuwingen.push(`${waar}: elke actie vraagt een gebouw; geef er minstens één die altijd kan.`);

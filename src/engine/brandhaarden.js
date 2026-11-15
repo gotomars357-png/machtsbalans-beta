@@ -72,6 +72,11 @@ export function ankerNaam(state, h) {
   return (state.pack.gebouwIndex[soort.anker]?.naam ?? soort.anker).toLowerCase();
 }
 
+// Lopende vertraagde aanpakken van een haard (voor paneel en ring): [{dag, druk, actie}], eerst de vroegste.
+export function lopendeAanpak(h) {
+  return h?.wacht?.length ? h.wacht : [];
+}
+
 // ---------- orders ----------
 
 export function brandhaardStatus(state, landIdx, id, actieId) {
@@ -99,7 +104,11 @@ export function voerBrandhaardActieUit(state, landIdx, id, actieId) {
   const a = soort.acties.find((x) => x.id === actieId);
   const c = state.landen[landIdx];
   betaal(c, a.kosten || {});
-  h.druk += a.druk ?? 0;
+  // Een aanpak met vertraging (praten, C14): je betaalt nu en het overige effect gaat meteen in, maar de druk zakt pas op
+  // de effectdag. Wie vroeg begint, is er vóór de eerste trap; wie laat begint, niet.
+  const v = a.vertraging_dagen ?? 0;
+  if (v > 0) (h.wacht ??= []).push({ dag: state.dag + v, druk: a.druk ?? 0, actie: a.id });
+  else h.druk += a.druk ?? 0;
   applyEffect(state, c, a.effect || {});
   h.gebruikt.push(a.id);
   if (landIdx === state.speler) log(state, `${soort.naam}: ${a.naam.toLowerCase()}.`, 'info');
@@ -107,13 +116,15 @@ export function voerBrandhaardActieUit(state, landIdx, id, actieId) {
   return { ok: true };
 }
 
-// De goedkoopste aanpak (in geld, bij gelijkspel de eerste in het pack). Met alleenUitvoerbaar alleen wat nu kan.
-export function goedkoopsteActie(state, h, alleenUitvoerbaar = true) {
+// De goedkoopste aanpak (in geld, bij gelijkspel de eerste in het pack). Met alleenUitvoerbaar alleen wat nu kan,
+// met opties.direct alleen aanpakken zonder vertraging.
+export function goedkoopsteActie(state, h, alleenUitvoerbaar = true, opties = {}) {
   const soort = brandhaardSoort(state, h.soort);
   const geld = state.pack.rollen.geld;
   let best = null;
   for (const a of soort?.acties || []) {
     if (h.gebruikt.includes(a.id)) continue;
+    if (opties.direct && (a.vertraging_dagen ?? 0) > 0) continue;
     if (alleenUitvoerbaar && !brandhaardStatus(state, h.land, h.id, a.id).ok) continue;
     if (!best || (a.kosten?.[geld] ?? 0) < (best.kosten?.[geld] ?? 0)) best = a;
   }
@@ -157,6 +168,12 @@ export function brandhaardenTick(state) {
     const soort = brandhaardSoort(state, h.soort);
     const c = state.landen[h.land];
     if (!soort || !c || !ankerBestaat(state, h)) { lijst.splice(i, 1); continue; } // anker veroverd of weg: de haard dooft
+    // Vertraagde aanpakken die vandaag (of eerder) ingaan, op index in volgorde van aanpak.
+    if (h.wacht?.length) {
+      for (let w = 0; w < h.wacht.length;) {
+        if (h.wacht[w].dag <= state.dag) { h.druk += h.wacht[w].druk; h.wacht.splice(w, 1); } else w++;
+      }
+    }
     if (h.druk <= 0) { losOp(state, i); continue; }
     h.druk += groeiPerDag(state, h);
     const trappen = soort.trappen || [];
@@ -164,7 +181,8 @@ export function brandhaardenTick(state) {
       const t = trappen[h.trap];
       applyEffect(state, c, t.effect || {});
       legAnkerStil(state, c, h, t.gebouw_uit_dagen);
-      if (h.land === state.speler && t.tekst) log(state, `${soort.naam}: ${t.tekst}`, 'slecht', true);
+      // Loopt er al overleg, dan is een hogere trap geen nieuw alarm: de speler heeft al gekozen.
+      if (h.land === state.speler && t.tekst) log(state, `${soort.naam}: ${t.tekst}`, h.wacht?.length ? 'info' : 'slecht', true);
       h.trap += 1;
     }
     if (h.druk >= 100 || state.dag >= h.deadline) { barstUit(state, i); continue; }
@@ -175,9 +193,12 @@ export function brandhaardenTick(state) {
   for (let i = 0; i < lijst.length;) {
     const h = lijst[i];
     const c = state.landen[h.land];
-    if (h.land !== state.speler && h.druk >= M.brandhaard_ai_drempel) {
+    if (h.land !== state.speler && h.druk >= M.brandhaard_ai_drempel && !h.wacht?.length) { // loopt er overleg, dan wacht hij
       const reserve = P.persoonlijkheden[c.persoonlijkheid]?.ai?.reserve ?? 100;
-      const a = c.voorraad[P.rollen.geld] > reserve ? goedkoopsteActie(state, h) : null;
+      const geld = c.voorraad[P.rollen.geld];
+      // Op de AI-drempel is praten te laat: eerst een aanpak die meteen werkt, als het geld daarna boven de reserve blijft.
+      const d = goedkoopsteActie(state, h, true, { direct: true });
+      const a = d && geld > reserve + (d.kosten?.[P.rollen.geld] ?? 0) ? d : geld > reserve ? goedkoopsteActie(state, h) : null;
       if (a) {
         voerBrandhaardActieUit(state, c.idx, h.id, a.id);
         if (lijst[i] !== h) continue; // opgelost en verwijderd
@@ -281,5 +302,5 @@ export function maakBrandhaard(state, landIdx, soortId, tegel) {
 
 export function brandhaardenAfdruk(state) {
   const l = state.brandhaarden;
-  return l?.length ? `#bh${l.map((h) => `${h.id}@${h.druk.toFixed(2)}`).join(',')}` : '';
+  return l?.length ? `#bh${l.map((h) => `${h.id}@${h.druk.toFixed(2)}${h.wacht?.length ? `w${h.wacht.map((w) => w.dag).join('.')}` : ''}`).join(',')}` : '';
 }

@@ -1,0 +1,73 @@
+[
+  {
+    "id": "bewapening",
+    "naam": "Rust zich uit",
+    "na": {
+      "winst_oorlog": true
+    },
+    "effecten": {
+      "leger_korting": 0.06,
+      "stabiliteit": -2
+    },
+    "tekst": "{leider} van {land} zag jou winnen met wapens in de hand. Hij rust zich nu uit.",
+    "tegenzet": "Dus probeer hem te verslaan zonder oorlog: zijn volk is onrustig van alle kazernes.",
+    "kop": "{rivaal} van {rivaalland} laat nieuwe schepen en tanks bouwen"
+  },
+  {
+    "id": "markt",
+    "naam": "Beschermt zijn markt",
+    "na": {
+      "winst_route": "aandeel_productie"
+    },
+    "effecten": {
+      "handel_bonus": 0.06,
+      "bouw_korting": -0.04
+    },
+    "tekst": "{leider} van {land} zag jouw economie winnen. Hij beschermt nu zijn markt.",
+    "tegenzet": "Dus probeer hem via landen en coalities te omsingelen: bouwen is voor hem duurder.",
+    "kop": "{rivaal} van {rivaalland} legt tolmuren rond de havens"
+  },
+  {
+    "id": "afscherming",
+    "naam": "Schermt zijn volk af",
+    "na": {
+      "winst_route": "aantal_landen"
+    },
+    "effecten": {
+      "informatiecontrole": 3,
+      "productiviteit": -0.03
+    },
+    "tekst": "{leider} van {land} zag landen naar jou overlopen. Hij schermt zijn volk nu af.",
+    "tegenzet": "Dus probeer hem economisch voorbij te groeien: zijn fabrieken werken trager.",
+    "kop": "{rivaal} van {rivaalland} zet de omroepen onder toezicht"
+  },
+  {
+    "id": "kennis",
+    "naam": "Koopt kennis in",
+    "na": {
+      "winst_route": "tech_factor"
+    },
+    "effecten": {
+      "tech_groei": 0.000008,
+      "handel_bonus": -0.05
+    },
+    "tekst": "{leider} van {land} zag jouw techniek winnen. Hij koopt nu kennis in.",
+    "tegenzet": "Dus probeer hem via de handel te raken: zijn handel levert minder op.",
+    "kop": "{rivaal} van {rivaalland} haalt chipmakers naar huis"
+  },
+  {
+    "id": "overmoedig",
+    "naam": "Overmoedig",
+    "na": {
+      "verlies": true
+    },
+    "effecten": {
+      "complot_gevoeligheid": 0.12,
+      "stabiliteit": -1,
+      "productiviteit": 0.01
+    },
+    "tekst": "{leider} van {land} versloeg jou en is overmoedig geworden.",
+    "tegenzet": "Dus probeer zijn volk te bespelen met media en netwerken: hij is vatbaar voor complotten.",
+    "kop": "{rivaal} van {rivaalland} waant zich heerser van de Drie Zeeën"
+  }
+]

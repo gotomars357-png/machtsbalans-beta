@@ -1,7 +1,7 @@
 {
   "id": "koude-front",
   "naam": "Koude Front 1962",
-  "versie": "0.1.0",
+  "versie": "0.2.0",
   "auteur": "Go To Mars",
   "licentie": "CC-BY-4.0",
   "classificatie": "historisch",
@@ -19,6 +19,7 @@
     "blokken": "actors/blokken.json",
     "acties": "actions/acties.json",
     "verhaal": "story/verhaal.json",
+    "krant": "story/krant.json",
     "eenheden": "military/eenheden.json",
     "events": "events/events.json",
     "brandhaarden": "events/brandhaarden.json"

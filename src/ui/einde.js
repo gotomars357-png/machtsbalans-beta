@@ -6,7 +6,8 @@ import { maakReplay } from '../engine/sim.js';
 import { tekenGrafiek } from './chart.js';
 import { berekenScore } from './score.js';
 import { bewaarResultaat, deelTekst, kopieer, datumTekst, vernieuwUitdaging } from './uitdaging.js';
-import { registreerPotje, embleemSvg, effectRegels } from './huis.js';
+import { registreerPotje, embleemSvg, effectRegels, bepaalRivaal } from './huis.js';
+import { kroniekUit } from './krant.js';
 
 const SPELTEST_SLEUTEL = 'machtsbalans.speltest';
 const UUR = 3600;
@@ -189,8 +190,17 @@ export function toonEindoverzicht(state, ctx) {
     top = bewaarResultaat(datum, { id: `${state.instellingen.seed}-${u.dag}-${state.orders.length}-${score.totaal}`, score: score.totaal, dag: u.dag, spelerWint: !!u.spelerWint, zonderOorlog: score.zonderOorlog, opgeslagen: new Date().toISOString() });
   }
   const mijnId = datum ? `${state.instellingen.seed}-${u.dag}-${state.orders.length}-${score.totaal}` : null;
+  // De kroniek (C14): de grootste koppen uit de krant van dit potje plus de eindkop. Een geladen spel mist het begin
+  // van het archief; dat vullen de hoogtepunten aan.
+  const kroniek = kroniekUit(ctx.krant?.archief?.() ?? null, state, punten);
   // Je huis (C13): één generatie per afgerond potje, ook als dit scherm twee keer opent; niet bij een replay.
-  const huis = replay ? null : registreerPotje(state, score);
+  const huis = replay ? null : registreerPotje(state, score, { kroniek, rivaal: bepaalRivaal(state, score) });
+  const eindkop = kroniek.find((r) => r.eind) ?? null;
+  const voorpagina = kroniek.length ? `<div class="einde-voorpagina">
+      <div class="ev-naam">${esc(state.pack.krant?.naam ?? 'De krant')}</div>
+      ${eindkop ? `<div class="ev-kop ${u.spelerWint ? '' : 'slecht'}">${esc(eindkop.tekst)}</div>` : ''}
+      <ol class="ev-regels">${kroniek.filter((r) => !r.eind).map((r) => `<li><span class="num">dag ${r.dag}</span><span>${esc(r.tekst)}</span></li>`).join('')}</ol>
+    </div>` : '';
   const gespeeld = state.pack.doctrineIndex?.[state.instellingen.doctrine];
   const huisHtml = huis?.generatie ? `<div class="einde-huis">
       ${huis.nieuw.map((d) => `<div class="einde-nieuw"><span class="en-embleem">${embleemSvg(d.embleem, 36)}</span><div><b>Nieuwe doctrine vrijgespeeld: ${esc(d.naam)}</b>
@@ -210,6 +220,7 @@ export function toonEindoverzicht(state, ctx) {
       <div class="einde-opbouw">${score.regels.map((r) => `<span>${esc(r.label)}</span><span class="num">${r.waarde >= 0 ? '+' : '−'}${Math.abs(r.waarde)}</span>`).join('')}</div>
     </div>
     ${huisHtml}
+    ${voorpagina}
     ${datum ? `<div class="einde-uitdaging">
       <div class="uitdaging-kop"><span>Uitdaging ${datumTekst(datum)}</span><button class="knop klein" id="e-deel">Deel</button></div>
       <ol class="einde-top">${top.map((r) => `<li class="${r.id === mijnId ? 'jij' : ''}"><span class="num">${r.score}</span> <span class="zacht">${r.spelerWint ? 'gewonnen' : 'verloren'} op dag ${r.dag}${r.spelerWint && r.zonderOorlog ? ', zonder oorlog' : ''}</span></li>`).join('')}</ol>

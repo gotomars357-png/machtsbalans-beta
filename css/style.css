@@ -416,3 +416,90 @@ table.vr td.r { text-align: right; font-family: var(--mono); }
   .bh-blok { margin: 4px 0 6px; }
   .bh-actie .knop { min-height: 36px; }
 }
+/* ---------- C14 De Krant: kaartje linksonder, editie, archief in het logboek ---------- */
+:root { --krant-h: 190px; --krant-onder: 104px; --krant-serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, 'Times New Roman', serif; }
+.krant-kaart { position: fixed; left: 16px; bottom: var(--krant-onder); width: 320px; max-height: 46vh; z-index: 15; overflow: hidden;
+  display: flex; flex-direction: column; gap: 2px; padding: 8px 12px 6px; border-radius: 6px; cursor: pointer;
+  background: #efe8d8; color: #1d1a14; border: 1px solid #c9bc9c; box-shadow: 0 10px 30px rgba(0, 0, 0, .45); }
+.krant-kaart.kk-in { animation: krant-in .25s ease-out; }
+@keyframes krant-in { from { transform: translateY(16px); opacity: 0; } }
+.krant-kaart:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.kk-kop { display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #1d1a14; padding-bottom: 2px; }
+.kk-naam { font-family: var(--krant-serif); font-weight: 700; font-size: 16px; letter-spacing: .02em; }
+.kk-sluit { background: none; border: 0; color: #1d1a14; font-size: 20px; line-height: 1; padding: 0 4px; cursor: pointer; min-width: 28px; min-height: 28px; }
+.kk-datum { font-family: var(--krant-serif); font-size: 11px; color: #5f5747; border-bottom: 1px solid #c9bc9c; padding-bottom: 2px; }
+.kk-titel { font-family: var(--krant-serif); font-weight: 800; font-size: 16px; line-height: 1.2; margin-top: 2px;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.kk-titel.slecht { color: #8c1d18; }
+.krant-kaart > * { flex-shrink: 0; }
+.krant-kaart > .kk-sub:nth-child(n+6) { display: none; }
+.kk-sub { font-family: var(--krant-serif); font-size: 12.5px; line-height: 1.3; color: #3b352a; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.kk-voet { margin-top: 4px; display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #6d6452; }
+.kk-uit { background: none; border: 0; color: #6d6452; text-decoration: underline; font-size: 11px; cursor: pointer; padding: 2px 0; }
+body:has(#krant-kaart:not([hidden])):not(:has(#context:not([hidden]))) #toasts { bottom: calc(var(--krant-onder) + var(--krant-h) + 8px); }
+body:has(#context:not([hidden])) #krant-kaart, body:has(#voertuig:not([hidden])) #krant-kaart { display: none; }
+.krant-editie { color: var(--tekst); }
+/* De editie als krantenpapier, net als het kaartje (alleen als de krant in het venster staat). */
+.modal-kaart:has(> .krant-editie) { background: #efe8d8; border-color: #c9bc9c; }
+.modal-kaart > .krant-editie, .modal-kaart > .krant-editie .ke-naam, .modal-kaart .krant-editie h2.ke-kop { color: #1d1a14; }
+.modal-kaart > .krant-editie .ke-naam { border-bottom-color: #1d1a14; }
+.modal-kaart > .krant-editie .ke-datum { color: #5f5747; border-bottom-color: #c9bc9c; }
+.modal-kaart .krant-editie h2.ke-kop.slecht { color: #8c1d18; }
+.modal-kaart .krant-editie .ke-sub { color: #3b352a; }
+.krant-editie .ke-naam { font-family: var(--krant-serif); font-size: 26px; font-weight: 700; text-align: center; border-bottom: 3px double var(--lijn); padding-bottom: 4px; color: var(--tekst); }
+.krant-editie .ke-datum { font-family: var(--krant-serif); font-size: 12px; text-align: center; color: var(--zacht); border-bottom: 1px solid var(--lijn); padding: 3px 0; margin-bottom: 10px; }
+.modal-kaart .krant-editie h2.ke-kop { font-family: var(--krant-serif); font-size: 22px; line-height: 1.2; letter-spacing: 0; text-transform: none; margin: 6px 0 10px; }
+.modal-kaart .krant-editie .ke-sub { font-family: var(--krant-serif); font-size: 15px; margin: 0 0 8px; }
+#tabs button.krant-nieuw { position: relative; }
+#tabs button.krant-nieuw::after { content: ''; position: absolute; top: 6px; right: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.krant-archief h3 .ka-naam { font-family: var(--krant-serif); text-transform: none; letter-spacing: 0; font-size: 15px; color: var(--tekst); }
+.ka-editie { display: grid; grid-template-columns: 54px 1fr; width: 100%; text-align: left; background: none; border: 0; border-top: 1px solid var(--lijn); padding: 6px 0; cursor: pointer; font-size: 12.5px; }
+.ka-editie:hover b { color: var(--accent); }
+.ka-editie .d { font-family: var(--mono); color: var(--zacht); }
+.ka-editie .ka-tekst { display: grid; gap: 1px; }
+.ka-editie b { font-family: var(--krant-serif); font-size: 14px; }
+.ka-editie.ongelezen .d::before { content: '● '; color: var(--accent); }
+.ka-leeg, .ka-uit { font-size: 12.5px; margin: 4px 0; }
+@media (max-width: 980px) {
+  :root { --krant-onder: calc(8px + env(safe-area-inset-bottom)); }
+  .krant-kaart { left: 8px; right: 8px; width: auto; }
+  body:has(#krant-kaart:not([hidden])):not(:has(#context:not([hidden]))) #toasts { bottom: calc(var(--krant-onder) + var(--krant-h) + 8px); }
+}
+@media (max-width: 600px) {
+  .krant-kaart { left: 16px; right: 16px; }
+  .kk-sluit { min-width: 44px; min-height: 44px; margin: -10px -10px -10px 0; }
+  .kk-uit { min-height: 32px; }
+  .ka-editie { padding: 10px 0; }
+}
+/* C14 rivalen: dossier op het startscherm en in het blokkenpaneel */
+.rivaal-dossier { border: 1px solid var(--slecht); border-left-width: 3px; border-radius: 8px; padding: 10px 12px; background: rgba(242, 112, 106, .06); display: grid; gap: 4px; font-size: 12.5px; }
+.rivaal-dossier p { margin: 0; }
+.rivaal-dossier .rd-kop { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 13.5px; }
+.rivaal-dossier .rd-keer { color: var(--slecht); font-size: 12px; }
+.rivaal-dossier .rd-tekst { color: #b9c6d4; }
+.rivaal-dossier .rd-tegenzet { color: var(--accent); }
+.rivaal-dossier.geldt-niet { border-color: var(--lijn); background: transparent; color: var(--zacht); }
+.rivaal-dossier.geldt-niet .rd-tekst, .rivaal-dossier.geldt-niet .rd-tegenzet, .rivaal-dossier.geldt-niet b { color: var(--zacht); }
+.rivaal-dossier .rd-niet { color: var(--zacht); font-style: italic; }
+.rivaal-regel { color: var(--slecht); }
+/* C14 kroniek: uitklapbare generaties in het Huis */
+.huis-strook li[role=button] { cursor: pointer; }
+.huis-strook li[role=button]:hover { border-color: #3a4f66; }
+.huis-strook li[aria-expanded=true] { border-color: var(--accent); }
+.huis-strook li[role=button]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.huis-kroniek { border: 1px solid var(--accent); border-radius: 8px; padding: 10px 12px; font-size: 12.5px; display: grid; gap: 6px; }
+.huis-kroniek .hk-kop b { color: var(--accent); }
+.hk-regels { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+.hk-regels li { display: grid; grid-template-columns: 64px 1fr; gap: 6px; font-family: var(--krant-serif); font-size: 13.5px; }
+.hk-regels li.hk-eind { font-weight: 700; }
+.hk-regels li > :first-child, .einde-voorpagina .ev-regels li > :first-child { white-space: nowrap; font-weight: 400; }
+.hk-leeg, .hk-rivaal { margin: 0; }
+/* C14 eindoverzicht: de voorpagina */
+.einde-voorpagina { border: 1px solid #c9bc9c; border-radius: 8px; padding: 10px 14px 12px; margin: 10px 0; background: #efe8d8; color: #1d1a14; }
+.einde-voorpagina .ev-naam { font-family: var(--krant-serif); font-weight: 700; font-size: 18px; text-align: center; border-bottom: 3px double #1d1a14; padding-bottom: 3px; }
+.einde-voorpagina .ev-kop { font-family: var(--krant-serif); font-weight: 800; font-size: 22px; line-height: 1.2; margin: 8px 0 6px; }
+.einde-voorpagina .ev-kop.slecht { color: #8c1d18; }
+.einde-voorpagina .ev-regels { list-style: none; margin: 0; padding: 6px 0 0; border-top: 1px solid #c9bc9c; display: grid; gap: 2px; }
+.einde-voorpagina .ev-regels li { display: grid; grid-template-columns: 64px 1fr; gap: 6px; font-family: var(--krant-serif); font-size: 13px; color: #3b352a; }
+.einde-voorpagina .ev-regels .num { color: #6d6452; font-size: 11.5px; }
+@media (max-width: 560px) { .einde-voorpagina .ev-kop { font-size: 19px; } }

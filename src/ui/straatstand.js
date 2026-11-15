@@ -131,7 +131,8 @@ export function rekenTelling() { return rekenTeller; }
 // Hooguit zoveel opleggers per grensovergang in de rij bij een blokkade; zoveel extra personenauto's (als deel van
 // wat er al rijdt) krijgt een bloeiend land, deels als volger in het verkeer en deels geparkeerd.
 export const RIJ_MAX = 6;
-export const BLOEI_EXTRA = 0.25;
+export const BLOEI_EXTRA = 0.5; // C14d: de helft erbij, en minstens BLOEI_MIN auto's
+export const BLOEI_MIN = 4;
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 function hash(a, b = 0, c = 0) { let h = (a * 374761393 + b * 668265263 + c * 2147483647) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
 const R_DOCK = 0, R_PLEK = 1; // soorten rustpunten in ritten.js
@@ -239,7 +240,7 @@ export function straatVerkeer(R, st, net, laag) {
       }
     }
   }
-  // bloei: een kwart meer personenauto's, half als volger in het verkeer en half geparkeerd op vrije plekken langs de
+  // bloei: de helft meer personenauto's (C14d), half als volger in het verkeer en half geparkeerd op vrije plekken langs de
   // opritten (zijn die er niet, dan ook als volger)
   let bloei = false;
   for (let i = 0; i < st.land.length; i++) if (st.land[i].bloei) bloei = true;
@@ -255,8 +256,8 @@ export function straatVerkeer(R, st, net, laag) {
       nAuto[R.land[v]]++;
       autos.push([hash(v, 93, R.land[v]), v, R.land[v]]);
     }
-    // per land een kwart erbij (afgerond): de helft (naar boven) als volger, de rest geparkeerd
-    const extraVan = (li) => Math.round(nAuto[li] * BLOEI_EXTRA), volgVan = (li) => Math.ceil(extraVan(li) / 2);
+    // per bloeiend land de helft erbij (afgerond, minstens BLOEI_MIN): de helft (naar boven) als volger, de rest geparkeerd
+    const extraVan = (li) => (st.land[li]?.bloei ? Math.max(Math.round(nAuto[li] * BLOEI_EXTRA), BLOEI_MIN) : 0), volgVan = (li) => Math.min(nAuto[li], Math.ceil(extraVan(li) / 2));
     autos.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
     const nVolg = new Int32Array(st.land.length);
     for (let i = 0; i < autos.length; i++) { const [, v, li] = autos[i]; if (nVolg[li] < volgVan(li)) { nVolg[li]++; k.volger[v] = 1; } }

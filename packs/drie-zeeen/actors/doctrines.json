@@ -10,8 +10,8 @@
   {
     "id": "handelsvorst",
     "naam": "De Handelsvorst",
-    "tekst": "11% meer inkomsten uit handel. Je leger is 10% duurder, want het geld zit in schepen en contracten.",
-    "effecten": { "handel_bonus": 0.11, "leger_korting": -0.1 },
+    "tekst": "11% meer inkomsten uit handel. Je leger is 6% duurder, want het geld zit in schepen en contracten.",
+    "effecten": { "handel_bonus": 0.11, "leger_korting": -0.06 },
     "ontgrendel": { "start": true },
     "embleem": "schip"
   },
@@ -43,7 +43,7 @@
     "id": "hervormer",
     "naam": "De Hervormer",
     "tekst": "Je technologie groeit sneller. Niet iedereen vertrouwt al dat nieuwe: 10% vatbaarder voor complotten.",
-    "effecten": { "tech_groei": 0.000006, "complot_gevoeligheid": 0.1 },
+    "effecten": { "tech_groei": 0.000009, "complot_gevoeligheid": 0.1 },
     "ontgrendel": { "winst_route": "aantal_landen" },
     "embleem": "kolf"
   }

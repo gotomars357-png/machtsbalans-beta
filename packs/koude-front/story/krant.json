@@ -1,0 +1,189 @@
+{
+  "naam": "Het Frontbericht",
+  "koppen": {
+    "start": {
+      "goed": [
+        "{speler} aan zet in een koude wereld",
+        "Nieuw bewind in {speler} belooft staal en stabiliteit"
+      ],
+      "slecht": [],
+      "sub": [
+        "Aan beide kanten van het front wordt gewacht op de eerste zet",
+        "Olievelden en staalovens bepalen wie het jaar {jaar} wint",
+        "Uit {rivaalland} komt bericht: {rivaal} is niets vergeten",
+        "{rivaal} van {rivaalland} heeft zijn plannen herzien, melden bronnen"
+      ]
+    },
+    "aansluiting": {
+      "goed": [
+        "{land} kiest de kant van {spelerblok}",
+        "Front verschuift: {land} sluit zich aan bij {spelerblok}"
+      ],
+      "slecht": [],
+      "sub": [
+        "Het andere kamp spreekt van een provocatie",
+        "Nieuwe leveringen van olie en staal zijn al afgesproken",
+        "Diplomaten reizen af en aan"
+      ]
+    },
+    "afvallig": {
+      "goed": [],
+      "slecht": [
+        "{land} breekt met {spelerblok}",
+        "Gat in het front: {land} loopt over"
+      ],
+      "sub": [
+        "In de hoofdstad wordt naar schuldigen gezocht",
+        "De verloren leveringen moeten elders vandaan komen",
+        "Het andere kamp viert stil feest"
+      ]
+    },
+    "aandeel": {
+      "goed": [
+        "Productie {spelerblok} bereikt {aandeel} van de wereld",
+        "Ovens draaien door: {spelerblok} op {aandeel}"
+      ],
+      "slecht": [],
+      "sub": [
+        "De planbureaus melden nieuwe records",
+        "Het andere kamp zegt de cijfers te wantrouwen",
+        "Arbeiders werken in drie ploegen"
+      ]
+    },
+    "bijna": {
+      "goed": [
+        "{spelerblok} staat op het punt het front te beslissen",
+        "Overwicht in zicht voor {spelerblok}"
+      ],
+      "slecht": [
+        "Gevaar: {blok} nadert het overwicht",
+        "{blok} drukt door, {speler} onder druk"
+      ],
+      "sub": [
+        "Elke week telt nu",
+        "Strategen werken dag en nacht",
+        "Wie nu stilzit, verliest het front"
+      ]
+    },
+    "fase": {
+      "goed": [
+        "Nieuw hoofdstuk aan het front: {fase}",
+        "De spanning loopt op: {fase} begint"
+      ],
+      "slecht": [],
+      "sub": [
+        "Beide kampen herzien hun plannen",
+        "Er staan nieuwe middelen ter beschikking",
+        "De radio meldt verhoogde paraatheid"
+      ]
+    },
+    "oorlog": {
+      "goed": [],
+      "slecht": [
+        "Het koude front wordt heet: {speler} in oorlog",
+        "Oorlog: {spelerblok} trekt ten strijde"
+      ],
+      "sub": [
+        "Rantsoenering staat op de agenda",
+        "Treinen rijden alleen nog voor het leger",
+        "Families zwaaien de soldaten uit"
+      ]
+    },
+    "vrede": {
+      "goed": [
+        "Wapenstilstand: vrede voor {speler}",
+        "Akkoord getekend, het front bevriest weer"
+      ],
+      "slecht": [],
+      "sub": [
+        "Het leger trekt zich terug op de oude linies",
+        "De fabrieken schakelen terug naar burgerwerk",
+        "Opluchting in de straten"
+      ]
+    },
+    "haard_opgelost": {
+      "goed": [
+        "Onrust in {speler} bedaard: {haard} opgelost",
+        "Regering grijpt in, {haard} van de baan"
+      ],
+      "slecht": [],
+      "sub": [
+        "Het werk wordt hervat",
+        "Waarnemers prijzen het snelle optreden",
+        "Het andere kamp had op meer chaos gehoopt"
+      ]
+    },
+    "haard_uitgebarsten": {
+      "goed": [],
+      "slecht": [
+        "Onrust escaleert: {haard} in {speler}",
+        "Te laat ingegrepen, {speler} betaalt de prijs"
+      ],
+      "sub": [
+        "De productie ligt voorlopig stil",
+        "Vragen over de koers van de regering",
+        "Het andere kamp buit de onrust uit"
+      ]
+    },
+    "verkiezing": {
+      "goed": [
+        "Verkiezingen gewonnen: de regering blijft zitten",
+        "{speler} kiest voor continuïteit"
+      ],
+      "slecht": [],
+      "sub": [
+        "De campagne was fel maar kort",
+        "Het nieuwe kabinet wordt snel beëdigd",
+        "Buitenlandse waarnemers noemen de stemming rustig"
+      ]
+    },
+    "hervorming": {
+      "goed": [
+        "Staatshervorming in {speler}: een nieuw bestel",
+        "{speler} schrijft zijn grondregels opnieuw"
+      ],
+      "slecht": [],
+      "sub": [
+        "De oude garde is niet blij",
+        "De nieuwe regels gaan direct in",
+        "Bondgenoten wachten af"
+      ]
+    },
+    "kolonie": {
+      "goed": [
+        "Kolonie gesticht: {speler} vestigt een post overzee",
+        "Kolonisten uit {speler} gaan aan land"
+      ],
+      "slecht": [],
+      "sub": [
+        "De nieuwe post moet nog alles opbouwen",
+        "Het andere kamp volgt de schepen op de radar",
+        "Een nieuw knooppunt aan de overkant"
+      ]
+    },
+    "einde_winst": {
+      "goed": [
+        "{spelerblok} beslist het koude front",
+        "Historische overwinning voor {speler}"
+      ],
+      "slecht": [],
+      "sub": [
+        "De lange winter is voorbij",
+        "In de hoofdstad klinken de klokken",
+        "Een nieuwe orde tekent zich af"
+      ]
+    },
+    "einde_verlies": {
+      "goed": [],
+      "slecht": [
+        "Het front is verloren voor {speler}",
+        "Nederlaag: {spelerblok} moet wijken"
+      ],
+      "sub": [
+        "Een nieuwe generatie zal het opnieuw proberen",
+        "De archieven worden verzegeld",
+        "Stilte in de kazernes"
+      ]
+    }
+  }
+}
