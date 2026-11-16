@@ -451,6 +451,41 @@ function bakGloed(cv, [r, g, b]) {
 
 // ---------- de laag ----------
 
+// C15b: waar trein j op route r op tijdstip u rijdt, puur (de body van de methode treinStand). Vult uit.kop (voorkant in
+// de rijrichting), staart, rich (+1 heen, -1 terug), ltr (lengte), per, rit, wacht en tTrein; Tw = geo.T.
+export function treinStandVan(r, j, u, Tw, uit = {}) {
+  const tr = r.treinen[j], L = r.L, Ltr = Math.min(tr.totaal, L * 0.5);
+  const v = Tw * (r.goederen ? 0.45 : 0.65), wacht = r.goederen ? 10 : 6;
+  // de natuurlijke omloop afgerond naar boven op een deler van 180; de rit wordt iets sneller, nooit langzamer
+  const nat = 2 * (Math.max(1, (L - Ltr) / v) + wacht);
+  const per = DAG / Math.max(1, Math.floor(DAG / nat)), rit = per / 2 - wacht;
+  uit.per = per; uit.rit = rit; uit.wacht = wacht;
+  const t = frac(u / per + tr.fase) * per;
+  // cycloïde: optrekken en afremmen zonder schok
+  const glad = (q) => q - Math.sin(TAU * q) / TAU;
+  if (t < wacht) { uit.rich = 1; uit.kop = Ltr; }
+  else if (t < wacht + rit) { uit.rich = 1; uit.kop = Ltr + (L - Ltr) * glad((t - wacht) / rit); }
+  else if (t < 2 * wacht + rit) { uit.rich = -1; uit.kop = L - Ltr; }
+  else { uit.rich = -1; uit.kop = (L - Ltr) - (L - Ltr) * glad((t - 2 * wacht - rit) / rit); }
+  uit.staart = uit.kop - uit.rich * Ltr;
+  uit.ltr = Ltr;
+  uit.tTrein = t;
+  return uit;
+}
+
+// C15b: punt op afstand q langs route r (wereld), puur (de body van de methode punt): uit.px, py, hx, hy en pi.
+export function puntOp(r, q, uit = {}) {
+  const S = r.s, X = r.x, Y = r.y, n = r.n;
+  if (q <= 0) q = 0; else if (q >= S[n - 1]) q = S[n - 1];
+  let lo = 0, hi = n - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (S[m] <= q) lo = m; else hi = m; }
+  const d = S[hi] - S[lo] || 1, f = (q - S[lo]) / d;
+  uit.px = X[lo] + (X[hi] - X[lo]) * f; uit.py = Y[lo] + (Y[hi] - Y[lo]) * f;
+  uit.hx = (X[hi] - X[lo]) / d; uit.hy = (Y[hi] - Y[lo]) / d;
+  uit.pi = lo;
+  return uit;
+}
+
 export class InfraLaag {
   constructor() {
     this.u = 0; // verkeerstijd van dit beeld (s, 0..180): de enige klok voor alles wat rijdt of schakelt
@@ -484,6 +519,8 @@ export class InfraLaag {
     this.lucht = new Float32Array(PLAFOND.vliegtuigen * LUCHT);
     this.zw = new Int32Array(4096); // zichtbare wegen, per beeld
     this.zr = new Int32Array(PLAFOND.sporen); // zichtbare spoorroutes, per beeld
+    this.treinIn = new Int16Array(PLAFOND.treinen * 2); // C15b: getekende treinen (route-index, j), per beeld
+    this.nTreinIn = 0;
     this.gloed = null;
     this.vliegSprites = new Map();
     this.terrein = null; // de terreinlaag (rivieren en meren), als die er is
@@ -810,7 +847,19 @@ export class InfraLaag {
       }
     }
     for (const land of s.landen) { const h = geo.hoofdstad[land.idx]; if (h != null && h >= 0) this.soort[h] = HOOFD; }
+    // C15c: een leeg kavel na een sloop (state.kavels) blijft voor deze laag bebouwd: geen station, mast of leiding
+    // erop, zodat het wegennet (dat het kavel in de stad houdt) niet verschuift
+    this.kavelT = null;
+    for (let i = 0; i < (s.kavels?.length ?? 0); i++) {
+      const t = s.kavels[i].tegel;
+      if (s.bezet[t] || !(s.eigenaar[t] >= 0)) continue;
+      (this.kavelT ??= new Uint8Array(geo.tegels.length))[t] = 1;
+      if (this.soort[t] === LEEG) this.soort[t] = OVERIG;
+    }
   }
+
+  // Staat er iets op tegel t (state.bezet of een leeg kavel)?
+  bebouwd(t) { return !!this.state.bezet[t] || (this.kavelT !== null && this.kavelT !== undefined && this.kavelT[t] === 1); }
 
   // Wegen voor deze laag en voor de oude lezers (hemel, kust, werk, stad): de rechte stukken van net.wegen(), elk met
   // zijn brug (tak over water: tBouw 1 of 2) of tunnel (tBouw 3). Per tak ook waar hij begint en eindigt, voor de
@@ -867,7 +916,7 @@ export class InfraLaag {
     const dak = (this.dakTak = new Uint8Array(net ? net.nT : 0));
     if (net) {
       const o = {}, T = this.geo.T, s = this.state, kol = this.geo.kol, rij = this.geo.rij;
-      const bebouwd = (x, y) => { const k = Math.floor(x / T), r = Math.floor(y / T); if (k < 0 || r < 0 || k >= kol || r >= rij) return false; const t = r * kol + k; return !!s.bezet[t] || !!this.res[t]; };
+      const bebouwd = (x, y) => { const k = Math.floor(x / T), r = Math.floor(y / T); if (k < 0 || r < 0 || k >= kol || r >= rij) return false; const t = r * kol + k; return this.bebouwd(t) || !!this.res[t]; };
       for (let i = 0; i < net.nT; i++) {
         if (net.tBouw[i] !== 3 || net.tKlasse[i] === KLASSE.OPRIT) continue;
         net.puntIn(net.D, i, net.tLen[i] / 2, o);
@@ -879,7 +928,7 @@ export class InfraLaag {
 
   vrij(t, land) {
     const s = this.state, tg = this.geo.tegels[t];
-    return !!tg && tg.terrein !== 'water' && !s.bezet[t] && !this.res[t] && s.eigenaar[t] === land;
+    return !!tg && tg.terrein !== 'water' && !this.bebouwd(t) && !this.res[t] && s.eigenaar[t] === land;
   }
 
   reserveer(t, soort, land) { this.res[t] = soort; this.resLand[t] = land; }
@@ -1015,7 +1064,7 @@ export class InfraLaag {
         // De leiding loopt over vrije landtegels (geen gebouw, bouwplaats of bouwwerk van deze laag, geen water) van
         // tegelmidden naar tegelmidden, met haakse bochten: de kortste weg in breedte-eerst over de vier buren, hooguit
         // zestien tegels. Lukt dat niet, dan komt er geen leiding.
-        const vrijT = (t) => !s.bezet[t] && !this.res[t] && this.soort[t] === LEEG && geo.tegels[t].terrein !== 'water';
+        const vrijT = (t) => !this.bebouwd(t) && !this.res[t] && this.soort[t] === LEEG && geo.tegels[t].terrein !== 'water';
         const vorig = new Int32Array(geo.tegels.length);
         const pad = (a, b) => {
           vorig.fill(-2);
@@ -1131,7 +1180,7 @@ export class InfraLaag {
         const q = 0.55 * Tw + (len - 1.1 * Tw) * (i / m);
         const x = A.x + ux * q, y = A.y + uy * q;
         const tg = Math.floor(y / Tw) * kol + Math.floor(x / Tw);
-        if (this.isWater(x, y) || (s.bezet[tg] && tg !== p.t && tg !== doel) || this.res[tg]) continue;
+        if (this.isWater(x, y) || (this.bebouwd(tg) && tg !== p.t && tg !== doel) || this.res[tg]) continue;
         masten.push(x, y);
       }
       masten.push(B.x, B.y);
@@ -1156,7 +1205,7 @@ export class InfraLaag {
     const t = this.geo.tegels[u], s = this.state;
     if (t.terrein === 'water' || this.verboden?.has(u)) return Infinity;
     let c = t.terrein === 'berg' ? 3.2 : t.terrein === 'bos' ? 1.5 : t.terrein === 'kust' ? 1.6 : 1;
-    if (s.bezet[u]) c += 30;
+    if (this.bebouwd(u)) c += 30;
     if (this.res[u] && this.resLand[u] === land && u !== start) c += 40;
     if (s.eigenaar[u] !== land) c += 3;
     return c;
@@ -1272,6 +1321,8 @@ export class InfraLaag {
       tr.push({ fase: z, lengtes: Float32Array.from(lengtes), totaal: totaal * Tw, loc: LOC[Math.floor(hash(zaad, j, 11) * LOC.length)], rijtuig: RIJTUIG[Math.floor(hash(zaad, j, 12) * RIJTUIG.length)], lading: Uint8Array.from(lengtes, (_, i) => Math.floor(hash(zaad, j * 31 + i, 14) * 5)) });
     }
     r.treinen = tr;
+    // C15b: begin- en eindtegel en of de lijn bij een station begint (voor treinkaart.js)
+    r.van = pad[0]; r.naar = pad[pad.length - 1]; r.station = !!station;
     return r;
   }
 
@@ -1384,7 +1435,7 @@ export class InfraLaag {
       for (let i = 2; i < m - 2 && uit.length < 24; i += 3) {
         if (!rv.open[i] || rv.br[i] < 0.9 || rv.br[i] > BREED || hash(ri, i, 307) > 0.4) continue;
         const x = p[i * 2], y = p[i * 2 + 1], t = Math.floor(y / Tw) * kol + Math.floor(x / Tw);
-        if (!geo.tegels[t] || geo.tegels[t].terrein === 'water' || s.bezet[t] || this.res[t]) continue;
+        if (!geo.tegels[t] || geo.tegels[t].terrein === 'water' || this.bebouwd(t) || this.res[t]) continue;
         const st = stadBij(t);
         if (st < 0 || gehad.has(st)) continue;
         const dx = p[i * 2 + 2] - p[i * 2 - 2], dy = p[i * 2 + 3] - p[i * 2 - 1], l = Math.hypot(dx, dy) || 1;
@@ -1479,6 +1530,7 @@ export class InfraLaag {
   teken(c, view, sc, nu, dt = 0, tempo = 0) {
     void dt; void tempo;
     this.nul();
+    this.nTreinIn = 0;
     const s = view.state;
     if (!s || !view.geo || !view.w) return;
     if (this.state !== s || this.geo !== view.geo || this.eigenaar !== view.eigenaar) this.laad(view);
@@ -2952,22 +3004,9 @@ export class InfraLaag {
   // Waar trein j op route r op tijdstip u rijdt: this.kop (voorkant in de rijrichting), this.staart en this.rich (+1
   // heen, -1 terug). De dienstregeling is periodiek: this.per deelt 180, dus de stand op u is die op u + 180.
   treinStand(r, j, u = this.u) {
-    const tr = r.treinen[j], Tw = this.geo.T, L = r.L, Ltr = Math.min(tr.totaal, L * 0.5);
-    const v = Tw * (r.goederen ? 0.45 : 0.65), wacht = r.goederen ? 10 : 6;
-    // de natuurlijke omloop afgerond naar boven op een deler van 180; de rit wordt iets sneller, nooit langzamer
-    const nat = 2 * (Math.max(1, (L - Ltr) / v) + wacht);
-    const per = DAG / Math.max(1, Math.floor(DAG / nat)), rit = per / 2 - wacht;
-    this.per = per; this.rit = rit; this.wacht = wacht;
-    const t = frac(u / per + tr.fase) * per;
-    // cycloïde: optrekken en afremmen zonder schok
-    const glad = (q) => q - Math.sin(TAU * q) / TAU;
-    if (t < wacht) { this.rich = 1; this.kop = Ltr; }
-    else if (t < wacht + rit) { this.rich = 1; this.kop = Ltr + (L - Ltr) * glad((t - wacht) / rit); }
-    else if (t < 2 * wacht + rit) { this.rich = -1; this.kop = L - Ltr; }
-    else { this.rich = -1; this.kop = (L - Ltr) - (L - Ltr) * glad((t - 2 * wacht - rit) / rit); }
-    this.staart = this.kop - this.rich * Ltr;
-    this.ltr = Ltr;
-    this.tTrein = t;
+    const o = treinStandVan(r, j, u, this.geo.T, this._ts ??= {});
+    this.per = o.per; this.rit = o.rit; this.wacht = o.wacht;
+    this.rich = o.rich; this.kop = o.kop; this.staart = o.staart; this.ltr = o.ltr; this.tTrein = o.tTrein;
   }
 
   tekenTreinen(c, a) {
@@ -2987,6 +3026,8 @@ export class InfraLaag {
         const mx = this.px * sc + this.ox, my = this.py * sc + this.oy;
         if (!this.opScherm(mx, my, this.ltr * sc)) continue;
         this.n.treinen++;
+        // C15b: welke treinen in beeld staan (voor treinOp in treinkaart.js)
+        if (this.nTreinIn < PLAFOND.treinen) { const ti = this.treinIn, o = this.nTreinIn++ * 2; ti[o] = this.zr[i]; ti[o + 1] = j; }
         // wagons: eerst alle schaduwen, dan elke bak in zijn kleur
         let q = kop;
         const nW = tr.lengtes.length;

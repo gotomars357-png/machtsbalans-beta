@@ -5,6 +5,7 @@ import { nextRandom } from './rng.js';
 import { netwerkStatus, voerNetwerkActieUit, woningCapaciteit } from './samenleving.js';
 import { mediaStatus, voerMediaActieUit, overnameStatus, voerOvernameUit, vijandigeMedia } from './media.js';
 import { aiCyber, aiCyberVerdediging } from './cyber.js';
+import { actieveVerbouw, verbouwStatus, voerVerbouwUit, niveauVan } from './verbouw.js';
 import {
   bouw, bouwKosten, actieKosten, isOntgrendeld, vrijePlekken, voerHefboomUit, hefboomStatus, verwachteWinst,
   voerEscalatieUit, escalatieStatus, deescaleer, MOEILIJKHEID, log, opslagMax, kostenInGeld,
@@ -50,17 +51,18 @@ function aiEconomie(state, c) {
   else if (c.stab > 66 && c.verdeling > (ai.verdeling ?? 0.1)) c.verdeling = Math.max(0, c.verdeling - 0.01);
   const fc = P.acties.media?.find((a) => a.type === 'verdediging');
   if (fc && vijandigeMedia(state, c) > 25 && c.voorraad[R.geld] > (ai.reserve ?? 100) && mediaStatus(state, c.idx, c.idx, fc).ok) voerMediaActieUit(state, c.idx, c.idx, fc.id);
-  if (c.bouw.length >= P.model.max_bouw) return;
+  if (c.bouw.length + actieveVerbouw(c) >= P.model.max_bouw) return;
 
   const net = (r) => c.netto[r] ?? 0;
   const wachtrij = (pred) => c.bouw.some((b) => pred(P.gebouwIndex[b.gebouw]));
   const produceertIn = (r) => wachtrij((g) => g.productie?.[r]);
   let keuze = null;
-  if ((net(R.voedsel) < 1.5 || c.ratio[R.voedsel] < 1) && !produceertIn(R.voedsel)) keuze = producent(state, c, R.voedsel);
-  if (!keuze && (net(R.energie) < 3 || c.ratio[R.energie] < 1) && !produceertIn(R.energie)) keuze = producent(state, c, R.energie);
+  let tekortRes = null; // eerste tekort zonder vrije producent: dan verbouwt de AI liever (C15c)
+  if ((net(R.voedsel) < 1.5 || c.ratio[R.voedsel] < 1) && !produceertIn(R.voedsel)) { keuze = producent(state, c, R.voedsel); if (!keuze) tekortRes ??= R.voedsel; }
+  if (!keuze && (net(R.energie) < 3 || c.ratio[R.energie] < 1) && !produceertIn(R.energie)) { keuze = producent(state, c, R.energie); if (!keuze) tekortRes ??= R.energie; }
   if (!keuze) {
     for (const r of P.resources) {
-      if (r.rol === 'grondstof' && net(r.id) < 1.5 && !produceertIn(r.id)) { keuze = producent(state, c, r.id); if (keuze) break; }
+      if (r.rol === 'grondstof' && net(r.id) < 1.5 && !produceertIn(r.id)) { keuze = producent(state, c, r.id); if (keuze) break; tekortRes ??= r.id; }
     }
   }
   if (!keuze) {
@@ -87,7 +89,7 @@ function aiEconomie(state, c) {
       if (g.kapitaalvoorraad > best) { best = g.kapitaalvoorraad; keuze = g.id; }
     }
   }
-  if (!keuze) return;
+  if (!keuze) { if (state.instellingen.systemen.verbouw && tekortRes) aiVerbouw(state, c, tekortRes); return; }
   // Ontbreekt een bouwgrondstof, bouw dan eerst de producent daarvan.
   const tekort = Object.entries(bouwKosten(state, c, keuze)).find(([r, v]) => r !== R.geld && (c.voorraad[r] ?? 0) < v);
   if (tekort) {
@@ -96,15 +98,35 @@ function aiEconomie(state, c) {
     if (!keuze) return;
   }
   const kosten = bouwKosten(state, c, keuze);
-  // Blokleiders sparen vanaf de invloedfase een deel van hun geld voor het overhalen van landen.
+  if ((c.voorraad[R.geld] - (kosten[R.geld] || 0)) < bouwReserve(state, c, ai)) return;
+  bouw(state, c.idx, keuze);
+}
+
+// Blokleiders sparen vanaf de invloedfase een deel van hun geld voor het overhalen van landen.
+function bouwReserve(state, c, ai) {
   const isLeider = state.blokken.some((b) => b.leider === c.idx && b.id !== state.spelerBlok);
   const mult = MOEILIJKHEID[state.instellingen.moeilijkheid]?.invloed ?? 1;
   const invloedFase = state.pack.verhaal.fasen.find((f) => (f.ontgrendelt || []).includes('invloed'));
   const bijnaInvloed = isOntgrendeld(state, 'invloed') || (invloedFase && state.dag >= invloedFase.dag - 60);
   const spaar = isLeider && bijnaInvloed ? 1 + 5 * (ai.invloed ?? 0.3) * mult : 1;
-  const reserve = (ai.reserve ?? 100) * spaar;
-  if ((c.voorraad[R.geld] - (kosten[R.geld] || 0)) < reserve) return;
-  bouw(state, c.idx, keuze);
+  return (ai.reserve ?? 100) * spaar;
+}
+
+// C15c: geen vrije plek voor een producent van een tekort? Verbouw dan de beste eigen producent ervan
+// (hoogste rendement, bij gelijke stand de laagste tegel). Geen toeval; de AI sloopt nooit.
+function aiVerbouw(state, c, resId) {
+  const P = state.pack;
+  let best = null;
+  for (let i = 0; i < c.plaatsingen.length; i++) {
+    const p = c.plaatsingen[i];
+    if (!P.gebouwIndex[p.g]?.productie?.[resId] || p.verbouw || niveauVan(p) >= P.model.verbouw.niveau_max || p.t < 0) continue;
+    if (!best || p.eff > best.eff || (p.eff === best.eff && p.t < best.t)) best = p;
+  }
+  if (!best) return;
+  const st = verbouwStatus(state, c.idx, best.t);
+  if (!st.ok) return;
+  if ((c.voorraad[P.rollen.geld] - (st.kosten[P.rollen.geld] || 0)) < bouwReserve(state, c, persAi(state, c))) return;
+  voerVerbouwUit(state, c.idx, best.t);
 }
 
 function besteHefboom(state, payer, t, budget, criterium = 'efficient') {

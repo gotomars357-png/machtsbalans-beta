@@ -207,7 +207,7 @@ export function maakTekeningen(H) {
     rect(c, x - s * 0.44, y - s * 0.06, s * 0.88, s * 0.05, '#6d7072');
     if (lod >= 1) { c.strokeStyle = '#a6acb1'; c.lineWidth = lijn(s, 0.004); c.beginPath(); for (let k = 0; k < 4; k++) { const py = y - s * 0.052 + k * s * 0.012; c.moveTo(x - s * 0.44, py); c.lineTo(x + s * 0.44, py); } c.stroke(); }
     // procestorens (hoog, ronde koppen) ten noorden van de brug
-    const torens = [[-0.32, -0.26, 0.05], [-0.18, -0.3, 0.04], [-0.06, -0.24, 0.055], [0.08, -0.31, 0.035]];
+    const torens = [[-0.32, -0.26, 0.05], [-0.18, -0.3, 0.04], [-0.06, -0.24, 0.055], [0.08, -0.31, 0.035], [-0.25, -0.4, 0.03]]; // vijf: niveau 3 (C15c-review)
     for (let i = 0; i < 2 + n; i++) { const [dx, dy, r] = torens[i]; tank(c, x + dx * s, y + dy * s, r * s, '#c8ccd0'); if (lod >= 1) levend(L.STOOM, x + dx * s, y + dy * s, s * 0.08); }
     pand(c, x + s * 0.18, y - s * 0.42 + 2 * s * 0.017, s * 0.26, s * 0.24, 2, '#8c949c', '#a0a6ab', { units: 0, raamAfstand: 0.05 });
     // tanks ten zuiden van de brug, in een bak

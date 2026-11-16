@@ -100,6 +100,14 @@ export const DEFAULT_MODEL = {
   brandhaard_afkoeling: 120,    // dezelfde soort komt in hetzelfde land pas na zoveel dagen terug
   brandhaard_ai_drempel: 20,    // vanaf deze druk pakt een AI-land een haard aan (vóór de eerste trap op 33)
   brandhaard_stilte: 80,        // na zoveel stille dagen bij de speler (geen haard, gebeurtenis of oorlog) loopt de kans op
+  // Verbouwen en slopen (C15c). Per niveau (1, 2, 3): effect, verbruik en onderhoud als factor op het gebouw.
+  // kosten en bouwtijd per stap (1→2, 2→3) als factor op de bouwkosten en bouwtijd; tijdens = kracht tijdens de verbouwing.
+  // sloop_terug: deel van alles wat erin zat dat je terugkrijgt; sloop_oorlog_afstand: vakjes tot een vijandelijke eenheid.
+  verbouw: {
+    niveau_max: 3, effect: [1, 1.6, 2.3], verbruik: [1, 1.5, 2.0], onderhoud: [1, 1.4, 1.8], kosten: [1.0, 1.6], kosten_schaal: 0.2,
+    bouwtijd: [0.8, 1.2], tijdens: 0.5, sloop_terug: 0.35, sloop_dagen: 3, sloop_oorlog_afstand: 3,
+    sloop_stabiliteit: { woningen: { waarde: -5, dagen: 60 }, maatschappij: { waarde: -2, dagen: 40 } },
+  },
 };
 
 export const DEFAULT_REGIMES = {

@@ -10,7 +10,7 @@
 import { pictogramVan, trapKleur, tekenPictogram } from './brandhaard.js';
 import { brandhaardSoort } from '../engine/brandhaarden.js';
 import { partij, inOorlog } from '../engine/leger.js';
-import { VoertuigKaart } from './voertuigkaart.js';
+import { VoertuigKaart, voertuigPlek, ZOOM_AUTO, RITTEN_MAX } from './voertuigkaart.js';
 
 // ---------- teksten en pictogrammen (UI-tekst, geen balans) ----------
 
@@ -364,6 +364,60 @@ export class Pings {
     const K = state.kolonies ?? [];
     for (let i = 0; i < K.length; i++) this.kolonies.push(K[i].t);
   }
+}
+
+// ---------- C15b: een melding koppelen aan zijn ping ----------
+
+// Welke meldingen (state.meldingen, uit log(..., true) in de engine) bij welke soort ping horen, op de beginwoorden of
+// trefwoorden van de echte zinnen:
+//   leger.js        '<A> verklaart <B> de oorlog.'  'Vrede tussen <A> en <B>.'  '<A> capituleert voor <B>.'
+//                   'Kolonie gesticht! ...'  '<land> sticht een overzeese kolonie.'
+//                   '<land> verovert gebied van je.' (alleen om de tien dagen gemeld)
+//   brandhaarden.js 'Brandhaard: <soort> (nog N dagen).'  'Opgelost: <soort>.'  'Uitgebarsten: <soort>. ...'
+//                   '<Soort>: <tekst van de trap>' (zie BRANDHAARD_SOORT hieronder)
+// Een oplevering geeft geen melding (sim.js logt 'X is klaar.' zonder melden) en valt hierbuiten.
+export const MELDING_NAAR_PING = [
+  { soort: 'oorlog', patroon: / verklaart .+ de oorlog\./ },
+  { soort: 'vrede', patroon: /^Vrede tussen / },
+  { soort: 'brandhaard', patroon: /^(Brandhaard|Opgelost|Uitgebarsten): / },
+  { soort: 'kolonie', patroon: /^Kolonie gesticht|sticht een overzeese kolonie/ },
+  { soort: 'verovering', patroon: / capituleert voor |verovert gebied van je/ },
+];
+export const MELDING_DAGEN = 8, MELDING_MS = 3000;
+
+// De soort ping bij een melding, of null.
+export function pingSoortVan(state, tekst) {
+  if (typeof tekst !== 'string') return null;
+  for (let i = 0; i < MELDING_NAAR_PING.length; i++) if (MELDING_NAAR_PING[i].patroon.test(tekst)) return MELDING_NAAR_PING[i].soort;
+  // een brandhaard die een trap oploopt: '<naam van de soort>: <tekst>'
+  const B = state?.pack?.brandhaarden ?? [];
+  for (let i = 0; i < B.length; i++) if (B[i].naam && tekst.startsWith(`${B[i].naam}: `)) return 'brandhaard';
+  return null;
+}
+
+// Oorlog en vrede: de ping noemt de andere partij ('Oorlog met X'); die moet ook in de melding staan, anders gaat het
+// over een oorlog tussen twee anderen.
+const PARTNER = { oorlog: 'Oorlog met ', vrede: 'Vrede met ' };
+
+// Puur: de ping die bij deze melding hoort, of null. Kandidaten: pings van dezelfde soort, hooguit MELDING_DAGEN
+// speeldagen en MELDING_MS echte ms oud. Eerst een ping in het land van de speler of in een land dat de melding noemt,
+// dan de nieuwste.
+export function pingVoorMelding(state, pings, melding, echtNu = 0) {
+  const soort = pingSoortVan(state, melding?.tekst);
+  const L = pings?.lijst;
+  if (!soort || !L?.length) return null;
+  const tekst = melding.tekst, dag = melding.dag ?? state?.dag ?? 0;
+  let best = null, bestGenoemd = false;
+  for (let i = 0; i < L.length; i++) {
+    const p = L[i];
+    if (p.soort !== soort || Math.abs(p.dag - dag) > MELDING_DAGEN || echtNu - p.geboren > MELDING_MS) continue;
+    const pre = PARTNER[soort];
+    if (pre && typeof p.tekst === 'string' && p.tekst.startsWith(pre) && !tekst.includes(p.tekst.slice(pre.length))) continue;
+    const naam = state?.landen?.[p.land]?.naam;
+    const genoemd = p.land === state?.speler || (!!naam && tekst.includes(naam));
+    if (!best || (genoemd && !bestGenoemd) || (genoemd === bestGenoemd && p.id > best.id)) { best = p; bestGenoemd = genoemd; }
+  }
+  return best;
 }
 
 // ---------- pictogrammen ----------
@@ -774,7 +828,38 @@ export class LevendeKaart {
       this.laag.legendaVak = this.pings.lijst.length ? this.tijdlijn.legenda() : null;
     }
     this.laag.teken(c, view, this.pings, nu);
+    this.tekenGebouwRitten(c, view);
     this.voertuig.teken(c, view, nu);
+  }
+
+  // [extra] C15b: bij een open gebouwpaneel een dunne gouden ring om de wagens van dat gebouw die in beeld zijn
+  // (view.gebouwRitten, gezet door verkeerblok.js). Hooguit RITTEN_MAX keer voertuigPlek per beeld.
+  tekenGebouwRitten(c, view) {
+    const g = view.gebouwRitten;
+    if (!g) return;
+    if (typeof document !== 'undefined' && typeof document.getElementById === 'function') {
+      const ctx = (this.ctxEl ??= document.getElementById('context'));
+      if (!ctx || ctx.hidden) { view.gebouwRitten = null; return; }
+    }
+    if (view.zoom < ZOOM_AUTO || view.bouwModus) return;
+    const L = view.levenLaag, R = L?.rit?.R;
+    if (!R) return;
+    const K = typeof L.straatVoor === 'function' ? L.straatVoor(R) : null;
+    const sc = view.schaal(), ox = view.w / 2 - view.cx * sc, oy = view.h / 2 - view.cy * sc, r = Math.max(9, view.geo.T * sc * 0.13);
+    const p = (this.ringPlek ??= {});
+    let n = 0;
+    c.save();
+    c.strokeStyle = '#f0b429'; c.lineWidth = 1.2; c.globalAlpha = 0.85;
+    c.beginPath();
+    for (let i = 0; i < g.sleutels.length && i < RITTEN_MAX; i++) {
+      if (!voertuigPlek(L, g.sleutels[i], p) || !(p.alpha > 0.1) || p.R !== R || K?.verborgen?.[p.v]) continue;
+      const x = p.x * sc + ox, y = p.y * sc + oy;
+      if (x < -r || y < -r || x > view.w + r || y > view.h + r) continue;
+      c.moveTo(x + r, y); c.arc(x, y, r, 0, Math.PI * 2);
+      n++;
+    }
+    if (n) c.stroke();
+    c.restore();
   }
 
   volgStap(view, dt) { this.voertuig.volgStap(view, dt); }

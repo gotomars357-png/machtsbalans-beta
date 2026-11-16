@@ -28,6 +28,15 @@
 #voertuig .vk-knoppen { display: flex; gap: 6px; }
 #voertuig .vk-einde { color: var(--zacht); padding: 4px 0 2px; }
 
+/* C15b: een toast is aan te tikken (sluit hem); met een speldje (met-plek) brengt een tik je naar de plek op de kaart. */
+.toast { cursor: pointer; }
+.toast:focus-visible { outline: 2px solid #f0b429; outline-offset: 1px; }
+.toast.met-plek { display: flex; align-items: center; gap: 8px; }
+.toast.met-plek .toast-tekst { flex: 1; min-width: 0; }
+.toast.met-plek .toast-speld { flex: none; width: 16px; height: 16px; color: #f0b429; display: grid; place-items: center; }
+.toast.met-plek .toast-speld svg { width: 16px; height: 16px; display: block; }
+.toast.met-plek:hover .toast-speld { transform: scale(1.15); }
+
 @media (prefers-reduced-motion: reduce) {
   #tijdlijn .tl-chip { transition: none; }
 }
@@ -40,4 +49,5 @@
   #tijdlijn .tl-uitleg { left: 52px; }
   #voertuig { width: auto; }
   body:has(#voertuig:not([hidden])) #toasts { bottom: calc(45svh + 8px); }
+  .toast { min-height: 44px; display: flex; align-items: center; box-sizing: border-box; }
 }

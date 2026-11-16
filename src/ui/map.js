@@ -8,6 +8,8 @@ import { woningCapaciteit } from '../engine/samenleving.js';
 import { tekenGebouwDetail } from './detail.js';
 import { OpleveringVolger } from './oplevering.js';
 import { kavelInfo, gebouwSoorten } from './detail.js';
+import { tekenVerbouwing } from './detail.js';
+import { tekenSloopplaats, tekenLeegKavel } from './sloopplaats.js';
 import { veer, vluchtPlan, nalopen, veegSnelheid, volgendeVerdieping, ankerMidden, begrensPunt, ZOOM_TAU, PIJL_SNELHEID, PIJL_TIK } from './camera.js';
 import { TerreinLaag } from './terrein.js';
 import { zoekPad } from '../engine/leger.js';
@@ -23,6 +25,8 @@ import { StadLaag } from './stad.js';
 import { ZeeLaag } from './zee.js';
 import { WerkLaag } from './werk.js';
 import { HemelLaag } from './hemel.js';
+import { echtNu, zetBeeldTijd } from './bakbudget.js';
+import { zetVlucht } from './detail.js';
 import { BrandhaardLaag } from './brandhaard.js';
 import { LevendeKaart } from './pings.js';
 import { Wegennet, KLASSE, KNOOP, PROFIEL, verkeersTijd } from './wegennet.js';
@@ -446,6 +450,7 @@ export class KaartView {
 
   // Eén camerastap per beeld: vlucht, wielzoom, nalopen en pijltjes. Na elke stap begrens().
   cameraStap(dt) {
+    this.zoomSnelheid = dt > 0 && this._zoomVorig != null ? Math.abs(this.zoom - this._zoomVorig) / dt : 0; this._zoomVorig = this.zoom; // C15a: |dzoom|/dt (vorig beeld)
     if (this._cameraState !== this.state) {
       // Nieuw spel geladen: geen restsnelheid of half afgemaakte zoom van het vorige.
       this._cameraState = this.state;
@@ -643,12 +648,19 @@ export class KaartView {
   teken(dt = 0, tempo = 0, frac = 1) {
     const s = this.state;
     if (!s || !this.eigenaar || !this.w) return;
+    const t0 = echtNu(); // C15a: de beeldtijd voor het aanpasbare bakbudget (bakbudget.js)
     const sig = s.landen.map((c) => c.alignment).join(',') + `|${this.geselecteerd}|${s.speler}|${s.grensVersie}`;
     if (sig !== this.handtekening) { this.tekenBasis(); this.handtekening = sig; }
     this.animTijd += dt * Math.min(tempo, 4);
 
     this.cameraStap(dt);
     this.levend?.volgStap(this, dt);
+    zetVlucht(!!this.doel);
+    // C15a: tijdens een snelle vlucht (meer dan 1,5 zoomtrede per seconde) vervagen de decorlagen (natuur, sfeergrond,
+    // hemel) in 220 ms en komen ze daarna even zacht terug; grenzen, terrein, wegen, gebouwen en eenheden blijven.
+    const dunDoel = this.doel?.plan && (this.zoomSnelheid ?? 0) > 1.5 ? 0 : 1, dunNu = this.dunAlfa ?? 1;
+    this.dunAlfa = dunNu < dunDoel ? Math.min(dunDoel, dunNu + dt / 0.22) : Math.max(dunDoel, dunNu - dt / 0.22);
+    const dun = (f) => { const a = this.dunAlfa; if (a < 0.05) return; if (a >= 1) { f(); return; } const a0 = c.globalAlpha; c.globalAlpha = a0 * a; f(); c.globalAlpha = a0; };
 
     const c = this.canvas.getContext('2d');
     c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
@@ -685,27 +697,28 @@ export class KaartView {
     this.grensLaag.teken(c, this, sc, nu, dt, tempo);
     this.levenLaag.teken(c, this, sc, nu, dt, tempo);
     this.werkLaag.teken(c, this, sc, nu, dt, tempo);
-    this.natuurLaag.teken(c, this, sc, nu, dt, tempo);
+    dun(() => this.natuurLaag.teken(c, this, sc, nu, dt, tempo));
     if (this.bouwModus) this.tekenBouwVoorbeeld(c, sc);
-    this.sfeerLaag.tekenGrond(c, this, sc, nu, frac);
+    dun(() => this.sfeerLaag.tekenGrond(c, this, sc, nu, frac));
     this.tekenEenheden(c, sc, detail, frac);
     this.infraLaag.tekenLucht(c, this, sc, nu);
-    this.hemelLaag.teken(c, this, sc, nu, dt, tempo);
+    dun(() => this.hemelLaag.teken(c, this, sc, nu, dt, tempo));
     this.tekenNacht(c, sc, nu);
     this.levenLaag.tekenLichten(c, this, sc, nu);
-    this.grensLaag.tekenLichten(c, this, sc, nu);
+    if (this.dunAlfa >= 0.05) this.grensLaag.tekenLichten(c, this, sc, nu);
     this.werkLaag.tekenLichten(c, this, sc, nu);
     this.infraLaag.tekenLichten(c, this, sc, nu);
     this.kustLaag.tekenLichten(c, this, sc, nu);
     this.stadLaag.tekenLichten(c, this, sc, nu);
     this.sfeerLaag.tekenLucht(c, this, sc, nu);
-    this.hemelLaag.tekenNacht(c, this, sc, nu);
+    dun(() => this.hemelLaag.tekenNacht(c, this, sc, nu));
     this.tekenGolven(c, sc, nu);
     this.brandLaag.teken(c, this, sc, nu);
     if (this.wegennetDebug) this.tekenNetDebug(c, sc);
     this.tekenStrategisch(c, sc);
     this.tekenMarkeringen(c);
     this.levend?.teken(c, this);
+    zetBeeldTijd(echtNu() - t0);
   }
 
   eenheidPositie(u, frac) {
@@ -1468,13 +1481,40 @@ export class KaartView {
         else { c.fillStyle = rand; c.fillRect(x - 2, y - 2, 4, 4); }
       }
       for (const p of land.plaatsingen) {
-        this.tekenGebouw(c, land, p.t, p.g, T, rand, detail, null, p.eff, p);
+        this.tekenGebouw(c, land, p.t, p.g, T, rand, detail, null, p.effBasis ?? p.eff, p);
         if ((p.uit ?? 0) > s.dag && p.t >= 0 && this.zichtbaar(this.geo.tegels[p.t])) tekenUitval(c, ...this.naarScherm(this.geo.tegels[p.t].x, this.geo.tegels[p.t].y), Math.max(4, T), this.nu, this.zoom >= MINI);
       }
       // C14b: vloeiende voortgang uit dag + dagfractie (bij pauze blijft de fractie staan); oude saves zonder start
       for (const b of land.bouw) {
         const start = b.start ?? b.klaar - (P.gebouwIndex[b.gebouw]?.bouwtijd ?? 5);
         this.tekenGebouw(c, land, b.tegel, b.gebouw, T, rand, detail, clamp((s.dag + (this.bouwFrac ?? 0) - start) / Math.max(1, b.klaar - start), 0, 0.999), 1);
+      }
+      // C15c: sloopplaatsen (kale grond, puin, hek en een graafmachine); op de middenzoom een merk
+      for (const sl of land.sloop ?? []) {
+        const st = this.geo.tegels[sl.tegel];
+        if (!st || !s.bezet[sl.tegel]?.sloop || !this.zichtbaar(st)) continue;
+        const [x, y] = this.naarScherm(st.x, st.y);
+        const duur = P.model.verbouw?.sloop_dagen ?? 3;
+        const f = clamp((s.dag + (this.bouwFrac ?? 0) - (sl.klaar - duur)) / Math.max(1, duur), 0, 1);
+        if (this.zoom >= MINI) {
+          tekenSloopplaats(c, x, y, T, f, sl.tegel, this.nu);
+          if (this.zoom < DIEP) this.merk(c, x, y, T, rand, '🚧', f);
+        } else if (detail) {
+          c.setLineDash([T * 0.12, T * 0.1]); this.vakje(c, x, y, T, rand, 0.75); c.setLineDash([]);
+          c.font = `${Math.round(this.vakjeMaat(T) * 1.1)}px ${EMOJI}`; c.fillText('🚧', x, y + 1);
+        } else {
+          c.fillStyle = 'rgba(160,150,135,0.6)'; c.fillRect(x - 1.3, y - 1.3, 2.6, 2.6);
+        }
+      }
+    }
+    // C15c: lege kavels na een sloop (state.kavels): braakliggend binnen de stoeprand, alleen dichtbij
+    if (this.zoom >= MINI) {
+      const kavels = s.kavels ?? [];
+      for (let i = 0; i < kavels.length; i++) {
+        const t = kavels[i].tegel, kt = this.geo.tegels[t];
+        if (!kt || s.bezet[t] || !(s.eigenaar[t] >= 0) || !this.zichtbaar(kt)) continue;
+        const [x, y] = this.naarScherm(kt.x, kt.y);
+        tekenLeegKavel(c, x, y, T, this.wegennet?.omgeving(t) ?? null, t);
       }
     }
   }
@@ -1507,7 +1547,7 @@ export class KaartView {
   vakjeMaat(T) { return clamp(T * 0.26, 6, 20); }
 
   // Klein merkje op een verkleinde tekening (MINI tot DIEP): wat er staat en van wie, verdwijnt bij verder inzoomen.
-  merk(c, x, y, T, rand, icoon, voortgang = null, pop = 1) {
+  merk(c, x, y, T, rand, icoon, voortgang = null, pop = 1, niveau = 1) {
     const a = 1 - smooth(3.3, DIEP, this.zoom);
     if (a <= 0.02) return;
     const m = clamp(T * 0.15, 6, 12) * pop; // pop: C14b, kort groter bij een oplevering
@@ -1516,6 +1556,13 @@ export class KaartView {
     c.beginPath(); c.arc(x, y, m, 0, Math.PI * 2); c.fill(); c.stroke();
     c.font = `${Math.round(m * 1.25)}px ${EMOJI}`;
     c.fillText(icoon, x, y + 1);
+    if (niveau > 1) {
+      // C15c: één gouden stipje per verbouwstap, net onder het rondje (boven een eventuele voortgangsbalk)
+      const r = Math.max(1.6, m * 0.2), dy = y + m + r + 1.5;
+      c.fillStyle = '#f0c14a'; c.strokeStyle = 'rgba(10,15,21,0.85)'; c.lineWidth = 1;
+      for (let i = 0; i < niveau - 1; i++) { c.beginPath(); c.arc(x + (i - (niveau - 2) / 2) * r * 2.8, dy, r, 0, Math.PI * 2); c.fill(); c.stroke(); }
+      if (voortgang != null) y += r * 2 + 2;
+    }
     if (voortgang != null) {
       c.fillStyle = '#0c131b'; c.fillRect(x - m * 1.6, y + m + 2, m * 3.2, 3);
       c.fillStyle = '#f0b429'; c.fillRect(x - m * 1.6, y + m + 2, m * 3.2 * clamp(voortgang, 0, 1), 3);
@@ -1535,12 +1582,20 @@ export class KaartView {
         ...(kc = this.kavelCtx(t, g.id, verkeersTijd(this.nu))),
         regime: land.regime, kleur: rand, tijd: this.nu / 1000, seed: t,
         actief: voortgang == null && (eff ?? 1) > 0, voortgang: voortgang == null ? null : clamp(voortgang, 0, 1),
-        eff: eff ?? 1, aantal: land.gebouwen[gebouwId] ?? 1, niveau: p?.niveau ?? null, L: land.L, capaciteit: this.woningenVan(land), basis: land.basisWoningen, uit: (p?.uit ?? 0) > this.state.dag, nacht: this.nacht ?? 0, dag: this.state.dag, stab: land.stab, welvaart: land.Y / Math.max(1, this.state.wereldY / this.state.landen.length),
+        eff: eff ?? 1, aantal: land.gebouwen[gebouwId] ?? 1, niveau: p?.niveau > 1 ? p.niveau : null, L: land.L, capaciteit: this.woningenVan(land), basis: land.basisWoningen, uit: (p?.uit ?? 0) > this.state.dag, nacht: this.nacht ?? 0, dag: this.state.dag, stab: land.stab, welvaart: land.Y / Math.max(1, this.state.wereldY / this.state.landen.length),
       });
       if (gelukt) {
-        if (this.zoom < DIEP) { this.merk(c, x, y, T, rand, g.icoon ?? '■', voortgang, voortgang == null ? this.oplevering?.popVan(t) ?? 1 : 1); return; }
-        if (voortgang != null && land.idx === this.state.speler) this.voortgangsBoog(c, x, y, T, kc.omgeving, soort, g.id, voortgang);
-        if (voortgang == null && eff < 0.95 && land.idx === this.state.speler) {
+        // C15c: een lopende verbouwing krijgt steigers en een bouwhek, en de voortgang op het merk of als boog
+        const vb = p?.verbouw ? clamp((this.state.dag + (this.bouwFrac ?? 0) - p.verbouw.start) / Math.max(1, p.verbouw.klaar - p.verbouw.start), 0, 0.999) : null;
+        if (vb != null) {
+          // de steigers staan tegen het gebouw op zijn kavel, niet midden op de tegel (C15c-review)
+          let bx = 0, by = 0, k = 1;
+          if (kc.omgeving) { try { const kv = kavelInfo(kc.omgeving, (this._soorten ??= new Set(gebouwSoorten())).has(g.id) ? g.id : soort); bx = kv.bx; by = kv.by; k = kv.k; } catch (err) { /* geen kavel */ } }
+          tekenVerbouwing(c, x + bx * T, y + by * T, k * T, vb);
+        }
+        if (this.zoom < DIEP) { this.merk(c, x, y, T, rand, g.icoon ?? '■', voortgang ?? vb, voortgang == null && vb == null ? this.oplevering?.popVan(t) ?? 1 : 1, p?.niveau ?? 1); return; }
+        if ((voortgang ?? vb) != null && land.idx === this.state.speler) this.voortgangsBoog(c, x, y, T, kc.omgeving, soort, g.id, voortgang ?? vb);
+        if (voortgang == null && vb == null && eff < 0.95 && land.idx === this.state.speler) {
           c.font = `600 ${Math.max(9, Math.round(T * 0.13))}px -apple-system, sans-serif`;
           c.fillStyle = eff < 0.7 ? '#f2706a' : '#f0b429';
           c.fillText(`${Math.round(eff * 100)}%`, x, y - T * 0.42);
@@ -1571,6 +1626,18 @@ export class KaartView {
     this.vakje(c, x, y, T, rand, 1);
     c.font = `${Math.round(this.vakjeMaat(T) * 1.2)}px ${EMOJI}`;
     c.fillText(g.icoon ?? '■', x, y + 1);
+    if (p?.niveau > 1 && T >= 6 && land.idx === this.state.speler) {
+      // C15c: kleine gouden stipjes onder het schildje, één per verbouwstap
+      c.fillStyle = '#f0c14a';
+      const dy = y + this.vakjeMaat(T) + 2.5;
+      for (let i = 0; i < p.niveau - 1; i++) { c.beginPath(); c.arc(x + (i - (p.niveau - 2) / 2) * 4, dy, 1.5, 0, Math.PI * 2); c.fill(); }
+    }
+    if (p?.verbouw) {
+      const vb = clamp((this.state.dag + (this.bouwFrac ?? 0) - p.verbouw.start) / Math.max(1, p.verbouw.klaar - p.verbouw.start), 0, 1);
+      c.fillStyle = '#0c131b'; c.fillRect(x - T * 0.32, y + this.vakjeMaat(T) + 5, T * 0.64, Math.max(2, T * 0.05));
+      c.fillStyle = '#f0b429'; c.fillRect(x - T * 0.32, y + this.vakjeMaat(T) + 5, T * 0.64 * vb, Math.max(2, T * 0.05));
+      return;
+    }
     if (eff < 0.95 && this.zoom >= 2.4 && land.idx === this.state.speler) {
       c.font = `600 ${Math.max(8, Math.round(T * 0.26))}px -apple-system, sans-serif`;
       c.fillStyle = eff < 0.7 ? '#f2706a' : '#f0b429';

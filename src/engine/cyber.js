@@ -10,6 +10,7 @@ import {
 import { voorziening } from './samenleving.js';
 import { partij, partijNaam } from './leger.js';
 import { animatie } from './media.js';
+import { actieveVerbouw, niveauVan } from './verbouw.js';
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
@@ -206,11 +207,20 @@ export function aiCyber(state, leider, blok) {
     const tb = t.alignment;
     if (t === leider || !tb || tb === 'zwevend' || tb === blok.id) return false;
     return Math.max(blok.spanning, blokVan(state, tb).spanning) >= drempel;
-  }).map((t) => ({ t, s: score(t) })).sort((a, b) => b.s - a.s || a.t.idx - b.t.idx).map((x) => x.t);
+  }).map((t) => ({ t, s: score(t) })).sort((a, b) => b.s - a.s || hoogsteNiveau(state, b.t) - hoogsteNiveau(state, a.t) || a.t.idx - b.t.idx).map((x) => x.t);
   for (const t of doelen.slice(0, 3)) {
     const v = e.varianten[Math.floor(nextRandom(state) * e.varianten.length)];
     if (cyberStatus(state, leider.idx, t.idx, v.id).ok) { voerCyberUit(state, leider.idx, t.idx, e, { variant: v.id }); return; }
   }
+}
+
+// C15c: bij gelijke score gaat een cyberaanval eerder naar het land met het hoogst verbouwde gebouw (de tegenzet
+// van verbouwen: wie investeert, valt op). Alleen als verbouwen aan staat; anders altijd 0.
+function hoogsteNiveau(state, c) {
+  if (!state.instellingen.systemen.verbouw) return 0;
+  let n = 1;
+  for (let i = 0; i < c.plaatsingen.length; i++) n = Math.max(n, niveauVan(c.plaatsingen[i]));
+  return n;
 }
 
 // Een land dat is aangevallen, bouwt een cybercentrum als de persoonlijkheid dat wil.
@@ -220,7 +230,7 @@ export function aiCyberVerdediging(state, c) {
   if (!g) return;
   const ai = state.pack.persoonlijkheden[c.persoonlijkheid].ai || {};
   const heeft = (c.gebouwen[g.id] || 0) + c.bouw.filter((b) => b.gebouw === g.id).length;
-  if (heeft >= (ai.cyber_verdediging ?? 0) || c.bouw.length >= state.pack.model.max_bouw) return;
+  if (heeft >= (ai.cyber_verdediging ?? 0) || c.bouw.length + actieveVerbouw(c) >= state.pack.model.max_bouw) return;
   const kosten = bouwKosten(state, c, g.id);
   if ((c.voorraad[state.pack.rollen.geld] - (kosten[state.pack.rollen.geld] ?? 0)) < (ai.reserve ?? 100)) return;
   if (kanBetalen(c, kosten)) bouw(state, c.idx, g.id);

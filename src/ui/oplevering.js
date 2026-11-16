@@ -60,6 +60,8 @@ export class OpleveringVolger {
     for (let i = 0; i < L.length; i++) {
       const b = L[i].bouw;
       for (let j = 0; j < b.length; j++) { this.ref.push(b[j]); this.items.set(`${i}:${b[j].tegel}:${b[j].gebouw}`, { land: i, tegel: b[j].tegel, gebouw: b[j].gebouw }); }
+      const pl = L[i].plaatsingen;
+      for (let j = 0; j < pl.length; j++) if (pl[j].verbouw) { this.ref.push(pl[j].verbouw); this.items.set(`${i}:${pl[j].t}:v`, { land: i, tegel: pl[j].t, gebouw: pl[j].g, naar: pl[j].verbouw.naar }); }
     }
   }
 
@@ -73,6 +75,9 @@ export class OpleveringVolger {
     for (let i = 0; i < L.length && gelijk; i++) {
       const b = L[i].bouw;
       for (let j = 0; j < b.length; j++, k++) if (ref[k] !== b[j]) { gelijk = false; break; }
+      // C15c: lopende verbouwingen tellen mee (het verbouw-object op de plaatsing)
+      const pl = L[i].plaatsingen;
+      for (let j = 0; j < pl.length && gelijk; j++) if (pl[j].verbouw) { if (ref[k] !== pl[j].verbouw) gelijk = false; else k++; }
     }
     if (gelijk && k === ref.length) return;
     // er is iets veranderd: sleutels vergelijken
@@ -86,9 +91,21 @@ export class OpleveringVolger {
         nieuw.set(sl, { land: i, tegel: b[j].tegel, gebouw: b[j].gebouw });
         if (!oud.has(sl)) this.meld('bouwstart', i, b[j].tegel, b[j].gebouw, state, nu);
       }
+      const pl = L[i].plaatsingen;
+      for (let j = 0; j < pl.length; j++) {
+        if (!pl[j].verbouw) continue;
+        ref.push(pl[j].verbouw);
+        nieuw.set(`${i}:${pl[j].t}:v`, { land: i, tegel: pl[j].t, gebouw: pl[j].g, naar: pl[j].verbouw.naar });
+      }
     }
     for (const [sl, it] of oud) {
       if (nieuw.has(sl)) continue;
+      if (it.naar != null) {
+        // C15c: een verbouwing is weg. Staat de plaatsing er nog op het nieuwe niveau, dan hetzelfde feest als een nieuwbouw.
+        const p = state.landen[it.land]?.plaatsingen.find((x) => x.t === it.tegel);
+        if (p && (p.niveau ?? 1) >= it.naar) this.meld('oplevering', it.land, it.tegel, it.gebouw, state, nu, true);
+        continue;
+      }
       const bz = state.bezet[it.tegel];
       const af = !!bz && bz.land === it.land && bz.gebouw === it.gebouw && bz.bouw === false;
       this.meld(af ? 'oplevering' : 'bouw_verloren', it.land, it.tegel, it.gebouw, state, nu);
@@ -96,9 +113,10 @@ export class OpleveringVolger {
     this.items = nieuw;
   }
 
-  meld(soort, land, tegel, gebouw, state, nu) {
+  meld(soort, land, tegel, gebouw, state, nu, verbouw = false) {
     const tg = state.pack.geo.tegels[tegel];
     const e = { soort, land, tegel, gebouw, dag: state.dag, wx: tg?.x ?? 0, wy: tg?.y ?? 0, nu };
+    if (verbouw) e.verbouw = true;
     laatste.push(e);
     if (laatste.length > 50) laatste.shift();
     for (let i = 0; i < luisteraars.length; i++) { try { luisteraars[i](e); } catch (err) { /* een koppeling mag de kaart niet stilzetten */ } }

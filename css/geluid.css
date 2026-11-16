@@ -1,0 +1,24 @@
+/* C15d Geluid: de luidsprekerknop bovenaan .kaart-knoppen en het kleine geluidspaneel ernaast. */
+.kaart-knoppen .geluid-knop { display: grid; place-items: center; padding: 0; color: var(--tekst, #e6e1d6);
+  -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; touch-action: manipulation; }
+.geluid-knop svg { width: 18px; height: 18px; display: block; pointer-events: none; }
+.geluid-knop .geluid-streep { display: none; }
+.geluid-knop.uit { color: var(--zacht, #8b929b); }
+.geluid-knop.uit .geluid-golf { display: none; }
+.geluid-knop.uit .geluid-streep { display: inline; }
+
+.geluid-paneel { position: absolute; right: 52px; bottom: 12px; z-index: 6; width: 220px; max-width: calc(100% - 68px);
+  box-sizing: border-box; padding: 10px 12px; border: 1px solid var(--lijn, #2a3440); border-radius: 8px;
+  background: rgba(13,20,28,.96); box-shadow: 0 6px 24px rgba(0,0,0,.4); font-size: 13px; display: grid; gap: 6px; }
+.geluid-paneel[hidden] { display: none; }
+.geluid-rij { display: grid; grid-template-columns: 1fr; gap: 2px; }
+.geluid-rij input[type=range] { width: 100%; margin: 0; accent-color: var(--accent, #f0b429); }
+.geluid-check { grid-template-columns: auto 1fr; align-items: center; gap: 8px; font-weight: 600; }
+.geluid-check input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent, #f0b429); }
+.geluid-hint { margin: 2px 0 0; color: var(--zacht, #8b929b); font-size: 12px; line-height: 1.3; }
+
+@media (max-width: 600px) {
+  .geluid-knop svg { width: 20px; height: 20px; }
+  .geluid-paneel { right: 56px; bottom: 8px; max-width: calc(100% - 72px); width: 230px; }
+  .geluid-rij input[type=range] { height: 28px; }
+}

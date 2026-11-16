@@ -20,6 +20,7 @@ import { Ritten, ritStand as ritStandVan, dockStand as dockStandVan, slagboom as
 import { bijwerken as straatBijwerken, straatStand, stilOp, landStand, straatVerkeer, parkOvergang, vervaag, padPunt, DREMPELS as STRAAT, RIJ_MAX, BLOEI_EXTRA } from './straatstand.js';
 import { kenmerkenVoorTegel, KENMERK, GEWAS, perceelHoek } from './terrein.js';
 import { DREMPEL } from './infra.js';
+import { tekenOnrustRook } from './onrustrook.js';
 
 // ---------- gedeelde hulpjes (eigen kopie, zie spec §0) ----------
 
@@ -772,6 +773,7 @@ export class LevenLaag {
     if (z >= 2.5) this.tekenLucht(c, nu);
     // C13c: onrust al op de middenzoom (het protest neemt het tussen zoom 4 en 5 over) en de tekort-merkjes
     if (z < 5) this.tekenOnrustPuls(c, nu, 1 - smooth(4, 5, z));
+    if (z < 11) tekenOnrustRook(c, this, nu, z);
     this.tekenBloei(c, nu, z >= 2 && z < 5.5 ? 1 - smooth(4.5, 5.5, z) : 0);
     if (z >= 2.5 && z < TEKORT_UIT) this.tekenTekorten(c, smooth(2.5, 2.9, z) * (1 - smooth(TEKORT_VAAG, TEKORT_UIT, z)), z);
     c.restore();

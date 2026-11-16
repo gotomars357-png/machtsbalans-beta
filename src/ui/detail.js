@@ -73,8 +73,19 @@ export function zetCanvasFabriek(fn) {
 const LOD1 = 90, LOD2 = 150;
 const MAX_BITMAPS = 300, MAX_PX = 600;
 const MAX_BYTES = 64 * 1024 * 1024; // plafond uit de spec; ruim 40 bitmaps op de grootste maat tegelijk in beeld
-const BAKKEN_PER_BEELD = 4; // daarna tijdelijk de vorige maat geschaald tonen, zodat zoomen niet hapert
+const BAKKEN_PER_BEELD = 4; // bovenste plafond; daarna tijdelijk de vorige maat geschaald tonen, zodat zoomen niet hapert
 const ZOOMMARGE = 1.25; // tijdens het zoomen mag de vorige bitmap tot deze factor geschaald worden
+// C15a: tijdens een vlucht (map.js zetVlucht) mag de vorige bitmap verder geschaald worden, en bakken gebeurt binnen
+// een eigen tijdgrens per beeld (echte klok, minstens één bitmap). Zonder vorige bitmap en met het plafond op: de
+// laatst gebakken bitmap van dezelfde soort (naam|regime|niveau), geschaald; anders false (de kaart tekent het merkje).
+// Rechtstreeks tekenen alleen zonder canvasfabriek (node).
+const ZOOMMARGE_VLUCHT = 2.0;
+const BAK_MS_RUST = 2.0, BAK_MS_VLUCHT = 1.0;
+const LAATSTE_SOORT = new Map(); // naam|regime|niveau → laatst gebakken bitmap
+let inVlucht = false, bakMs = 0;
+const LEEG_RAMEN = new Float32Array(0);
+export function zetVlucht(v) { inVlucht = !!v; }
+import { echtNu } from './bakbudget.js';
 const RAAMLICHT = '#ffe9a8';
 
 const CACHE = new Map(); // sleutel → bitmap; Map houdt de volgorde bij, dus de eerste is het langst ongebruikt
@@ -85,6 +96,7 @@ let cacheBytes = 0, bakBeeld = -1, bakTeller = 0;
 export function leegCache() {
   CACHE.clear();
   LAATSTE.clear();
+  LAATSTE_SOORT.clear();
   VORIGE_MAAT.clear();
   cacheBytes = 0;
   bakTeller = 0;
@@ -108,6 +120,7 @@ function opruimen() {
     CACHE.delete(k);
     cacheBytes -= e.bytes;
     if (LAATSTE.get(e.vast) === e) { LAATSTE.delete(e.vast); VORIGE_MAAT.delete(e.vast); }
+    if (e.soortSl && LAATSTE_SOORT.get(e.soortSl) === e) LAATSTE_SOORT.delete(e.soortSl); // C15a: geen opgeruimde bitmap vasthouden
   }
   if (VORIGE_MAAT.size > 2 * MAX_BITMAPS) VORIGE_MAAT.clear();
 }
@@ -2830,6 +2843,23 @@ function steigers(c, x, y, s, voortgang) {
   rect(c, x + s * 0.32, y + s * 0.26, s * 0.1, s * 0.012, '#2e6eb5');
 }
 
+// C15c: een lopende verbouwing over een afgebouwd gebouw: dezelfde steigers plus een bouwhek langs de voorkant.
+export function tekenVerbouwing(c, x, y, s, f) {
+  c.save();
+  // een licht steigerdoek langs de voorgevel, zodat de verbouwing ook op de middenzoom opvalt (C15c-review)
+  const v = Math.max(0, Math.min(1, f)), lagen = 1 + Math.floor(v * 4);
+  c.fillStyle = 'rgba(232,226,210,0.38)';
+  c.fillRect(x - s * 0.34, y + s * 0.28 - lagen * s * 0.05, s * 0.64, lagen * s * 0.05);
+  steigers(c, x, y, s, v);
+  const y0 = y + s * 0.38, x0 = x - s * 0.4, x1 = x + s * 0.4, paal = Math.max(1, s * 0.012);
+  c.strokeStyle = '#d9d3c5';
+  c.lineWidth = Math.max(0.8, s * 0.006);
+  c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y0); c.stroke();
+  c.fillStyle = '#e07b2a';
+  for (let i = 0; i <= 8; i++) c.fillRect(x0 + ((x1 - x0) * i) / 8 - paal / 2, y0 - paal * 1.5, paal, paal * 2);
+  c.restore();
+}
+
 // Helikopter op het platform: staat stil, draait op, stijgt op en vliegt weg, komt later terug en landt.
 function helikopter(c, px, py, r, t, fase, s, draait) {
   const p = frac(t / 70 + fase);
@@ -4495,7 +4525,7 @@ function niveauVan(soort, ctx) {
       // drukte (bezetting) of groei (bijgebouwde woningen t.o.v. de start) maakt de wijk dichter;
       // de sim houdt de bezetting vrijwel altijd onder 1, dus zonder groei kwam niveau 3 nooit voor
       const b = ctx.L / ctx.capaciteit, groei = ctx.basis > 0 ? ctx.capaciteit / ctx.basis : 1;
-      n = 1 + (b > 0.9 || groei > 1.15) + (b > 1.2 || groei > 1.35);
+      n = Math.max(ctx.niveau ?? 1, 1 + (b > 0.9 || groei > 1.15) + (b > 1.2 || groei > 1.35)); // C15c: een verbouwde wijk zakt nooit onder zijn niveau
     }
     else if (ctx.niveau != null) n = ctx.niveau;
     else {
@@ -4505,7 +4535,10 @@ function niveauVan(soort, ctx) {
       if (n > 1 && hash(ctx.seed ?? 0, 11) < 0.25) n -= 1;
     }
   } else if (soort === 'kolonie') n = ctx.niveau ?? 1;
-  else n = ctx.niveau ?? 1 + ((ctx.eff ?? 1) >= 1.05) + ((ctx.aantal ?? 1) >= 4);
+  // C15c: een verbouwd gebouw (ctx.niveau, alleen gezet vanaf niveau 2) tekent op zijn echte niveau; zonder verbouwing
+  // blijft het afgeleide niveau precies zoals het was, zodat geen bestaand gebouw er anders uitziet
+  // (review: het hoogste van beide, zodat een verbouwing naar 2 een gebouw dat al als 3 getekend werd niet kleiner maakt)
+  else n = Math.max(ctx.niveau ?? 1, 1 + ((ctx.eff ?? 1) >= 1.05) + ((ctx.aantal ?? 1) >= 4));
   return n < 1 ? 1 : n > 3 ? 3 : n | 0;
 }
 
@@ -5450,25 +5483,38 @@ export function tekenGebouwDetail(c, soort, x, y, s, ctx) {
     CACHE.set(sleutel, e);
   } else {
     const beeld = Math.floor((ctx.tijd ?? 0) * 60);
-    if (beeld !== bakBeeld) { bakBeeld = beeld; bakTeller = 0; }
+    if (beeld !== bakBeeld) { bakBeeld = beeld; bakTeller = 0; bakMs = 0; }
     // Zoomt de speler nog (andere maat dan vorig beeld) en ligt de vorige bitmap dichtbij, dan die geschaald tonen;
     // pas als de maat stil staat wordt er op de exacte maat gebakken, hoogstens een paar per beeld.
     const vorige = LAATSTE.get(vast);
     const verhouding = vorige ? vorige.px / px : 0;
     const zoomt = Math.abs((VORIGE_MAAT.get(vast) ?? s) - s) > 0.01;
-    if (vorige && ((zoomt && verhouding > 1 / ZOOMMARGE && verhouding < ZOOMMARGE) || bakTeller >= BAKKEN_PER_BEELD)) e = vorige;
-    else if (!vorige && bakTeller >= BAKKEN_PER_BEELD) {
-      // Geen vervanger en het bakbudget van dit beeld is op: dit beeld rechtstreeks tekenen (hieronder), volgend beeld bakken.
+    const marge = inVlucht ? ZOOMMARGE_VLUCHT : ZOOMMARGE;
+    const vol = bakTeller >= BAKKEN_PER_BEELD || (bakTeller > 0 && bakMs >= (inVlucht ? BAK_MS_VLUCHT : BAK_MS_RUST));
+    const soortSl = `${naam}|${ctx.regime}|${niveau}`;
+    if (vorige && ((zoomt && verhouding > 1 / marge && verhouding < marge) || vol)) e = vorige;
+    else if (!vorige && vol) {
+      // Geen vervanger en de bakgrens van dit beeld is op: een bitmap van dezelfde soort geschaald, anders het merkje
+      // (false); rechtstreeks tekenen (hieronder) alleen zonder canvasfabriek of zonder klok (node en de tests). De
+      // vervanger toont alleen de bitmap: ramen en levende delen horen bij een ander gebouw.
+      if (echtNu() > 0 && (fabriek !== standaardFabriek || typeof document !== 'undefined' || typeof OffscreenCanvas !== 'undefined')) {
+        const bron = LAATSTE_SOORT.get(soortSl);
+        if (!bron) { VORIGE_MAAT.set(vast, s); return false; }
+        e = bron.vervanger ??= { ...bron, ramen: LEEG_RAMEN, levend: LEEG_RAMEN, kavelLevend: null };
+      }
     } else {
       const doek = fabriek(px, px);
       if (doek) {
         bakTeller++;
+        const t0 = echtNu();
         const g = doek.getContext('2d');
         g.setTransform(px / s, 0, 0, px / s, 0, 0);
         e = bak(g, naam, f, st, ctx, s / 2, s / 2, s, niveau, effB, sz, groeiend, wv, armen, o, kv, dek, ijs);
-        Object.assign(e, { doek, px, bytes: px * px * 4, vast });
+        bakMs += echtNu() - t0;
+        Object.assign(e, { doek, px, bytes: px * px * 4, vast, soortSl });
         CACHE.set(sleutel, e);
         LAATSTE.set(vast, e);
+        LAATSTE_SOORT.set(soortSl, e);
         cacheBytes += e.bytes;
         opruimen();
       }

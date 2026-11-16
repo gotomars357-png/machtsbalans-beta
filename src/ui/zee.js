@@ -18,6 +18,7 @@
 import { seizoen, weer, wind } from './seizoen.js';
 import { maakBasis, TerreinLaag, ijsVan } from './terrein.js';
 import { KustLaag } from './kust.js';
+import { budget, begin, verbruik, echtNu } from './bakbudget.js';
 
 // ---------- gedeelde hulpjes (eigen kopie) ----------
 
@@ -348,10 +349,14 @@ function analyse(geo, b, tl) {
 
 // ---------- de laag ----------
 
+// De velden die kies vult (C15a: voorwerk neemt ze in één keer over van het schaduwobject, plus het raster).
+const KIES_VELDEN = ['walvissen', 'dolfijnen', 'scholen', 'kwallen', 'klippen', 'krabben', 'surfs', 'regattas', 'banen', 'oevers', 'lussen', 'ijsPlekken', 'zwemsteigers', 'plekLijst'];
+
 export class ZeeLaag {
   constructor() {
     this.state = null; this.geo = null; this.eigenaar = null; this.basis = null; this.tl = null; this.wereld = null;
     this.sig = ''; this.versie = 0; this.klBron = null; this.eigenKust = null;
+    this.voorGen = null; this.voorAan = false; this.voorSig = ''; this.voorKl = null;
     this.raster = new Uint8Array(RW * RH);
     this.cache = new Map(); // brokken onderwaterdetail, LRU
     this.laatste = new Map(); // brok → laatst gebakken (welke maat ook): vervanger tijdens het zoomen
@@ -394,6 +399,7 @@ export class ZeeLaag {
     const kaart = view.state?.pack?.kaart;
     this.warm = !!(kaart && (kaart.warmeZee || (kaart.zeeen || []).some((z) => z.warm)));
     this.sig = ''; this.klBron = null; this.inOorlog = null;
+    this.voorGen = null; this.voorAan = false; this.voorSig = ''; this.voorKl = null;
     this.leeg();
     this.cache.clear(); this.laatste.clear(); this.bytes = 0;
   }
@@ -476,28 +482,100 @@ export class ZeeLaag {
   // ---------- kiezen (alleen als de toestand iets verandert) ----------
 
   // Het botsraster komt van kust.js (die tekent eerder in hetzelfde beeld); zonder kustlaag een eigen.
+  // C15a: is er een kustlaag maar heeft die nog geen keuze (geen sig, of hij kiest voor het eerst), dan null: dit beeld
+  // geen kies en geen tekenOnder. Alleen zonder kustlaag (tests) een eigen.
   kustVan(view) {
     const kl = view.kustLaag;
     if (kl && kl.wereld && kl.state === view.state && kl.raster && kl.sig && kl.basis === this.basis) return kl;
+    if (kl) return null;
     const e = (this.eigenKust ??= new KustLaag());
     if (e.state !== view.state || e.geo !== view.geo || e.eigenaar !== view.eigenaar || e.basis !== this.basis) e.laad(view);
     e.werkCache(view);
     return e;
   }
 
+  sigVan(view, kl) {
+    const nl = view.natuurLaag;
+    return `${kl.sig}|${nl && nl.geo === view.geo ? `${nl.vallen?.length},${nl.snel?.length},${nl.bevers?.length},${nl.dieren?.length}` : '-'}`;
+  }
+
+  // Kiezen in één keer: alleen als er nog nooit voorwerk was (tests); daarna doet voorwerk() het in stappen.
   werkCache(view) {
+    if (this.voorGen || (this.voorAan && this.sig !== '')) return;
     const kl = this.kustVan(view), nl = view.natuurLaag;
-    const sig = `${kl.sig}|${nl && nl.geo === view.geo ? `${nl.vallen?.length},${nl.snel?.length},${nl.bevers?.length},${nl.dieren?.length}` : '-'}`;
+    if (!kl) return;
+    const sig = this.sigVan(view, kl);
     if (sig === this.sig && kl === this.klBron) return;
     this.sig = sig; this.klBron = kl;
     this.kies(kl, nl && nl.geo === view.geo ? nl : null);
   }
 
+  // ---------- voorwerk (C15a) ----------
+  // Zoals kust.js: elk beeld een stukje kiezen op een schaduwobject met wat er van het gedeelde budget over is, op elke
+  // zoom. Wacht zolang werk.js (vorig beeld) of de kustlaag nog voorwerk heeft. Pas als alles klaar is gaan de nieuwe
+  // lijsten en het raster over en komt er een nieuwe versie; tot dan blijft de vorige zee getekend.
+  voorwerk(view, nu) {
+    const s = view?.state;
+    if (!s || !view.geo || !view.w || !view.eigenaar) return;
+    if (!view.kustLaag) return; // zonder kustlaag (tests): werkCache in één keer
+    begin(nu, !!view.doel?.plan, view);
+    if (this.state !== s || this.geo !== view.geo || this.eigenaar !== view.eigenaar || (view.terreinLaag?.basis && view.terreinLaag.basis !== this.basis)) this.laad(view);
+    if (budget.werkBezig || view.kustLaag.voorGen) return;
+    if (!this.voorGen) {
+      const kl = this.kustVan(view);
+      if (!kl) return;
+      const sig = this.sigVan(view, kl);
+      if (sig === this.sig && kl === this.klBron) return;
+      // de allereerste keuze na laden op een zoom waar de zee tekent: die doet werkCache in één keer (tests)
+      if (this.sig === '' && !this.voorAan && view.zoom >= DREMPEL.zand - 0.4) return;
+      const nl = view.natuurLaag && view.natuurLaag.geo === view.geo ? view.natuurLaag : null;
+      this.voorSig = sig; this.voorKl = kl;
+      this.voorGen = this.kiesStappen(kl, nl);
+    }
+    this.voorAan = true;
+    this.stapTijden ??= {};
+    while (budget.over > 0) {
+      const t = echtNu();
+      const r = this.voorGen.next();
+      const ms = echtNu() - t;
+      verbruik(ms);
+      if (r.value?.naam) this.stapTijden[r.value.naam] = Math.max(this.stapTijden[r.value.naam] ?? 0, ms);
+      if (r.done) {
+        const sch = r.value.klaar;
+        for (const k of KIES_VELDEN) this[k] = sch[k];
+        this.raster.set(sch.raster);
+        this.versie++;
+        this.sig = this.voorSig; this.klBron = this.voorKl;
+        this.voorGen = null; this.voorKl = null;
+        break;
+      }
+    }
+  }
+
+  // kies in stappen op een schaduwobject: een yield na elk blok.
+  *kiesStappen(kl, nl) {
+    const sch = Object.create(Object.getPrototypeOf(this));
+    for (const k of ['state', 'geo', 'eigenaar', 'basis', 'tl', 'wereld', 'inOorlog', 'losNaam']) sch[k] = this[k];
+    sch.raster = new Uint8Array(RW * RH);
+    sch.versie = 0;
+    const st = sch.kiesBlokken(kl, nl);
+    let r = st.next();
+    while (!r.done) { yield r.value; r = st.next(); }
+    return { naam: 'klaar', klaar: sch };
+  }
+
   kies(kl, nl) {
-    this.leeg();
     // nieuwe versie: de brokken worden opnieuw gebakken (één per beeld); tot dan blijft de vorige versie staan
     // (via laatste), zodat het onderwaterdetail niet knippert als er ergens gebouwd wordt
     this.versie++;
+    const st = this.kiesBlokken(kl, nl);
+    while (!st.next().done);
+  }
+
+  // De keuze zelf, in blokken (C15a): merken, walvissen plus regatta's plus dolfijnen, stranden per 150, banen, lussen,
+  // ijsplekken plus zwemsteigers, oevers, en klippen plus scholen plus kwallen.
+  *kiesBlokken(kl, nl) {
+    this.leeg();
     const g = this.raster, A = this.wereld, R = this.tl.rivieren;
     if (kl.raster && kl.raster.length === g.length) g.set(kl.raster); else g.fill(0);
     // rotsen en rollers van de kust, het rivierleven van de natuurlaag
@@ -510,6 +588,7 @@ export class ZeeLaag {
       for (const v of nl.bevers ?? []) { this.merk(v.x, v.y, 2.6, NATUUR); this.merk(v.vx, v.vy, 2.2, NATUUR); this.merk(v.lx, v.ly, 1.2, NATUUR); }
       for (const v of nl.dieren ?? []) if (v.s === 4 || v.s === 5) this.merk(v.x, v.y, 1, NATUUR);
     }
+    yield { naam: 'merken' };
     // zee
     for (const w of A.walvissen) if (this.vrij(w.x, w.y, 7, LEVEN | KUST | INFRA)) { this.walvissen.push(w); this.plek('walvis', w.x, w.y); }
     for (const r of A.regattas) {
@@ -526,7 +605,10 @@ export class ZeeLaag {
       for (let q = 0; q < 12 && ok; q++) { const u = (q / 12) * TAU; ok = this.vrij(d.x + Math.cos(u) * d.R, d.y + Math.sin(u) * d.R * 0.7, 1, LEVEN | KUST | INFRA | ZEE); }
       if (ok) { this.dolfijnen.push(d); if (this.dolfijnen.length === 1) this.plek('dolfijnen', d.x + d.R, d.y); }
     }
+    yield { naam: 'zee' };
+    let nStrand = 0;
     for (const s of A.stranden) {
+      if (++nStrand % 150 === 0) yield { naam: 'stranden' };
       // surfspot: om de zoveel stranden, met ruimte langs de branding
       if (this.surfs.length < 40 && hash(s.zaad, 3) < 0.14) {
         const tx = -s.ny, ty = s.nx;
@@ -554,6 +636,7 @@ export class ZeeLaag {
         if (this.krabben.length === 1) this.plek('krabben', x, y);
       }
     }
+    yield { naam: 'stranden' };
     // rivieren en meren
     for (const bn of A.banen) {
       const rv = R[bn.ri];
@@ -564,6 +647,7 @@ export class ZeeLaag {
       for (let s = bn.sa; s <= bn.se; s += 2) { this.langs(rv, s); this.merk(this.px, this.py, this.hw + 0.3, ZEE); }
       if (this.banen.length === 1) this.plek('roeiers', bn.x, bn.y);
     }
+    yield { naam: 'banen' };
     for (const L of A.lussen) {
       let ok = true;
       for (let q = 0; q < 16 && ok; q++) { this.opLus(L, (q / 16) * TAU, 0.6); ok = this.vrij(this.px, this.py, 0.6, INFRA | KUST | GEBOUW | NATUUR | ZEE); }
@@ -577,6 +661,7 @@ export class ZeeLaag {
       if (this.lussen.length === 1) this.plek('meerlus', L.x, L.y);
       if (L.fiets && !this.plekLijst.some((p) => p.soort === 'waterfietsen')) this.plek('waterfietsen', L.x, L.y);
     }
+    yield { naam: 'lussen' };
     for (const p of A.ijsPlekken) {
       if (!this.vrij(p.x, p.y, 1.2, INFRA | KUST | GEBOUW | NATUUR | ZEE)) continue;
       this.ijsPlekken.push(p);
@@ -589,6 +674,7 @@ export class ZeeLaag {
       this.merk(p.x, p.y, 1.8, ZEE);
       this.plek('zwemsteiger', p.x, p.y);
     }
+    yield { naam: 'ijs' };
     for (const o of A.oevers) {
       if (!this.vrij(o.x, o.y, 0.6, INFRA | KUST | GEBOUW | NATUUR | LEVEN | ZEE) || !this.vrij(o.fx, o.fy, 0.4, INFRA | KUST | GEBOUW | NATUUR | ZEE)) continue;
       if (o.steiger && !this.vrij(o.bx, o.by, 0.5, INFRA | KUST | GEBOUW | NATUUR | ZEE)) continue;
@@ -597,6 +683,7 @@ export class ZeeLaag {
       if (o.steiger) this.merk((o.x + o.bx) / 2, (o.y + o.by) / 2, 0.9, ZEE);
       if (!this.plekLijst.some((p) => p.soort === (o.steiger ? 'steiger' : 'hengelaar'))) this.plek(o.steiger ? 'steiger' : 'hengelaar', o.x, o.y);
     }
+    yield { naam: 'oevers' };
     for (const k of A.klippen) {
       if (!this.vrij(k.x, k.y, k.r + 0.8, INFRA | KUST | LEVEN | RAND | ROTS | ZEE)) continue;
       this.klippen.push(k);
@@ -638,6 +725,7 @@ export class ZeeLaag {
   // Na de kustlaag: eerst wat onder water ligt, dan wat erop drijft en vaart, dan de mensen, als laatste wat vliegt.
   // C12: alleen op gebakken grond (terrein knipt het canvas tot de gebakken brokken; niets gebakken: niets tekenen)
   teken(c, view, sc, nu, dt = 0, tempo = 0) {
+    this.voorwerk(view, nu); // C15a: op elke zoom, vóór de klem en de zoomdrempel
     const klem = view?.terreinLaag?.klemOpGebakken?.(c) ?? 1;
     if (!klem) { this.nul(); return; }
     try { return this.tekenOpGrond(c, view, sc, nu, dt, tempo); } finally { if (klem === 2) c.restore(); }
@@ -693,7 +781,7 @@ export class ZeeLaag {
     c.save();
     c.lineCap = 'round';
     c.lineJoin = 'round';
-    this.tekenOnder(c, a * 0.95);
+    if (this.sig) this.tekenOnder(c, a * 0.95); // C15a: nog nooit gekozen (kust nog niet klaar): dit beeld niet
     if (z > DREMPEL.witwater - 0.5) this.tekenKlippen(c, a * smooth(DREMPEL.witwater - 0.5, DREMPEL.witwater + 0.3, z));
     if (z > DREMPEL.school - 0.5) this.tekenScholen(c, a * smooth(DREMPEL.school - 0.5, DREMPEL.school + 0.4, z));
     if (z > DREMPEL.kwal - 0.5 && sz.zomer + 0.4 * sz.lente > 0.25) this.tekenKwallen(c, a * smooth(DREMPEL.kwal - 0.5, DREMPEL.kwal + 0.4, z));

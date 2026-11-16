@@ -23,6 +23,7 @@
 import { inOorlog } from '../engine/leger.js';
 import { seizoen, wind } from './seizoen.js';
 import { verkeersTijd } from './wegennet.js';
+import { budget, begin, verbruik, echtNu } from './bakbudget.js';
 
 // ---------- gedeelde hulpjes (eigen kopie, zie inzoom-spec §0) ----------
 
@@ -537,9 +538,28 @@ export class GrensLaag {
   // Grensovergangen komen uit het wegennet (net.grensovergangen): een post op de stam- of hoofdweg waar die van het
   // ene land in het andere komt. Deze laag legt zelf geen wegen meer aan. Per overgang: de plek, de richting van de
   // weg (van land a naar land b), en hoe ver de weg aan beide kanten doorloopt (la, lb; voor het gat in het hek).
-  werkWegen(view) {
+  wegenSig(view) {
     const net = view.wegennet;
-    const sig = net?.klaar ? `${net.versie}|${this.state.grensVersie}` : '-';
+    return net?.klaar ? `${net.versie}|${this.state.grensVersie}` : '-';
+  }
+
+  // C15a: het rekenwerk (klassen, bezet, overgangen en posten) ook onder DREMPEL.weg, in rust met budget, zodat het
+  // passeren van de drempel niets meer kost. Zodra de laag tekent altijd. In een vlucht blijven de overgangen van de
+  // vorige stand staan; alleen als er nog nooit een stand was, rekent hij toch (de grens moet altijd getekend worden).
+  rustWerk(view, nu) {
+    const vlucht = !!view.doel?.plan, tekent = view.zoom >= DREMPEL.weg;
+    begin(nu, vlucht, view);
+    this.werkKlassen();
+    this.werkBezet();
+    if (this.wegenSig(view) === this.wegSig) return;
+    if (vlucht ? this.wegSig !== '' : !tekent && !(budget.over > 0)) return;
+    const t = echtNu();
+    this.werkWegen(view);
+    verbruik(echtNu() - t);
+  }
+
+  werkWegen(view) {
+    const net = view.wegennet, sig = this.wegenSig(view);
     if (sig === this.wegSig) return;
     this.wegSig = sig;
     const uit = [];
@@ -785,10 +805,8 @@ export class GrensLaag {
     this.nu = view.nu ?? nu;
     this.u = verkeersTijd(this.nu);
     this.klok = this.nu / 1000; // decor (patrouilles, wachters): doorlopend, zonder sprong aan het eind van de dag
+    this.rustWerk(view, nu); // C15a
     if (z < DREMPEL.weg) return;
-    this.werkKlassen();
-    this.werkBezet();
-    this.werkWegen(view);
     this.kader(view, sc);
     this.omgeving();
     this.sprite();

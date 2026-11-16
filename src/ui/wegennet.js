@@ -88,6 +88,24 @@ const INZET = { naad: 0, haag: 0.03, rand: 0.04, water: 0.02 };
 const PARKEER = { woon: 4, centrum: 6, dienst: 6, werk: 4, voorziening: 4, haven: 2, logistiek: 2, energie: 2, delf: 2, leger: 2, land: 2 };
 const POORTSOORT = { woon: 'woon', centrum: 'dienst', dienst: 'dienst', voorziening: 'voorziening', haven: 'voorziening' };
 const HALTE = { hoofdstad: 1, woonwijk: 1, school: 1, ziekenhuis: 1 };
+
+// Lege kavels na een sloop (state.kavels, zie engine/verbouw.js): voor het net blijft zo'n vakje een stadskavel van de
+// huidige eigenaar met de zone van wat er stond, zodat de straten, de rotonde en de aansluitingen niet verschuiven.
+// Zonder sloop is er geen state.kavels en verandert er niets.
+export function kavelKaart(s) {
+  const lijst = s.kavels;
+  if (!lijst || !lijst.length) return null;
+  const m = new Map();
+  for (let i = 0; i < lijst.length; i++) m.set(lijst[i].tegel, lijst[i].gebouw);
+  return m;
+}
+// Wat het net op tegel t ziet: state.bezet[t], of een leeg kavel als daar niets (meer) staat.
+export function netBezet(s, t, kv) {
+  const b = s.bezet[t];
+  if (b || !kv) return b;
+  const g = kv.get(t), L = s.eigenaar[t];
+  return g === undefined || L == null || L < 0 ? null : { land: L, gebouw: g, kavel: true };
+}
 const LOKAAL = 0, STAMZOEK = 1;
 
 // Steekt de weg van (ax, ay) naar (bx, by) het water over op de natte strook tussen fractie f0 en f1? Dan loopt het
@@ -314,12 +332,14 @@ export class Wegennet {
     const s = view.state, n = view.geo.tegels.length, inf = view.infraLaag;
     const ids = this._ids ??= new Map();
     let h = 7, g = 11;
+    const kv = kavelKaart(s);
     for (let t = 0; t < n; t++) {
-      const b = s.bezet[t];
+      const b = netBezet(s, t, kv);
       let v = 0;
       if (b) {
         let id = 0;
-        if (b.gebouw) { id = ids.get(b.gebouw); if (id === undefined) { id = ids.size + 1; ids.set(b.gebouw, id); } }
+        const gb = b.gebouw ?? b.sloop;
+        if (gb) { id = ids.get(gb); if (id === undefined) { id = ids.size + 1; ids.set(gb, id); } }
         v = (b.land + 2) * 977 + (b.hoofdstad ? 1 : b.kolonie ? 2 : id * 3 + 5);
       }
       h = (Math.imul(h, 31) + v) | 0;
@@ -371,11 +391,14 @@ export class Wegennet {
     const blk = new Uint8Array(n), blkLand = new Int16Array(n).fill(-1), groep = new Int32Array(n).fill(-1);
     const zoneT = new Array(n).fill(''), gebT = new Array(n).fill('');
     const zoneVan = (id) => P.gebouwIndex?.[id]?.zone ?? ZONE[id] ?? (P.gebouwIndex?.[id]?.woningen ? 'woon' : 'werk');
+    const kv = kavelKaart(s);
     for (let t = 0; t < n; t++) {
-      const b = s.bezet[t];
+      const b = netBezet(s, t, kv);
       if (b) {
         blk[t] = 1; blkLand[t] = b.land;
-        if (b.hoofdstad) { zoneT[t] = 'centrum'; gebT[t] = 'hoofdstad'; } else if (b.kolonie) { zoneT[t] = 'woon'; gebT[t] = 'kolonie'; } else { zoneT[t] = zoneVan(b.gebouw); gebT[t] = b.gebouw ?? ''; }
+        // een sloopplaats en een leeg kavel houden de zone van wat er stond: dezelfde straten en aansluitingen
+        const gb = b.gebouw ?? b.sloop;
+        if (b.hoofdstad) { zoneT[t] = 'centrum'; gebT[t] = 'hoofdstad'; } else if (b.kolonie) { zoneT[t] = 'woon'; gebT[t] = 'kolonie'; } else { zoneT[t] = zoneVan(gb); gebT[t] = gb ?? ''; }
       } else if (inf?.res && inf.res[t] && (inf.resLand?.[t] ?? -1) >= 0) {
         blk[t] = 2; blkLand[t] = inf.resLand[t]; zoneT[t] = 'voorziening';
         gebT[t] = ['', 'station', 'vliegveld', 'haven', 'depot'][inf.res[t]] ?? 'voorziening';

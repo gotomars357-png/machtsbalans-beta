@@ -19,6 +19,7 @@ import { mediaTick, voerMediaActieUit, voerOvernameUit } from './media.js';
 import { initContracten, contractenTick, voerContractUit, contractenAfdruk, aiContractenTick } from './contracten.js';
 import { voerCyberUit, cyberTick } from './cyber.js';
 import { brandhaardenTick, voerBrandhaardActieUit, brandhaardenAfdruk } from './brandhaarden.js';
+import { actieveVerbouw, verbouwTick, voerVerbouwUit, voerSloopUit, heeftSloop, sloopOpruim, verbouwAfdruk } from './verbouw.js';
 
 export const MOEILIJKHEID = {
   makkelijk: { econ: 0.93, invloed: 0.6, oorlog: 0.2, naam: 'Makkelijk' },
@@ -32,7 +33,7 @@ export function createGame(pack, settings = {}) {
   const s = {
     seed: 12345, moeilijkheid: 'normaal', onboarding: true, land: null,
     ...settings,
-    systemen: { events: true, schokken: true, escalatie: true, contracten: true, brandhaarden: false, ...(settings.systemen || {}) },
+    systemen: { events: true, schokken: true, escalatie: true, contracten: true, brandhaarden: false, verbouw: false, ...(settings.systemen || {}) },
   };
   pack.gebouwIndex ??= Object.fromEntries(pack.gebouwen.map((g) => [g.id, g]));
   pack.resIndex ??= Object.fromEntries(pack.resources.map((r) => [r.id, r]));
@@ -77,6 +78,7 @@ export function createGame(pack, settings = {}) {
       regime: l.regime, laatsteVerkiezing: -((idx * 97) % 400), revoluties: 0,
       media: {}, factcheck: 0, moraal: pack.model.moraal_basis, moraalDoel: pack.model.moraal_basis, moraalFactoren: [],
       training: [], complot: 0, controle: 0, weerbaarheid: 0, netwerken: {}, basisWoningen: l.bevolking * pack.model.basis_woningen,
+      sloop: [],
     };
   });
 
@@ -193,11 +195,29 @@ export function rendement(state, c, gebouwId, t, nodes = knooppunten(state, c)) 
 
 export function herbereken(state, c) {
   const nodes = knooppunten(state, c);
+  const V = state.pack.model.verbouw;
+  let extraVerbruik = null;
+  let extraOnderhoud = null;
   c.effSom = {};
   for (const p of c.plaatsingen) {
     p.eff = (p.uit ?? 0) > state.dag ? 0 : rendement(state, c, p.g, p.t, nodes); // uitgevallen door een cyberaanval
+    if (p.niveau > 1 || p.verbouw) {
+      // Verbouwd (C15c): meer effect per niveau; tijdens de verbouwing halve kracht. effBasis is voor de tekening.
+      const n = p.niveau ?? 1;
+      const fn = V.effect[n - 1];
+      if (fn !== 1) p.eff *= fn;
+      if (p.verbouw) { p.effBasis = p.eff; p.eff *= V.tijdens; } else delete p.effBasis;
+      if (n > 1) {
+        extraVerbruik ??= {};
+        extraOnderhoud ??= {};
+        extraVerbruik[p.g] = (extraVerbruik[p.g] || 0) + V.verbruik[n - 1] - 1;
+        extraOnderhoud[p.g] = (extraOnderhoud[p.g] || 0) + V.onderhoud[n - 1] - 1;
+      }
+    }
     c.effSom[p.g] = (c.effSom[p.g] || 0) + p.eff;
   }
+  c.extraVerbruik = extraVerbruik;
+  c.extraOnderhoud = extraOnderhoud;
 }
 
 export function tegelStatus(state, landIdx, gebouwId, t, nodes) {
@@ -207,7 +227,7 @@ export function tegelStatus(state, landIdx, gebouwId, t, nodes) {
   if (!tegel) return { ok: false, reden: 'Buiten de kaart.' };
   const eig = state.eigenaar[t];
   if (eig !== landIdx) return { ok: false, reden: eig === -1 ? 'Dit is water.' : eig === -2 ? 'Onbewoond land: sticht er eerst een kolonie met een kolonistenschip.' : 'Niet jouw grondgebied.' };
-  if (state.bezet[t]) return { ok: false, reden: state.bezet[t].hoofdstad ? 'Hier ligt je hoofdstad.' : state.bezet[t].kolonie ? 'Hier ligt het centrum van een kolonie.' : 'Dit vakje is al bebouwd.' };
+  if (state.bezet[t]) return { ok: false, reden: state.bezet[t].hoofdstad ? 'Hier ligt je hoofdstad.' : state.bezet[t].kolonie ? 'Hier ligt het centrum van een kolonie.' : state.bezet[t].sloop ? 'Hier wordt gesloopt.' : 'Dit vakje is al bebouwd.' };
   if (g.terrein && !g.terrein.includes(tegel.terrein)) return { ok: false, reden: `${g.naam} vraagt ${g.terrein.join(' of ')}; dit is ${tegel.terrein}.` };
   if (nodes === false) return { ok: true };
   return { ok: true, rendement: rendement(state, state.landen[landIdx], gebouwId, t, nodes ?? knooppunten(state, state.landen[landIdx])) };
@@ -327,7 +347,7 @@ function economieTick(state, c, schok) {
     if (!n) continue;
     const ne = c.effSom[g.id] || 0;
     for (const [r, v] of Object.entries(g.productie || {})) gross[r] = (gross[r] || 0) + ne * v * prodMult(r, g);
-    for (const [r, v] of Object.entries(g.verbruik || {})) vraag[r] = (vraag[r] || 0) + n * v;
+    for (const [r, v] of Object.entries(g.verbruik || {})) vraag[r] = (vraag[r] || 0) + (n + (c.extraVerbruik?.[g.id] ?? 0)) * v;
   }
   const eEcon = c.Y * M.energie_per_productie;
   const fEcon = c.L * M.voedsel_per_inwoner;
@@ -350,7 +370,7 @@ function economieTick(state, c, schok) {
     let eff = 1;
     for (const r of Object.keys(g.verbruik || {})) eff = Math.min(eff, ratio[r]);
     for (const [r, v] of Object.entries(g.productie || {})) prod[r] = (prod[r] || 0) + ne * v * prodMult(r, g) * eff;
-    for (const [r, v] of Object.entries(g.verbruik || {})) verbruik[r] = (verbruik[r] || 0) + n * v * eff;
+    for (const [r, v] of Object.entries(g.verbruik || {})) verbruik[r] = (verbruik[r] || 0) + (n + (c.extraVerbruik?.[g.id] ?? 0)) * v * eff;
   }
   verbruik[R.energie] = (verbruik[R.energie] || 0) + eEcon * ratio[R.energie];
   verbruik[R.voedsel] = (verbruik[R.voedsel] || 0) + fEcon * ratio[R.voedsel];
@@ -388,7 +408,7 @@ function economieTick(state, c, schok) {
   }
   c.vorderingen = c.vorderingen.filter((v) => v.dagen > 0);
   let onderhoud = 0;
-  for (const g of P.gebouwen) onderhoud += (c.gebouwen[g.id] || 0) * (g.onderhoud ?? M.onderhoud_per_gebouw);
+  for (const g of P.gebouwen) onderhoud += ((c.gebouwen[g.id] || 0) + (c.extraOnderhoud?.[g.id] ?? 0)) * (g.onderhoud ?? M.onderhoud_per_gebouw);
   onderhoud += legerOnderhoud(state, c);
   c.onderhoud = onderhoud;
   c.inkomen = belasting - sociaal + handel + leningen - onderhoud;
@@ -459,6 +479,7 @@ function economieTick(state, c, schok) {
     }
   }
   c.bouw = c.bouw.filter((b) => b.klaar > state.dag);
+  if (verbouwTick(state, c)) klaar = true;
   if (klaar) herbereken(state, c);
 
 }
@@ -642,6 +663,7 @@ export function tick(state) {
   const geldVoor = speler.voorraad[state.pack.rollen.geld];
   cyberTick(state);
   for (const c of state.landen) economieTick(state, c, schok);
+  if (heeftSloop(state)) sloopOpruim(state);
   contractenTick(state);
   const inkomen = speler.voorraad[state.pack.rollen.geld] - geldVoor;
   samenlevingTick(state);
@@ -699,6 +721,8 @@ export function applyOrder(state, o) {
   if (!state.landen[s]) return { ok: false, reden: `Onbekend land '${o.land}'.` };
   switch (o.type) {
     case 'bouw': return bouw(state, s, o.gebouw, o.tegel);
+    case 'verbouw': return voerVerbouwUit(state, s, +o.tegel);
+    case 'sloop': return voerSloopUit(state, s, +o.tegel);
     case 'beleid': return beleid(state, s, o);
     case 'hefboom': return voerHefboomUit(state, s, o.doel, o.actie);
     case 'escalatie': return voerEscalatieUit(state, s, o.doel, o.actie, o);
@@ -728,7 +752,7 @@ export function bouw(state, landIdx, gebouwId, tegel = null) {
   const g = state.pack.gebouwIndex[gebouwId];
   if (!g) return { ok: false, reden: 'Onbekend gebouw.' };
   if (!isOntgrendeld(state, gebouwId)) return { ok: false, reden: 'Nog niet beschikbaar in deze fase.' };
-  if (c.bouw.length >= state.pack.model.max_bouw) return { ok: false, reden: `Maximaal ${state.pack.model.max_bouw} projecten tegelijk.` };
+  if (c.bouw.length + actieveVerbouw(c) >= state.pack.model.max_bouw) return { ok: false, reden: `Maximaal ${state.pack.model.max_bouw} projecten tegelijk.` };
   const kosten = bouwKosten(state, c, gebouwId);
   if (!kanBetalen(c, kosten)) return { ok: false, reden: 'Onvoldoende middelen.' };
   const t = tegel == null ? kiesTegel(state, c, gebouwId) : tegel;
@@ -974,5 +998,5 @@ export function vingerafdruk(state) {
   const leger = state.eenheden.map((u) => `${u.id}:${u.t}:${u.hp.toFixed(2)}`).join(',');
   const regimes = state.landen.map((c) => c.regime[0]).join('');
   const keten = state.eventKeten.length ? `#k${state.eventKeten.map((k) => `${k.id}@${k.dag}@${k.land}`).join(',')}` : '';
-  return `${state.dag}#${state.rng}#${parts.join(';')}#${leger}#${state.oorlogen.length}#${regimes}#${state.kolonies.length}${contractenAfdruk(state)}${keten}${brandhaardenAfdruk(state)}`;
+  return `${state.dag}#${state.rng}#${parts.join(';')}#${leger}#${state.oorlogen.length}#${regimes}#${state.kolonies.length}${contractenAfdruk(state)}${keten}${brandhaardenAfdruk(state)}${verbouwAfdruk(state)}`;
 }

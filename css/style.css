@@ -253,6 +253,7 @@ table.vr td.r { text-align: right; font-family: var(--mono); }
   .context::before { content: ''; display: block; width: 40px; height: 4px; border-radius: 2px; background: var(--lijn); margin: 4px auto 6px; }
   .context-kop { position: sticky; top: -4px; background: #0d141c; padding: 4px 0; z-index: 1; touch-action: none; }
   .context-kop .knop { min-width: 36px; min-height: 36px; justify-content: center; }
+  #context .actie .knop { min-height: 40px; } /* C15c: verbouwen en slopen goed te raken op de telefoon */
   body:has(#context:not([hidden])) #toasts { bottom: calc(45svh + 8px); }
   .tip { font-size: 13px; max-width: min(240px, calc(100% - 16px)); }
   .knop.klein { padding: 6px 10px; }
@@ -266,6 +267,13 @@ table.vr td.r { text-align: right; font-family: var(--mono); }
   #kaart-wrap:has(.tutorial:not([hidden])) .bouwbalk { left: 8px; right: 8px; max-width: none; } /* top zet main.js (schikBouwbalk) */
 }
 @keyframes uitschuiven { from { transform: translateY(100%); } }
+
+/* ---------- verbouwen en slopen (C15c) ---------- */
+.niveau-bolletjes { display: flex; align-items: center; gap: 5px; margin: 4px 0 6px; font-size: 12px; }
+.niveau-bolletjes span { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid #f0c14a; background: transparent; }
+.niveau-bolletjes span.aan { background: #f0c14a; }
+.niveau-bolletjes b { margin-left: 4px; font-weight: 600; }
+.knop.sloop.bevestig { background: #b8362f; border-color: #e0574e; color: #fff; }
 
 /* ---------- contracten (B17) ---------- */
 .knop-res { cursor: pointer; font: inherit; color: inherit; }

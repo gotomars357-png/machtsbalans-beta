@@ -20,6 +20,7 @@
 // pakketjes, cellen in de schermen en het kielzog van de kitesurfers.
 
 import { seizoen, weer, wind } from './seizoen.js';
+import { budget, begin, verbruik, echtNu } from './bakbudget.js';
 
 // ---------- gedeelde hulpjes (eigen kopie, zie inzoom-spec §0) ----------
 
@@ -281,13 +282,21 @@ export class HemelLaag {
   }
 
   // Eens per dag (of na nieuwe gebouwen): kazernes, woonwijken, oorlogen en welvaart.
-  werkDag(view) {
-    const s = this.state;
+  // Klopt de dagstand nog (dag, gebouwen, oorlogen, grenzen)? Getallen vergelijken in plaats van elk beeld een nieuwe
+  // tekenreeks te bouwen.
+  dagGeldig() {
+    const s = this.state, d = this.dagSig;
+    if (!d) return false;
     let np = 0;
     for (const l of s.landen) np += l.plaatsingen.length;
-    // getallen vergelijken in plaats van elk beeld een nieuwe tekenreeks te bouwen
-    const d = this.dagSig;
-    if (d && d[0] === s.dag && d[1] === np && d[2] === s.oorlogen.length && d[3] === (s.grensVersie ?? 0)) return;
+    return d[0] === s.dag && d[1] === np && d[2] === s.oorlogen.length && d[3] === (s.grensVersie ?? 0);
+  }
+
+  werkDag(view) {
+    const s = this.state;
+    if (this.dagGeldig()) return;
+    let np = 0;
+    for (const l of s.landen) np += l.plaatsingen.length;
     this.dagSig = [s.dag, np, s.oorlogen.length, s.grensVersie ?? 0];
     const n = s.landen.length;
     const G = s.pack?.gebouwIndex ?? {};
@@ -317,8 +326,8 @@ export class HemelLaag {
     const gem = (s.wereldY ?? 0) / Math.max(1, n);
     this.welvaart = new Float32Array(n);
     for (let i = 0; i < n; i++) this.welvaart[i] = gem > 0 ? clamp(s.landen[i].Y / gem, 0, 3) : 1;
-    // landingszones die nu bebouwd zijn vallen weg
-    this.wegSig = null;
+    // landingszones die nu bebouwd zijn vallen weg (C15a: alleen de zones opnieuw, de stranden hangen niet van de dag af)
+    this.zonesOud = true;
   }
 
   // Waar parachutisten bij een kazerne neerkomen: een open stuk land binnen twee vakjes (droog, geen gebouw, bos,
@@ -347,19 +356,47 @@ export class HemelLaag {
     return null;
   }
 
+  vrijGeldig(view) { return !this.zonesOud && this.strandGeldig(view); }
+
+  strandGeldig(view) {
+    const inf = view.infraLaag, kust = view.kustLaag?.vrij ? view.kustLaag : null;
+    const kSig = kust && kust.sig ? kust.sig : null, w = this.wegSig;
+    if (!w) return false;
+    return inf ? w[0] === inf.wegen && w[1] === inf.routes && w[2] === kSig : w[2] === kSig;
+  }
+
+  // C15a: het rekenwerk van werkDag en werkVrij, ook onder DREMPEL.streep. In rust: met budget, of altijd als de
+  // hemel tekent en er nog nooit een stand was. In een vlucht niets: de vorige stand blijft getekend. Geeft false als er nog nooit een stand was en
+  // er nu niet gerekend mag worden (dan slaat de hemel dit beeld over).
+  rustWerk(view, nu) {
+    const vlucht = !!view.doel?.plan, tekent = view.zoom >= DREMPEL.streep;
+    begin(nu, vlucht, view);
+    if (vlucht) return !!this.dagSig;
+    for (const [geldig, werk, ooit] of [[() => this.dagGeldig(), () => this.werkDag(view), () => !!this.dagSig], [() => this.vrijGeldig(view), () => this.werkVrij(view), () => !!this.wegSig]]) {
+      if (geldig()) continue;
+      // zonder budget alleen als de hemel tekent en er nog nooit een stand was
+      if (!(budget.over > 0) && (!tekent || ooit())) break;
+      const t = echtNu();
+      werk();
+      verbruik(echtNu() - t);
+    }
+    return !!this.dagSig;
+  }
+
   // Bij nieuwe wegen of spoor: welke vliegerplekken en landingszones nog vrij liggen.
   werkVrij(view) {
     const inf = view.infraLaag, kust = view.kustLaag?.vrij ? view.kustLaag : null;
-    // kust.js houdt een botsraster bij van pieren, jachthavens, boeien, windparken, havenboten en gebouwen: dat
-    // raster is pas gevuld vanaf zijn eigen eerste drempel (zoom 3,6), dus pas daarna meetellen
-    const kSig = kust && view.zoom >= 3.6 ? kust.sig : null;
+    // kust.js houdt een botsraster bij van pieren, jachthavens, boeien, windparken, havenboten en gebouwen: dat telt
+    // mee zodra de kustlaag een keuze heeft (C15a: niet meer pas vanaf zoom 3,6, zodat een zoomdrempel niets herrekent)
+    if (this.vrijGeldig(view)) return;
+    const strand = !this.strandGeldig(view);
+    const kSig = kust && kust.sig ? kust.sig : null;
     const sig = inf ? [inf.wegen, inf.routes, kSig] : null;
-    if (this.wegSig && sig && this.wegSig[0] === sig[0] && this.wegSig[1] === sig[1] && this.wegSig[2] === sig[2]) return;
-    if (this.wegSig && !sig && this.wegSig[2] === kSig) return;
     this.wegSig = sig ?? [null, null, kSig];
+    this.zonesOud = false;
     const Tw = this.geo.T;
     const kustVrij = (x, y, r) => !kSig || kust.vrij(x, y, r, 15);
-    for (const st of this.stranden) {
+    if (strand) for (const st of this.stranden) {
       st.kiteVrij = 1;
       if (!st.kite || !kSig) continue;
       const kx = -st.wy, ky = st.wx;
@@ -372,7 +409,7 @@ export class HemelLaag {
       return false;
     };
     // een vliegerplek op een brug, vliegveld of ander bouwwerk van infra.js, of vlak bij een weg of spoor, valt weg
-    for (const st of this.stranden) for (let i = 0; i < st.vrij.length; i++) { const x = st.pl[i * 2], y = st.pl[i * 2 + 1]; st.vrij[i] = opWeg(x, y, 0.3) || inf?.gereserveerd?.(this.tegelVan(x, y)) || inf?.opBouwwerk?.(x, y) || !kustVrij(x, y, 0.3) ? 0 : 1; }
+    if (strand) for (const st of this.stranden) for (let i = 0; i < st.vrij.length; i++) { const x = st.pl[i * 2], y = st.pl[i * 2 + 1]; st.vrij[i] = opWeg(x, y, 0.3) || inf?.gereserveerd?.(this.tegelVan(x, y)) || inf?.opBouwwerk?.(x, y) || !kustVrij(x, y, 0.3) ? 0 : 1; }
     for (const k of this.kazernes) if (k.zone) k.zone.weg = opWeg(k.zone.x, k.zone.y, 0.32 * Tw) || !!inf?.gereserveerd?.(k.zone.t);
   }
 
@@ -436,9 +473,8 @@ export class HemelLaag {
     if (this.state !== s || this.geo !== view.geo || this.eigenaar !== view.eigenaar || this.basis !== (view.terreinLaag?.basis ?? null)) this.laad(view);
     const z = view.zoom;
     this.zoom = z;
-    if (z < DREMPEL.streep) return;
-    this.werkDag(view);
-    this.werkVrij(view);
+    const klaar = this.rustWerk(view, nu); // C15a
+    if (z < DREMPEL.streep || !klaar) return;
     this.kader(view, sc);
     this.omgeving(view, nu);
     this.sprite();

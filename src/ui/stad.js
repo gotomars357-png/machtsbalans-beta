@@ -32,6 +32,7 @@
 import { seizoen, weer } from './seizoen.js';
 import { KLASSE, KNOOP as NK, PROFIEL, GROND, ROTONDE_STRAAL, verkeersTijd, voetLicht } from './wegennet.js';
 import { maakBasis, TerreinLaag, kenmerkenVoorTegel } from './terrein.js';
+import { budget, begin, verbruik, echtNu } from './bakbudget.js';
 
 // ---------- gedeelde hulpjes (eigen kopie, zie inzoom-spec §0) ----------
 
@@ -718,6 +719,11 @@ function bakBouw(g, o, b) {
 
 const wereldCache = new WeakMap(); // basis → natte cellen (0 onbekend, 1 droog, 2 nat)
 
+// C15a: wat een keuze op het schaduwobject oplevert en bij klaar overgaat (het raster gaat met set)
+const STAD_VELDEN = ['vakjes', 'bouwplaatsen', 'autos', 'autoRit', 'meubels', 'plasplekken', 'fietsen', 'paaltjes', 'voetlichten', 'etalages', 'stoep', 'randen', 'plekLijst', 'soort', 'nabij', 'stoepT', 'stoepGrid', 'net', 'kustRaster'];
+const STRAAT_TAKKEN = 300; // takken van het net per stap in kiesStraatStappen
+const VOOR_ZOOM = 2.5; // vanaf deze zoom kiest de stad alvast in stappen, ook al tekent hij pas vanaf DREMPEL.grond
+
 export class StadLaag {
   constructor() {
     this.state = null;
@@ -780,6 +786,7 @@ export class StadLaag {
     this.nat = wereldCache.get(this.basis) ?? null;
     if (!this.nat) { this.nat = new Uint8Array(RW * RH); wereldCache.set(this.basis, this.nat); }
     this.sig = '';
+    this.voorGen = null; this.voorAan = false; this.voorSig = '';
     this.leeg();
     this.cache.clear();
     this.laatste.clear();
@@ -847,35 +854,107 @@ export class StadLaag {
 
   // ---------- kiezen (alleen als de toestand iets verandert) ----------
 
-  werkCache(view) {
+  // De sleutel van de keuze: net, grenzen, gebouwen, bouwplaatsen, landen, kolonies, infra en kust.
+  sigVan(view) {
     const s = this.state;
     let nP = 0, nB = 0, somT = 0;
     for (let i = 0; i < s.landen.length; i++) {
       const l = s.landen[i];
-      nP += l.plaatsingen.length; nB += l.bouw.length;
+      nP += l.plaatsingen.length; nB += l.bouw.length + (l.sloop?.length ?? 0);
       for (let j = 0; j < l.plaatsingen.length; j++) somT += l.plaatsingen[j].t;
       for (let j = 0; j < l.bouw.length; j++) somT += l.bouw[j].tegel * 3;
     }
+    const inf = view.infraLaag, kust = view.kustLaag, net = view.wegennet && view.wegennet.klaar ? view.wegennet : null;
+    return `${net ? net.versie : '-'}|${s.grensVersie}|${nP}|${nB}${s.kavels?.length ? `k${s.kavels.length}` : ''}|${somT}|${s.landen.length}|${s.kolonies?.length ?? 0}|${inf ? inf.sig : '-'}|${kust ? kust.sig : '-'}`;
+  }
+
+  // Kiezen in één keer: alleen als er nog nooit voorwerk was (tests, eerste beeld dichtbij); daarna doet voorwerk()
+  // het in stappen (C15a).
+  werkCache(view) {
+    if (this.voorGen || (this.voorAan && this.sig !== '')) return;
     const inf = view.infraLaag, kust = view.kustLaag, net = view.wegennet;
     this.net = net && net.klaar ? net : null;
-    const sig = `${this.net ? this.net.versie : '-'}|${s.grensVersie}|${nP}|${nB}|${somT}|${s.landen.length}|${s.kolonies?.length ?? 0}|${inf ? inf.sig : '-'}|${kust ? kust.sig : '-'}`;
+    const sig = this.sigVan(view);
     if (sig === this.sig) return;
     this.sig = sig;
     this.kustRaster = kust && kust.raster && kust.geo === this.geo ? kust.raster : null;
     this.kies(inf);
   }
 
+  // ---------- voorwerk (C15a) ----------
+  // Zoals kust.js en zee.js: elk beeld een stukje kiezen op een schaduwobject met wat er van het gedeelde budget over is.
+  // Al vanaf VOOR_ZOOM, zodat de stad klaarligt voordat hij in beeld komt (een vlucht naar een stad). Wacht zolang
+  // werk.js nog voorwerk heeft. Pas als alles klaar is gaan de nieuwe lijsten, het net en het raster over; tot dan blijft
+  // de vorige stad getekend.
+  voorwerk(view, nu) {
+    const s = view?.state;
+    if (!s || !view.geo || !view.w || !view.eigenaar) return;
+    if (view.zoom < VOOR_ZOOM) return;
+    begin(nu, !!view.doel?.plan, view);
+    if (this.state !== s || this.geo !== view.geo || this.eigenaar !== view.eigenaar || (view.terreinLaag?.basis && view.terreinLaag.basis !== this.basis)) this.laad(view);
+    if (!this.voorGen) {
+      const sig = this.sigVan(view);
+      if (sig === this.sig) return;
+      // de allereerste keuze na laden op een zoom waar de stad tekent: die doet werkCache in één keer
+      if (this.sig === '' && !this.voorAan && view.zoom >= DREMPEL.grond - 0.4) return;
+      const kust = view.kustLaag, net = view.wegennet;
+      this.voorSig = sig;
+      this.voorGen = this.kiesStappen(view.infraLaag, net && net.klaar ? net : null, kust && kust.raster && kust.geo === this.geo ? kust.raster : null);
+    }
+    this.voorAan = true;
+    if (budget.werkBezig || view.kustLaag?.voorGen || view.zeeLaag?.voorGen) return;
+    this.stapTijden ??= {};
+    while (budget.over > 0) {
+      const t = echtNu();
+      const r = this.voorGen.next();
+      const ms = echtNu() - t;
+      verbruik(ms);
+      if (r.value?.naam) this.stapTijden[r.value.naam] = Math.max(this.stapTijden[r.value.naam] ?? 0, ms);
+      if (r.done) {
+        const sch = r.value.klaar;
+        for (const k of STAD_VELDEN) this[k] = sch[k];
+        this.raster.set(sch.raster);
+        this.sig = this.voorSig;
+        this.voorGen = null;
+        break;
+      }
+    }
+  }
+
+  // kies in stappen op een schaduwobject: een yield na elk blok.
+  *kiesStappen(inf, net, kustRaster) {
+    const sch = Object.create(Object.getPrototypeOf(this));
+    for (const k of ['state', 'geo', 'eigenaar', 'basis', 'tl', 'nat']) sch[k] = this[k];
+    sch.net = net; sch.kustRaster = kustRaster;
+    sch.raster = new Uint8Array(RW * RH);
+    const st = sch.kiesBlokken(inf);
+    let r = st.next();
+    while (!r.done) { yield r.value; r = st.next(); }
+    return { naam: 'klaar', klaar: sch };
+  }
+
   kies(inf) {
+    const st = this.kiesBlokken(inf);
+    while (!st.next().done);
+  }
+
+  *kiesBlokken(inf) {
     this.leeg();
     this.bouwSoorten(inf);
+    yield { naam: 'soorten' };
     this.raster.fill(0);
     this.merkInfra(inf);
+    yield { naam: 'infra' };
     this.merkGebouwen(inf);
     this.kiesBouwplaatsen();
+    yield { naam: 'bouwplaatsen' };
     this.kiesVakjes(inf);
+    yield { naam: 'vakjes' };
     this.kiesStoepTegels(inf);
+    yield { naam: 'stoeptegels' };
     // C12: geen losse stoepstroken meer tegen de gevels aan de stadsrand; stoep ligt alleen langs de straten van het net
-    this.kiesStraat(inf);
+    yield* this.kiesStraatStappen(inf);
+    yield { naam: 'straat' };
     this.stoep = Float32Array.from(this.stoepBouw); this.randen = Float32Array.from(this.randBouw);
     this.stoepBouw = this.randBouw = null;
   }
@@ -892,6 +971,8 @@ export class StadLaag {
       }
     }
     for (let t = 0; t < n; t++) { const b = s.bezet[t]; if (b && this.soort[t] === LEEG) this.soort[t] = b.bouw ? BOUW : OVERIG; else if (b && b.bouw) this.soort[t] = BOUW; }
+    // C15c: een leeg kavel na een sloop is voor het net nog een stadskavel; hier komt geen plein of park (map.js tekent het)
+    for (let i = 0; i < (s.kavels?.length ?? 0); i++) { const t = s.kavels[i].tegel; if (!s.bezet[t] && s.eigenaar[t] >= 0 && this.soort[t] === LEEG) this.soort[t] = OVERIG; }
     for (const land of s.landen) { const h = geo.hoofdstad[land.idx]; if (h != null && h >= 0) this.soort[h] = HOOFD; }
     // vrij vakje in of vlak naast de stad: binnen twee vakjes van een hoofdstad, of tussen de bebouwing (een
     // woonwijk of hoofdstad ernaast telt 2, een ander gebouw of een bouwplaats 1)
@@ -1149,6 +1230,12 @@ export class StadLaag {
   // net.haltes. Alles staat waar grondOp STOEP zegt; de kruisvlakken, haltes, overwegen en grensposten blijven vrij.
   // Geparkeerde auto's tekent deze laag niet meer: dat doen de ritten van leven.js op de parkeerstroken van het net.
   kiesStraat(inf) {
+    const st = this.kiesStraatStappen(inf);
+    while (!st.next().done);
+  }
+
+  // C15a: in stappen, een yield na het spoorraster en na elke STRAAT_TAKKEN takken (zelfde volgorde, zelfde uitkomst)
+  *kiesStraatStappen(inf) {
     this.autos = new Float32Array(0); this.autoRit = new Float32Array(0);
     const net = this.net;
     if (!net || !net.klaar || !net.D) return;
@@ -1166,6 +1253,7 @@ export class StadLaag {
         for (let cy = Math.max(0, Math.floor((y - rS) / RC)); cy <= Math.min(RH - 1, Math.floor((y + rS) / RC)); cy++) for (let cx = Math.max(0, Math.floor((x - rS) / RC)); cx <= Math.min(RW - 1, Math.floor((x + rS) / RC)); cx++) spoor[cy * RW + cx] = 1;
       }
     }
+    yield { naam: 'spoor' };
     const droog = (x, y, m) => !this.natPunt(x, y, m) && !spoor[cel(x, y)] && !(inf && inf.opBouwwerk && inf.opBouwwerk(x, y));
     const opStoep = (x, y) => net.grondOp(x, y) === G.STOEP && droog(x, y, 1);
     // in of vlak naast de stad (daar komt het straatmeubilair; lantaarns staan langs elke straat)
@@ -1189,6 +1277,7 @@ export class StadLaag {
       return P;
     };
     for (let i = 0; i < net.nT; i++) {
+      if (i > 0 && i % STRAAT_TAKKEN === 0) yield { naam: 'straat' };
       const kl = net.tKlasse[i];
       if ((kl !== KLASSE.STRAAT && kl !== KLASSE.HOOFD) || net.tBouw[i]) continue;
       const len = net.tLen[i], pr = PROFIEL[kl], zaadT = net.tZaad[i] | 0;
@@ -1384,6 +1473,7 @@ export class StadLaag {
     if (this.state !== s || this.geo !== view.geo || this.eigenaar !== view.eigenaar || (view.terreinLaag?.basis && view.terreinLaag.basis !== this.basis)) this.laad(view);
     const z = view.zoom;
     this.zoom = z;
+    this.voorwerk(view, nu); // C15a
     if (z < DREMPEL.grond - 0.4) return;
     this.werkCache(view);
     this.kader(view, sc);

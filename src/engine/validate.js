@@ -48,6 +48,7 @@ export function validatePack(p) {
       if (!TERREINEN.includes(t)) fouten.push(`Gebouw '${g.id}' noemt onbekend terrein '${t}' (kies uit ${TERREINEN.join(', ')}).`);
     }
   }
+  checkVerbouw(p, fouten);
   for (const r of p.resources) {
     if (r.rol === 'geld' || r.rol === 'stabiliteit') continue;
     if (!geproduceerd.has(r.id)) waarschuwingen.push(`Resource '${r.id}' wordt door geen enkel gebouw geproduceerd.`);
@@ -126,6 +127,31 @@ export function validatePack(p) {
     waarschuwingen.push('Dit pack gaat over actuele verhoudingen. Leiders zijn archetypen; uitkomsten zijn spel, geen voorspelling.');
   }
   return { fouten, waarschuwingen };
+}
+
+// Verbouwen en slopen (C15c): lengtes per niveau, geen negatieve waarden, en verbouwbaar is een ja/nee.
+function checkVerbouw(p, fouten) {
+  for (const g of p.gebouwen) {
+    if (g.verbouwbaar != null && typeof g.verbouwbaar !== 'boolean') fouten.push(`Gebouw '${g.id}': verbouwbaar moet true of false zijn.`);
+  }
+  const V = p.model?.verbouw;
+  if (V == null) return;
+  const waar = 'model.verbouw';
+  const max = V.niveau_max;
+  if (!Number.isInteger(max) || max < 1) { fouten.push(`${waar}: niveau_max moet een geheel getal van minstens 1 zijn.`); return; }
+  for (const [veld, lengte] of [['effect', max], ['verbruik', max], ['onderhoud', max], ['kosten', max - 1], ['bouwtijd', max - 1]]) {
+    const lijst = V[veld];
+    if (!Array.isArray(lijst) || lijst.length !== lengte) { fouten.push(`${waar}: '${veld}' moet een lijst van ${lengte} getallen zijn.`); continue; }
+    if (lijst.some((x) => typeof x !== 'number' || !(x >= 0))) fouten.push(`${waar}: '${veld}' mag alleen getallen van 0 of hoger bevatten.`);
+  }
+  for (const veld of ['kosten_schaal', 'tijdens', 'sloop_terug', 'sloop_dagen', 'sloop_oorlog_afstand']) {
+    if (typeof V[veld] !== 'number' || !(V[veld] >= 0)) fouten.push(`${waar}: '${veld}' moet een getal van 0 of hoger zijn.`);
+  }
+  if (V.sloop_terug > 1) fouten.push(`${waar}: sloop_terug ligt tussen 0 en 1.`);
+  if (V.sloop_dagen < 1) fouten.push(`${waar}: sloop_dagen moet minstens 1 zijn.`);
+  for (const [soort, s] of Object.entries(V.sloop_stabiliteit || {})) {
+    if (typeof s?.waarde !== 'number' || typeof s?.dagen !== 'number' || !(s.dagen >= 0)) fouten.push(`${waar}: sloop_stabiliteit.${soort} vraagt een waarde en een aantal dagen.`);
+  }
 }
 
 function checkEffect(waar, effect, resIds, waarschuwingen, fouten, p) {

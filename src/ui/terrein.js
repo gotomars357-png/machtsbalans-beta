@@ -66,6 +66,7 @@ const BAK_BUDGET = 1.5; // werk per frame aan bakken, in geschatte milliseconden
 const MAX_PRIMITIEVEN = 1500; // scherpe kenmerken per frame
 const GROF_PER_FRAME = 6; // werk aan nieuwe terugvalversies per frame: 1 per stuk (~0,3 ms), 3 als de grondgegevens nog ontbreken (~2,5 ms)
 const GROF_MS = { rust: 3, vlucht: 1.5 }; // C14d: daarnaast een echte tijdgrens per beeld; de eerste gaat altijd door
+const GROF_GROND_MS = 1.0; // C15a: zoveel ms per beeld voor de grondgegevens van een nieuwe terugval (grondStap)
 const PATROON_SPAN = CH / 6; // wereldeenheden per herhaling van een detailpatroon; 6 passen precies in een brok
 
 // Terreinsoorten in de gewichten.
@@ -771,6 +772,16 @@ function hoogteOp(b, x, y, berg) {
 // Rekent het monsterrooster van brok (ck, cr) uit. Monster (i, j) ligt op wereldpositie
 // (ck*64 - 2 + i + 0.5, cr*64 - 2 + j + 0.5). Geeft gewichten, hoogte, kustafstand en kleur (RGBA) terug.
 export function bakGrondData(b, ck, cr) {
+  const gen = bakGrondStappen(b, ck, cr);
+  let r = gen.next();
+  while (!r.done) r = gen.next();
+  return r.value;
+}
+
+// C15a: dezelfde berekening in stappen: een yield na elke GROND_RIJEN rijen, in beide passes. Tot het einde gedraaid
+// geeft hij bit voor bit hetzelfde als bakGrondData (dat hem zo gebruikt).
+export const GROND_RIJEN = 17;
+export function* bakGrondStappen(b, ck, cr) {
   const ruis = b.geo.ruis;
   const x0 = ck * CH - MARGE, y0 = cr * CH - MARGE;
   const NN = N * N;
@@ -798,6 +809,7 @@ export function bakGrondData(b, ck, cr) {
       if (vl[1] > 0.01) hoogte[m] += vl[1] * 0.42 * smooth(0.2, 3, kd);
       if (vl[2] > 0.01) hoogte[m] += vl[2] * 0.1 * smooth(0.6, 2, kd) * (1 - smooth(5, 8, kd)) * ruis(x * 0.33 + 11, y * 0.33 + 5);
     }
+    if ((j + 1) % GROND_RIJEN === 0) yield;
   }
   const kleur = new Uint8ClampedArray(NN * 4); // samengesteld: wat je ziet
   const land = new Uint8ClampedArray(NN * 4); // landkleur overal (onder water: zand)
@@ -939,11 +951,42 @@ export function bakGrondData(b, ck, cr) {
       const bron = water[m] ? zee : land;
       kleur[p] = bron[p]; kleur[p + 1] = bron[p + 1]; kleur[p + 2] = bron[p + 2]; kleur[p + 3] = 255;
     }
+    if ((j + 1) % GROND_RIJEN === 0) yield;
   }
   // heeftWater: zit er in dit brok ergens water of een meer (anders hoeft de waterstap niet)
   let heeftWater = false;
   for (let m = 0; m < NN && !heeftWater; m++) if (water[m] || meerA[m] < 1.2 || sd[m] > -1.5) heeftWater = true;
   return { ck, cr, x0, y0, n: N, gewicht, water, sd, hoogte, sneeuw, kleur, land, zee, vlag, sneeuwBasis, licht, meer: meerA, hoogte8, steil8, alm8, heeftWater };
+}
+
+// C15a: het nawerk van TerreinLaag.grondVan op de uitkomst van bakGrondData, in stappen: één yield per masker
+// (GRAS, BOS, BERG, ZAND), dan het grove watermasker en de rest. Geeft de grondgegevens g van het brok.
+export function* grondNawerk(d) {
+  const NN = N * N;
+  // maskers per terreinsoort voor de detailpatronen
+  const maskers = [];
+  const soorten = [GRAS, BOS, BERG, ZAND];
+  for (let k = 0; k < soorten.length; k++) {
+    const s = soorten[k], m = new Uint8ClampedArray(NN * 4);
+    for (let i = 0; i < NN; i++) { m[i * 4] = m[i * 4 + 1] = m[i * 4 + 2] = 255; m[i * 4 + 3] = d.gewicht[s * NN + i] * 255; }
+    maskers.push(m);
+    yield;
+  }
+  // grof watermasker (1 monster per eenheid) voor de terugvalversie: zee en meren zoals in bakMaskerData
+  const wa8 = new Uint8Array(NN);
+  for (let i = 0; i < NN; i++) {
+    let wa = smooth(-0.18, 0.18, d.sd[i]);
+    if (d.meer[i] < 0.35) wa = Math.max(wa, smooth(0.35, -0.35, d.meer[i]));
+    wa8[i] = wa * 255;
+  }
+  yield;
+  return { land: d.land, zee: d.zee, maskers, sneeuwBasis: d.sneeuwBasis, licht: d.licht, meer: d.meer, hoogte8: d.hoogte8, steil8: d.steil8, alm8: d.alm8, heeftWater: d.heeftWater, wa8 };
+}
+
+// De hele grondtaak van één brok: bakGrondStappen en daarna grondNawerk.
+export function* grondTaakStappen(b, ck, cr) {
+  const d = yield* bakGrondStappen(b, ck, cr);
+  return yield* grondNawerk(d);
 }
 
 // Seizoen over de gebakken grondkleuren: gras dof in de winter en droog in de nazomer, herfsttinten in het bos,
@@ -3099,25 +3142,47 @@ export class TerreinLaag {
     const ci = cr * this.kolC + ck;
     let g = this.basis.grond[ci];
     if (!g) {
-      const d = bakGrondData(this.basis, ck, cr);
-      const NN = N * N;
-      // maskers per terreinsoort voor de detailpatronen
-      const maskers = [GRAS, BOS, BERG, ZAND].map((s) => {
-        const m = new Uint8ClampedArray(NN * 4);
-        for (let i = 0; i < NN; i++) { m[i * 4] = m[i * 4 + 1] = m[i * 4 + 2] = 255; m[i * 4 + 3] = d.gewicht[s * NN + i] * 255; }
-        return m;
-      });
-      // grof watermasker (1 monster per eenheid) voor de terugvalversie: zee en meren zoals in bakMaskerData
-      const wa8 = new Uint8Array(NN);
-      for (let i = 0; i < NN; i++) {
-        let wa = smooth(-0.18, 0.18, d.sd[i]);
-        if (d.meer[i] < 0.35) wa = Math.max(wa, smooth(0.35, -0.35, d.meer[i]));
-        wa8[i] = wa * 255;
-      }
-      g = { land: d.land, zee: d.zee, maskers, sneeuwBasis: d.sneeuwBasis, licht: d.licht, meer: d.meer, hoogte8: d.hoogte8, steil8: d.steil8, alm8: d.alm8, heeftWater: d.heeftWater, wa8 };
+      // C15a: loopt er al een grondTaak voor dit brok, dan die afmaken; anders alles in één keer
+      const tk = this.grondTaak && this.grondTaak.ci === ci && this.grondTaak.basis === this.basis ? this.grondTaak : null;
+      const gen = tk ? tk.gen : grondTaakStappen(this.basis, ck, cr);
+      let r = gen.next();
+      while (!r.done) r = gen.next();
+      if (tk) this.grondTaak = null;
+      g = r.value;
       this.basis.grond[ci] = g;
     }
     return g;
+  }
+
+  // C15a: de grondgegevens van brok (ck, cr) in stappen (bakGrondStappen, dan grondNawerk), binnen ms milliseconden
+  // (echte klok; minstens één stap). Geeft g als hij klaar is, anders null. Hooguit één grondTaak tegelijk: een lopende
+  // voor een ander brok wordt eerst afgemaakt. De tijd telt mee in this.werk.
+  grondStap(ck, cr, ms = (this.limiet ?? BAK_BUDGET) - (this.werk ?? 0)) {
+    const ci = cr * this.kolC + ck;
+    const g = this.basis.grond[ci];
+    if (g) return g;
+    const t0 = echtNu();
+    if (this.grondTaak && this.grondTaak.basis !== this.basis) this.grondTaak = null;
+    let klaar = true;
+    if (this.grondTaak && this.grondTaak.ci !== ci) klaar = this.grondWerk(t0, ms);
+    if (klaar) {
+      if (!this.grondTaak) this.grondTaak = { ci, basis: this.basis, gen: grondTaakStappen(this.basis, ck, cr) };
+      klaar = this.grondWerk(t0, ms);
+    }
+    this.werk = (this.werk ?? 0) + Math.max(MIN_STAP, echtNu() - t0);
+    return klaar && this.basis.grond[ci] ? this.basis.grond[ci] : null;
+  }
+
+  // Werkt aan de lopende grondTaak: minstens één stap, dan door zolang de volgende stap (geschat op de vorige) nog
+  // in de tijd past. true als hij af is.
+  grondWerk(t0, ms) {
+    const tk = this.grondTaak;
+    let r, t = echtNu(), stap = 0;
+    do { r = tk.gen.next(); const nu = echtNu(); stap = nu - t; t = nu; } while (!r.done && t - t0 + stap < ms);
+    if (!r.done) return false;
+    this.basis.grond[tk.ci] = r.value;
+    this.grondTaak = null;
+    return true;
   }
 
   // ---- bakken ----
@@ -3205,7 +3270,7 @@ export class TerreinLaag {
       const geschat = this.stapKosten(tk), st = tk.stap, kost = geschat * this.factor[st];
       if (this.werk > 0 && (kost >= GROOT_STAP || this.werk + kost > limiet)) return null;
       const t0 = echtNu();
-      this.bakStap(view, tk);
+      if (this.bakStap(view, tk) === false) return null; // C15a: de grond is nog in de maak
       const echt = echtNu() - t0;
       this.factor[st] = Math.max(0.25, this.factor[st] * 0.8 + 0.2 * (echt / Math.max(0.01, geschat)));
       this.werk += Math.max(MIN_STAP, echt, kost * 0.25);
@@ -3226,7 +3291,8 @@ export class TerreinLaag {
 
   bakStap(view, tk) {
     const s = view.state, b = this.basis, { R, ck, cr } = tk, S = CH * R;
-    const g = this.grondVan(ck, cr);
+    const g = this.grondStap(ck, cr); // C15a: in stappen; nog niet klaar, dan dit beeld geen bakstap
+    if (!g) return false;
     const pal = this.palVoor(s.dag);
     const k = this.kctx, t = this.tctx;
     if (tk.stap === 0) {
@@ -3429,7 +3495,10 @@ export class TerreinLaag {
     let e = this.grof.get(ci);
     if (e && e.stap === stap) return e.cv;
     if (!mag) return e ? e.cv : null; // het vorige seizoen is beter dan niets
-    const g = this.grondVan(ck, cr);
+    // C15a: in stappen; nog niet klaar, dan wat er was. Heeft het brok nog helemaal niets (geen terugval van een vorig
+    // seizoen), dan maakt hij de grond af binnen de tijdgrens van mag (zoals voorheen): anders valt er een gat in de kaart.
+    const g = this.grondStap(ck, cr, e ? GROF_GROND_MS : Infinity);
+    if (!g) return e ? e.cv : null;
     const NN4 = N * N * 4;
     const sl = this._grofL ?? (this._grofL = new Uint8ClampedArray(NN4)), sz = this._grofZ ?? (this._grofZ = new Uint8ClampedArray(NN4));
     seizoensGrond(g, this.palVoor(view.state.dag).sz, sl, sz);
@@ -3559,7 +3628,7 @@ export class TerreinLaag {
     }
     if (!this.taak) {
       if (beste) {
-        if (!this.basis.grond[beste.cr * this.kolC + beste.ck]) { this.grondVan(beste.ck, beste.cr); this.werk += 2.5; }
+        if (!this.basis.grond[beste.cr * this.kolC + beste.ck]) this.grondStap(beste.ck, beste.cr); // C15a: in stappen
         else this.begin(view, beste);
       } else if (!vlucht) this.voorbak(view, k0, k1, r0, r1, R, glob, mx, my);
     }
@@ -3683,7 +3752,7 @@ export class TerreinLaag {
     }
     if (beste < 0) return;
     const t = echtNu();
-    this.grondVan(beste % this.kolC, Math.floor(beste / this.kolC));
+    this.grondStap(beste % this.kolC, Math.floor(beste / this.kolC), budget.over); // C15a: in stappen
     verbruik(echtNu() - t);
   }
 
@@ -3731,7 +3800,7 @@ export class TerreinLaag {
       }
     }
     if (!beste) return;
-    if (!this.basis.grond[beste.cr * this.kolC + beste.ck]) { this.grondVan(beste.ck, beste.cr); this.werk += 2.5; }
+    if (!this.basis.grond[beste.cr * this.kolC + beste.ck]) this.grondStap(beste.ck, beste.cr); // C15a: in stappen
     else this.begin(view, beste);
   }
 

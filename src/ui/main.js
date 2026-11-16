@@ -16,8 +16,11 @@ import { toonUitdaging } from './uitdaging.js';
 import { toonHuis, gekozenDoctrine, doctrineKort, rivaalInstelling } from './huis.js';
 import { extraEffectTekst, keuzeKnop } from './dilemma.js';
 import { cyberBlok, cyberTrede } from './cyber.js';
+import { verbouwBlok, sloopplaatsBlok } from './verbouwpaneel.js';
 import { brandhaardBlok, brandhaardBij } from './brandhaard.js';
 import { maakKrant } from './krant.js';
+import { verkeerBlok } from './verkeerblok.js';
+import { pingVoorMelding, svgVan } from './pings.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -130,7 +133,7 @@ function leesInstellingen() {
     doctrine: gekozenDoctrine(ui.gekozenPack?.pack),
     moeilijkheid: $('#opt-moeilijkheid').value,
     onboarding: $('#opt-onboarding').checked,
-    systemen: { events: $('#opt-events').checked, schokken: $('#opt-schokken').checked, escalatie: $('#opt-escalatie').checked, brandhaarden: $('#opt-brandhaarden').checked },
+    systemen: { events: $('#opt-events').checked, schokken: $('#opt-schokken').checked, escalatie: $('#opt-escalatie').checked, brandhaarden: $('#opt-brandhaarden').checked, verbouw: true },
     // Rivalen met geheugen (C14): de engine kent alleen deze lijst, nooit het Huis of localStorage.
     rivalen: $('#opt-rivalen').checked ? rivaalInstelling(ui.gekozenPack?.pack) : [],
   };
@@ -332,7 +335,7 @@ function frame(now) {
     }
     if (s.pendingEvent && !s.replay && !ui.modal) toonEvent();
     if (s.uitkomst && !ui.eindGetoond && !ui.modal) toonEinde();
-    for (const m of s.meldingen.splice(0)) toast(m.tekst, m.soort);
+    for (const m of s.meldingen.splice(0)) toast(m.tekst, m.soort, ui.kaart?.levend ? pingVoorMelding(ui.state, ui.kaart.levend.pings, m, ui.kaart.echtNu ?? 0) : null);
     krant.tick(s, now);
     tutorialTick(now);
     doelbalk.tick(now);
@@ -382,6 +385,8 @@ document.addEventListener('pointerdown', (e) => {
   tutorialEvent('actie', { actie: d.actie, id: d.id });
   switch (d.actie) {
     case 'bouw': geef({ type: 'bouw', gebouw: d.id }); break;
+    case 'verbouw': geef({ type: 'verbouw', tegel: +d.tegel }); break;
+    case 'sloop': sloopTik(+d.tegel); break; // twee tikken binnen 4 s (C15c)
     case 'plaats': if (ui.bouwModus === d.id) stopBouwModus(); else startBouwModus(d.id); break;
     case 'hefboom': geef({ type: 'hefboom', actie: d.id, doel: d.doel != null ? +d.doel : ui.sel }); break;
     case 'escalatie': geef({ type: 'escalatie', actie: d.id, doel: d.doel != null ? +d.doel : ui.sel }); break;
@@ -777,6 +782,15 @@ function sluitContext() {
   $('#context').hidden = true;
 }
 
+// Slopen (C15c): de eerste tik zet de knop op 'Zeker? Tik nogmaals', een tweede tik binnen 4 seconden geeft de order.
+function sloopTik(t) {
+  const nu = performance.now();
+  if (ui.sloopBevestig?.t === t && ui.sloopBevestig.tot > nu) { ui.sloopBevestig = null; geef({ type: 'sloop', tegel: t }); return; }
+  ui.sloopBevestig = { t, tot: nu + 4000 };
+  ui.dirty = true; renderUI();
+  setTimeout(() => { if (ui.sloopBevestig && ui.sloopBevestig.tot <= performance.now()) { ui.sloopBevestig = null; ui.dirty = true; renderUI(); } }, 4020);
+}
+
 // Rivalen met geheugen (C14): de les die deze blokleider uit je vorige potje meenam, of ''.
 function lesRegel(c) {
   const les = c?.rivaalLes ? ui.state.pack.rivaalIndex?.[c.rivaalLes] : null;
@@ -917,6 +931,9 @@ function renderContext() {
         ${contractBlok(land)}
         <div style="margin-top:6px"><button class="knop klein" data-actie="naar-tab" data-id="invloed" data-doel="${land.idx}">Alle opties in Invloed</button></div>`;
     }
+  } else if (b.sloop) {
+    titel = '🚧 Sloopplaats';
+    h += sloopplaatsBlok(s, t);
   } else {
     const g = P.gebouwIndex[b.gebouw];
     const p = land.plaatsingen.find((x) => x.t === t);
@@ -925,6 +942,7 @@ function renderContext() {
     if (g.beschrijving) h += `<p style="font-size:12.5px;color:#b9c6d4;margin:6px 0">${esc(g.beschrijving)}</p>`;
     const prod = Object.entries(g.productie || {}).map(([r, v]) => `+${(v * (p?.eff ?? 1)).toFixed(1)} ${res(r)?.naam.toLowerCase()}`).join(', ');
     if (prod) h += `<div style="font-size:12px">${prod} per dag</div>`;
+    if (eigen && !b.bouw) h += verbouwBlok(s, t, { esc, kostenTekst, meter, bevestig: ui.sloopBevestig?.tot > performance.now() ? ui.sloopBevestig.t : null });
     if (eigen && !b.bouw && (g.informatiecontrole || g.id === 'omroep')) {
       // Het mediacentrum: verdedigen in eigen land, aanvallen in andere landen.
       const c = speler();
@@ -959,7 +977,7 @@ function renderContext() {
       h += buitenlandsGebouw(land, g, b);
     }
   }
-  h = brandhaardBlok(s, t) + h; // een brandhaard bovenaan: die vraagt nu aandacht
+  h = brandhaardBlok(s, t) + h + verkeerBlok(s, t, b, ui.kaart, esc); // een brandhaard bovenaan: die vraagt nu aandacht; het verkeer (C15b) onderaan
   const html = `<div class="context-kop"><b>${titel}</b><button class="knop klein" data-actie="sluit-context">×</button></div>${h}`;
   if (el._html !== html) { el.innerHTML = html; el._html = html; }
   el.hidden = false;
@@ -1550,6 +1568,8 @@ function toonTip(idx, t, x, y) {
   if (bezet && ui.kaart.zoom >= 1.5) {
     const land = s.landen[bezet.land];
     if (bezet.hoofdstad) { plaatsTip(`<b>🏛 Hoofdstad van ${esc(land.naam)}</b><br><span class="zacht">Knooppunt: gebouwen binnen ${s.pack.model.bereik} vakjes draaien op vol rendement.</span>`); return; }
+    if (bezet.sloop) { const n = Math.max(0, bezet.klaar - s.dag); plaatsTip(`<b>🚧 Sloopplaats</b> · ${esc(land.naam)}<br><span class="zacht">Nog ${n} ${n === 1 ? 'dag' : 'dagen'}, daarna vrij om te bouwen.</span>`); return; }
+    if (!bezet.gebouw) return;
     const g = s.pack.gebouwIndex[bezet.gebouw];
     const p = land.plaatsingen.find((x) => x.t === t);
     const prod = Object.entries(g.productie || {}).map(([r, v]) => `+${(v * (p?.eff ?? 1)).toFixed(1)} ${res(r)?.naam.toLowerCase()}`).join(', ');
@@ -2045,14 +2065,31 @@ function renderTutorial(forceer) {
 
 // ---------- meldingen ----------
 
-function toast(tekst, soort = 'info') {
+// C15b: met een ping (pingVoorMelding in pings.js) krijgt de toast een speldje en brengt een tik je naar de plek; zonder
+// ping sluit een tik hem. Op een smal scherm staan er hooguit 2 tegelijk, korter.
+function toast(tekst, soort = 'info', ping = null) {
   const box = $('#toasts');
   const el = document.createElement('div');
   el.className = `toast ${soort}`;
-  el.textContent = tekst;
+  el.dataset.soort = soort;
+  el.setAttribute('role', 'button');
+  el.tabIndex = 0;
+  if (ping) {
+    el.classList.add('met-plek');
+    el.innerHTML = `<span class="toast-tekst"></span><span class="toast-speld" aria-hidden="true">${svgVan(ping.pict)}</span>`;
+    el.firstChild.textContent = tekst;
+    el.setAttribute('aria-label', `${tekst} Tik om erheen te gaan.`);
+  } else el.textContent = tekst;
+  const tik = () => {
+    if (ping && ui.kaart?.levend) ui.kaart.levend.vlieg(ping, ui.kaart);
+    el.remove();
+  };
+  el.addEventListener('click', tik);
+  el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); tik(); } });
   box.prepend(el);
-  while (box.children.length > 4) box.lastChild.remove();
-  setTimeout(() => el.remove(), soort === 'fase' ? 9000 : 5000);
+  const smal = window.matchMedia('(max-width: 600px)').matches;
+  while (box.children.length > (smal ? 2 : 4)) box.lastChild.remove();
+  setTimeout(() => el.remove(), soort === 'fase' ? 9000 : smal ? 4000 : 5000);
 }
 
 // Doelbalk, bijna klaar en sessie-overzicht (src/ui/doelen.js): leest alleen, geeft geen orders.
