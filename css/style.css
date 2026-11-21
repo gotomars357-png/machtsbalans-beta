@@ -61,7 +61,8 @@ h3 { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: v
 
 /* ---------- spel ---------- */
 #spel { display: grid; grid-template-rows: auto 1fr 28px; height: 100%; }
-#topbalk { display: flex; align-items: center; gap: 18px; padding: 8px 14px; background: #0d141c; border-bottom: 1px solid var(--lijn); flex-wrap: wrap; }
+#topbalk { display: flex; align-items: center; gap: 18px; padding: 8px 14px; background: #0d141c; border-bottom: 1px solid var(--lijn); flex-wrap: wrap;
+  position: sticky; top: 0; z-index: 13; } /* C16a: blijft staan bij scrollen (onder modal 20, boven context 12) */
 .merk { font-weight: 800; letter-spacing: .25em; font-size: 13px; color: var(--accent); }
 .datum { display: flex; gap: 8px; align-items: center; font-family: var(--mono); font-size: 13px; }
 .tempo { display: flex; border: 1px solid var(--lijn); border-radius: 6px; overflow: hidden; }
@@ -79,7 +80,8 @@ h3 { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: v
 @keyframes pulse { 50% { border-color: var(--accent); box-shadow: 0 0 12px var(--accent); } }
 
 #hoofd { display: grid; grid-template-columns: 1fr 420px; min-height: 0; }
-#kaart-wrap { position: relative; min-width: 0; min-height: 0; display: flex; align-items: center; justify-content: center; background: #0e2639; overflow: hidden; }
+#kaart-wrap { position: relative; min-width: 0; min-height: 0; display: flex; align-items: center; justify-content: center; background: #0e2639; overflow: hidden;
+  scroll-margin-top: var(--topbalk-h, 0px); } /* C16a: scrollIntoView schuift de kaart niet onder de vaste balk */
 #kaart { position: absolute; inset: 0; cursor: pointer; touch-action: none; }
 #kaart-wrap.bouwen #kaart { cursor: crosshair; }
 .kaart-knoppen { position: absolute; right: 12px; bottom: 12px; display: grid; gap: 4px; }
@@ -237,7 +239,7 @@ table.vr td.r { text-align: right; font-family: var(--mono); }
   #spel, #hoofd { grid-template-columns: minmax(0, 1fr); }
   .resources { gap: 4px; flex: 1 1 100%; min-width: 0; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
   .res { min-width: 0; padding: 3px 7px; gap: 4px; flex: 0 0 auto; }
-  .res .d { display: none; }
+  .res .d { font-size: 10px; } /* C16a: de trend blijft zichtbaar, compact (twee regels: zie css/evenwicht.css) */
   .res.heeft-nieuw { order: -1; }
   #kaart-wrap { height: 58vh; height: 58svh; }
   .legenda { left: 8px; bottom: 8px; right: 56px; gap: 6px; padding: 4px 8px; font-size: 11px; }

@@ -1,0 +1,82 @@
+/* ---------- C16b: bouwlade en plaatsbalk op de telefoon (src/ui/bouwlade.js) ---------- */
+/* Op een breed scherm bestaat dit niet: daar blijven de bouwlijst en #bouwbalk. */
+#bouw-knop, #legenda-knop, #kaart-ruimte, .bouwlade { display: none; }
+
+@media (max-width: 600px) {
+  /* Ronde Bouwen-knop linksonder, in duimbereik (rechtsonder staat de kaartknoppenstapel). */
+  #bouw-knop { display: flex; position: absolute; left: 8px; bottom: 8px; z-index: 5; width: 56px; height: 56px; border-radius: 50%;
+    flex-direction: column; align-items: center; justify-content: center; gap: 0; padding: 0; cursor: pointer;
+    border: 1px solid var(--accent); background: rgba(13,20,28,.94); color: var(--tekst); box-shadow: 0 4px 16px rgba(0,0,0,.45);
+    font: 600 10px/1.1 system-ui, -apple-system, sans-serif; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+  #bouw-knop[hidden] { display: none; }
+  #bouw-knop .bk-hamer { font-size: 20px; line-height: 1; }
+  #bouw-knop .bk-tel { position: absolute; top: -4px; right: -6px; min-width: 22px; padding: 0 5px; border-radius: 10px; background: var(--accent); color: #1b1300;
+    font: 700 11px/18px var(--mono); text-align: center; }
+  #bouw-knop .bk-tel:empty { display: none; }
+
+  /* De legenda klapt in tot een (i)-knopje naast Bouwen; een tik klapt hem uit. */
+  #legenda-knop { display: grid; place-items: center; position: absolute; left: 70px; bottom: 14px; z-index: 5; width: 44px; height: 44px; border-radius: 50%;
+    border: 1px solid var(--lijn); background: rgba(13,20,28,.9); color: var(--zacht); font: italic 700 16px/1 Georgia, serif; padding: 0; cursor: pointer; }
+  #legenda-knop.open { border-color: var(--accent); color: var(--tekst); }
+  .legenda { display: none; }
+  .legenda.open { display: flex; left: 8px; right: 56px; bottom: 72px; }
+  body.lade-open #legenda-knop, body.lade-open .legenda.open { display: none; }
+
+  /* De kaart ligt vast tussen de bovenbalk en de onderrand; de ruimtehouder houdt zijn plek in de pagina. */
+  #kaart-ruimte { display: block; height: 0; }
+  #kaart-wrap.lade-vast { position: fixed; top: var(--topbalk-h, 0px); left: 0; right: 0; bottom: 0; height: auto; z-index: 11; }
+  body.lade-open .kaart-knoppen { bottom: calc(var(--lade-h, 0px) + 8px); }
+  body.lade-open .geluid-paneel { bottom: calc(var(--lade-h, 0px) + 8px); }
+  body.lade-open #toasts { bottom: calc(var(--lade-h, 0px) + 8px) !important; right: 56px; } /* review: niet over de kaartknoppen rechts */
+
+  /* De lade: half open hoogstens 220 px, zonder grijze laag (de kaart blijft bedienbaar). */
+  .bouwlade { display: block; position: absolute; left: 0; right: 0; bottom: 0; z-index: 8; box-sizing: border-box;
+    background: #0d141c; border-top: 1px solid var(--accent); border-radius: 14px 14px 0 0; box-shadow: 0 -8px 28px rgba(0,0,0,.45);
+    padding: 0 0 env(safe-area-inset-bottom); transition: transform .15s ease-out; touch-action: none; animation: uitschuiven .2s ease-out; }
+  .bouwlade[hidden] { display: none; }
+  .bouwlade[data-stand="half"] { height: calc(220px + env(safe-area-inset-bottom)); }
+  .bouwlade[data-stand="plaats"] { height: calc(72px + env(safe-area-inset-bottom)); }
+  .bl-greep { height: 10px; display: flex; justify-content: center; align-items: flex-end; }
+  .bl-greep::before { content: ''; width: 40px; height: 4px; border-radius: 2px; background: var(--lijn); }
+  .bl-kop { display: flex; height: 44px; align-items: stretch; padding: 0 4px 0 8px; gap: 2px; }
+  .bl-tab { flex: 1 1 auto; min-height: 44px; min-width: 44px; padding: 0 6px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--zacht);
+    font: 600 13px system-ui, -apple-system, sans-serif; cursor: pointer; }
+  .bl-tab.actief { color: var(--tekst); border-bottom-color: var(--accent); }
+  .bl-dicht { flex: 0 0 44px; height: 44px; border: 0; background: none; color: var(--zacht); font-size: 18px; cursor: pointer; }
+  .bl-regel-rij { display: flex; align-items: center; gap: 6px; height: 44px; padding: 0 10px; overflow-x: auto; scrollbar-width: none; touch-action: pan-x; font-size: 12px; }
+  .bl-regel-rij::-webkit-scrollbar { display: none; }
+  .bl-heb { flex: 0 0 auto; white-space: nowrap; color: #b9c6d4; font-family: var(--mono); font-size: 11px; }
+  .bl-project { flex: 0 0 auto; min-height: 44px; min-width: 44px; padding: 0 10px; border-radius: 22px; border: 1px solid var(--lijn); background: #152131; color: var(--tekst);
+    font-size: 12px; white-space: nowrap; cursor: pointer; }
+  /* Horizontale strook kaarten van ongeveer 120 breed, die je met je duim veegt. */
+  .bl-strook { display: flex; gap: 8px; height: 122px; padding: 2px 10px 6px; box-sizing: border-box; overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+    touch-action: pan-x; scroll-snap-type: x proximity; overscroll-behavior-x: contain; }
+  .bl-strook::-webkit-scrollbar { display: none; }
+  .bl-kaart { flex: 0 0 120px; height: 114px; box-sizing: border-box; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 6px 8px;
+    border: 1px solid var(--lijn); border-radius: 10px; background: #152131; color: var(--tekst); text-align: left; font: 11px/1.25 system-ui, -apple-system, sans-serif;
+    cursor: pointer; scroll-snap-align: start; position: relative; overflow: hidden; touch-action: pan-x; }
+  .bl-kaart.aanbevolen { border-color: var(--ev-goud, #f0c14a); box-shadow: 0 0 0 1px var(--ev-goud, #f0c14a) inset; }
+  .bl-kaart.gedimd { background: #10181f; color: #c5ced8; cursor: default; }
+  .bl-kaart.gedimd .bl-ico { opacity: .55; }
+  .bl-kaart.tut-gloed, .bl-kaart.db-gloed { border-color: var(--accent) !important; }
+  .bl-tag { font: 700 9px/1 var(--mono); text-transform: uppercase; letter-spacing: .04em; color: var(--ev-goud, #f0c14a); }
+  .bl-ico { font-size: 18px; line-height: 1.1; }
+  .bl-naam { font-weight: 700; font-size: 12px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bl-kost { font-family: var(--mono); font-size: 11px; }
+  .bl-kost .ok { color: var(--goed); } .bl-kost .mist { color: var(--slecht); }
+  .bl-regel { font-size: 11px; color: #b9c6d4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .bl-regel.reden { color: var(--slecht); }
+
+  /* Plaatsbalk: links ✗, in het midden wat en waar, rechts ✓. */
+  .pb-balk { display: flex; align-items: center; gap: 10px; height: 72px; padding: 0 10px; box-sizing: border-box; }
+  .pb-nee, .pb-ja { flex: 0 0 48px; width: 48px; height: 48px; border-radius: 50%; font-size: 22px; line-height: 1; cursor: pointer; display: grid; place-items: center; padding: 0; }
+  .pb-nee { border: 1px solid var(--lijn); background: #152131; color: var(--tekst); }
+  .pb-ja { border: 0; background: var(--goed); color: #062014; font-weight: 700; }
+  .pb-ja:disabled { background: #2a3440; color: #6b7785; cursor: default; }
+  .pb-midden { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; }
+  .pb-ico { font-size: 22px; }
+  .pb-tekst { min-width: 0; font-size: 13px; line-height: 1.3; }
+  .pb-tekst b { white-space: nowrap; }
+  .pb-status { display: block; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pb-status.groen { color: var(--goed); } .pb-status.oranje { color: var(--ev-oranje, #f0923a); } .pb-status.rood { color: var(--slecht); }
+}

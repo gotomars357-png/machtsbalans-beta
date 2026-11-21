@@ -28,6 +28,10 @@ export function validatePack(p) {
   for (const r of p.resources) {
     if (resIds.has(r.id)) fouten.push(`Resource '${r.id}' komt dubbel voor.`);
     resIds.add(r.id);
+    // C16a: velden voor de evenwichtsbalk (alleen weergave, geen spelregel).
+    if (r.waarschuw_dagen != null && !(typeof r.waarschuw_dagen === 'number' && r.waarschuw_dagen > 0)) fouten.push(`Resource '${r.id}': waarschuw_dagen moet een getal groter dan 0 zijn.`);
+    if (r.vol_waarschuwing != null && typeof r.vol_waarschuwing !== 'boolean') fouten.push(`Resource '${r.id}': vol_waarschuwing moet true of false zijn.`);
+    if (r.advies != null && typeof r.advies !== 'string') fouten.push(`Resource '${r.id}': advies moet een tekst zijn.`);
   }
   for (const rol of VEREISTE_ROLLEN) {
     if (!p.rollen[rol]) fouten.push(`Geen resource met rol '${rol}'. Elke wereld heeft ${VEREISTE_ROLLEN.join(', ')} nodig.`);

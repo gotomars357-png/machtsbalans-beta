@@ -21,6 +21,12 @@ import { brandhaardBlok, brandhaardBij } from './brandhaard.js';
 import { maakKrant } from './krant.js';
 import { verkeerBlok } from './verkeerblok.js';
 import { pingVoorMelding, svgVan } from './pings.js';
+import * as onderpaneel from './onderpaneel.js';
+import { maakEvenwicht, actieveVerbouw, toestand as evenwichtToestand } from './evenwicht.js';
+import { maakBouwfeedback, bouwKaartGegevens, naBouwenStukken } from './bouwfeedback.js'; // C16c: kaartgegevens uit evenwicht.bouwKaartData (c16a)
+import { meldOrder, meldBouwlade, zetBron as zetOrderBron } from './ordersignaal.js'; // C16b: 'order', 'bouwfeedback' en 'bouwlade' op window
+import { maakBouwlade } from './bouwlade.js'; // C16b: bouwlade en plaatsbalk op de telefoon
+import * as leren from './leren.js'; // C16d: lokaal speelverslag, pulskaartje en afhaakvraag (alleen lezen, nooit orders)
 
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -56,6 +62,9 @@ const krant = maakKrant({
   magTonen: () => !ui.modal && !zichtbaar('#context') && !zichtbaar('#voertuig'),
   startVrij: () => !ui.tutorial || ui.tutorial.idx >= 1,
 });
+const evenwicht = maakEvenwicht({ ui }); // C16a: evenwichtsbalk en oplosser-kaartje (src/ui/evenwicht.js)
+zetOrderBron(() => ui.state); // C16b: het ordersignaal leest de spelstand voor 'bouwfeedback'
+const bouwlade = maakBouwlade({ ui, geef: (o) => geef(o), startBouwModus: (id) => startBouwModus(id), stopBouwModus: () => stopBouwModus() }); // C16b: telefoon
 
 // ---------- startscherm ----------
 
@@ -237,6 +246,7 @@ function startSpel(pack, inst, replay = null, geladen = null) {
   krant.reset(ui.state, performance.now());
   ui.autoDag = null; // nieuwe of geladen partij: de autosave-teller begint opnieuw
   startSessie();
+  leren.potje(ui, { geladen: !!geladen, replay: !!replay });
   if (replay) {
     ui.state.replay = replay.orders.map((o) => ({ ...o }));
     ui.state.replayDoel = replay;
@@ -253,6 +263,7 @@ function startSpel(pack, inst, replay = null, geladen = null) {
       onSelect: (idx, t, x, y) => klikOpKaart(idx, t, x, y),
       onHover: (idx, t, x, y) => toonTip(idx, t, x, y),
       onPlaats: (t) => plaatsOp(t),
+      onKandidaat: (t) => bouwlade?.verplaats(t), // C16b: de eerste tik verplaatst het voorbeeld
       onAnnuleer: () => stopBouwModus(),
       onKlikEenheid: (id, erbij) => {
         if (!erbij) ui.selectie.clear();
@@ -275,6 +286,7 @@ function startSpel(pack, inst, replay = null, geladen = null) {
   ui.selectie = new Set();
   ui.kaart.selectie = ui.selectie;
   stopBouwModus();
+  bouwlade?.sluit(); // C16b: een nieuwe partij begint met de lade dicht
   ui.kaart.laad(ui.state);
   renderLegenda();
   zetTab('economie');
@@ -303,6 +315,7 @@ function renderLegenda() {
 function zetTempo(t) {
   if (t > 0) ui.vorigTempo = t;
   ui.tempo = t;
+  leren.tempo(t);
   for (const b of document.querySelectorAll('[data-tempo]')) b.classList.toggle('actief', +b.dataset.tempo === t);
 }
 for (const b of document.querySelectorAll('[data-tempo]')) b.onclick = () => zetTempo(+b.dataset.tempo);
@@ -371,6 +384,7 @@ function geef(order) {
   if (s.replay) { toast('Replay: alleen kijken.', 'info'); return { ok: false }; }
   if (s.uitkomst) { toast('Het spel is afgelopen.', 'info'); return { ok: false }; }
   const r = sim.issueOrder(s, order);
+  meldOrder(order, r);
   if (!r.ok) toast(r.reden, 'slecht');
   ui.dirty = true;
   renderUI();
@@ -384,10 +398,10 @@ document.addEventListener('pointerdown', (e) => {
   const d = b.dataset;
   tutorialEvent('actie', { actie: d.actie, id: d.id });
   switch (d.actie) {
-    case 'bouw': geef({ type: 'bouw', gebouw: d.id }); break;
+    case 'bouw': if (opLade()) naEchteTik(e, b, () => bouwlade.auto(d.id)); else geef({ type: 'bouw', gebouw: d.id }); break; // C16b: telefoon eerst het voorbeeld
     case 'verbouw': geef({ type: 'verbouw', tegel: +d.tegel }); break;
     case 'sloop': sloopTik(+d.tegel); break; // twee tikken binnen 4 s (C15c)
-    case 'plaats': if (ui.bouwModus === d.id) stopBouwModus(); else startBouwModus(d.id); break;
+    case 'plaats': if (opLade()) naEchteTik(e, b, () => { if (ui.bouwModus === d.id) stopBouwModus(); else bouwlade.kies(d.id); }); else if (ui.bouwModus === d.id) stopBouwModus(); else startBouwModus(d.id); break;
     case 'hefboom': geef({ type: 'hefboom', actie: d.id, doel: d.doel != null ? +d.doel : ui.sel }); break;
     case 'escalatie': geef({ type: 'escalatie', actie: d.id, doel: d.doel != null ? +d.doel : ui.sel }); break;
     case 'cyber': { const e = ui.state.pack.acties.escalatie.find((x) => x.type === 'cyber'); geef({ type: 'escalatie', actie: e.id, doel: +d.doel, variant: d.id, ...(d.tegel != null ? { tegel: +d.tegel } : {}) }); break; }
@@ -413,6 +427,10 @@ document.addEventListener('pointerdown', (e) => {
     case 'brandhaard': geef({ type: 'brandhaard', id: +d.doel, actie: d.id }); break;
     case 'krant-editie': krant.openEditie(+d.id); break;
     case 'krant-aan': krant.zetAan(true); ui.dirty = true; renderUI(); break;
+    // C16a: chip of meter opent het oplosser-kaartje. Bij aanraken pas op een echte tik (de chiprij en het kaartje
+    // scrollen op de telefoon: wie veegt, opent niets).
+    case 'evenwicht': naEchteTik(e, b, () => evenwicht.wissel(d.id, b)); break;
+    case 'oplos-bouw': naEchteTik(e, b, () => { evenwicht.sluit(); if (ui.bouwModus !== d.id) startBouwModus(d.id); }); break;
   }
 });
 
@@ -441,6 +459,7 @@ function selecteer(idx) {
 
 function zetTab(t) {
   ui.tab = t;
+  leren.tab(t);
   for (const b of document.querySelectorAll('#tabs button')) b.classList.toggle('actief', b.dataset.tab === t);
   for (const p of document.querySelectorAll('[data-paneel]')) p.hidden = p.dataset.paneel !== t;
   ui.grafiekLen = -1;
@@ -468,6 +487,9 @@ function stuurEenheden(t) {
 
 // ---------- bouwen op de kaart ----------
 
+// C16b: op de telefoon loopt bouwen via de lade (src/ui/bouwlade.js); de kaart blijft dan vast in beeld.
+function opLade() { return !!bouwlade && TELEFOON.matches; }
+
 function startBouwModus(id) {
   if (ui.state.replay) return;
   ui.bouwModus = id;
@@ -475,18 +497,25 @@ function startBouwModus(id) {
   sluitContext(); // het contextpaneel zou anders de kaart (en het bouwdoel) bedekken
   $('#kaart-wrap').classList.add('bouwen');
   berekenBouwStatus();
-  if (ui.kaart.zoom < 2.2) ui.kaart.naarLand(ui.state.speler, 3);
-  // Op een telefoon staat het paneel onder de kaart: breng de kaart in beeld, anders tikt de speler in het niets.
-  if (TELEFOON.matches) $('#kaart-wrap').scrollIntoView({ block: 'start' });
+  if (opLade()) bouwlade.plaatsGestart(id); // plaatsbalk, voorbeeld op de beste plek en de camera erheen; geen scrollIntoView
+  else {
+    ui.kaart.bouwKandidaat = -1;
+    if (ui.kaart.zoom < 2.2) ui.kaart.naarLand(ui.state.speler, 3);
+    // Op een telefoon staat het paneel onder de kaart: breng de kaart in beeld, anders tikt de speler in het niets.
+    if (TELEFOON.matches) $('#kaart-wrap').scrollIntoView({ block: 'start' });
+  }
+  meldBouwlade({ stap: 'plaats', gebouw: id, kaartInBeeld: bouwlade?.kaartInBeeld() ?? true });
   ui.dirty = true;
   renderUI();
 }
 
 function stopBouwModus() {
+  const was = ui.bouwModus;
   ui.bouwModus = null;
   if (ui.kaart) { ui.kaart.bouwModus = null; ui.kaart.bouwStatus = null; }
   $('#kaart-wrap').classList.remove('bouwen');
   $('#bouwbalk').hidden = true;
+  if (was) { bouwlade?.plaatsGestopt(); meldBouwlade({ stap: 'plaatsStop', gebouw: was, kaartInBeeld: bouwlade?.kaartInBeeld() ?? true }); }
   ui.dirty = true;
 }
 
@@ -499,6 +528,7 @@ function berekenBouwStatus() {
   const g = s.pack.gebouwIndex[ui.bouwModus];
   const vrij = [...status.values()].filter((x) => x.ok).length;
   const kosten = sim.bouwKosten(s, c, g.id);
+  if (opLade()) { $('#bouwbalk').hidden = true; return; } // C16b: op de telefoon zegt de plaatsbalk dit
   $('#bouwbalk').hidden = false;
   schikBouwbalk();
   $('#bouwbalk').innerHTML = `<span class="groot">${g.icoon ?? ''}</span><span><b>${esc(g.naam)}</b> · ${kostenTekst(kosten)} · ${g.terrein ? `op ${g.terrein.join(' of ')}` : 'op elk land'}<br>
@@ -507,6 +537,7 @@ function berekenBouwStatus() {
 
 function plaatsOp(t) {
   if (!ui.bouwModus) return;
+  if (opLade()) { bouwlade.bevestig(t); return; } // C16b: een tweede tik op hetzelfde vakje is ✓
   const r = geef({ type: 'bouw', gebouw: ui.bouwModus, tegel: t });
   if (r.ok) {
     const c = speler();
@@ -553,6 +584,7 @@ function renderUI() {
   if (!s) return;
   renderTopbalk();
   if (ui.bouwModus) berekenBouwStatus();
+  bouwlade?.render(s); // C16b
   renderContext();
   renderTabs();
   if (ui.tab === 'economie') renderEconomie();
@@ -571,38 +603,11 @@ function renderUI() {
 
 function renderTopbalk() {
   const s = ui.state;
-  const c = speler();
   const fase = s.pack.verhaal.fasen[s.faseIdx];
   $('#datum').textContent = `${datumTekst(s)} · dag ${s.dag}`;
   $('#fase').textContent = (s.replay ? 'REPLAY · ' : '') + (fase?.naam ?? '');
-  const P = s.pack;
-  const chips = [];
-  for (const r of P.resources) {
-    if (!sim.isOntgrendeld(s, r.id)) continue;
-    const nieuw = !ui.ontgrendeldGezien.has(r.id);
-    if (nieuw) ui.ontgrendeldGezien.add(r.id);
-    let w, d, cls = '', titel;
-    if (r.id === P.rollen.stabiliteit) {
-      w = c.stab.toFixed(0);
-      const delta = c.stabDoel - c.stab;
-      d = `<span class="d ${delta >= 0 ? 'goed' : 'slecht'}">${delta >= 0 ? '↗' : '↘'} ${c.stabDoel.toFixed(0)}</span>`;
-      if (c.stab < 30) cls = 'tekort';
-      titel = `Stabiliteit ${c.stab.toFixed(1)}, doel ${c.stabDoel.toFixed(1)}`;
-    } else if (r.id === P.rollen.geld) {
-      w = fmt(c.voorraad[r.id]);
-      d = `<span class="d ${c.inkomen >= 0 ? 'goed' : 'slecht'}">${plus(c.inkomen)}/d</span>`;
-      if (c.voorraad[r.id] < 0) cls = 'tekort';
-      titel = `Kapitaal. Inkomen ${c.inkomen.toFixed(1)} per dag na onderhoud (${c.onderhoud?.toFixed(1) ?? 0}).`;
-    } else {
-      const cap = sim.opslagMax(s, c, r.id);
-      w = fmt(c.voorraad[r.id] ?? 0);
-      const n = c.netto[r.id] ?? 0;
-      d = `<span class="d ${n >= 0 ? 'goed' : 'slecht'}">${plus(n)}</span>`;
-      if ((c.ratio[r.id] ?? 1) < 1) cls = 'tekort';
-      titel = `${r.naam}: ${fmt(c.voorraad[r.id] ?? 0)} / ${fmt(cap)}. Voorziening ${pct(c.ratio[r.id] ?? 1)}.`;
-    }
-    chips.push(`<div class="res ${cls} ${nieuw && s.dag > 0 ? 'nieuw' : ''}" title="${esc(titel)}"><span class="ico">${r.icoon ?? ''}</span><span class="w">${w}</span>${d}</div>`);
-  }
+  // C16a: chips met niveau (rood, oranje, goud), trend per dag, "nog x d" en vulbalkje, plus de meter en --topbalk-h.
+  const chips = evenwicht.render(s);
   chips.push(creditsChip());
   const html = chips.join('') + `<button class="knop klein" id="menu-knop" title="Replay opslaan of stoppen">Menu</button>`;
   const el = $('#resources');
@@ -718,7 +723,7 @@ function gebouwLijst(filter) {
   const s = ui.state;
   const c = speler();
   const P = s.pack;
-  const M = P.model;
+  const lijst = evenwichtToestand(s); // één keer per lijst, gedeeld door alle kaarten
   let gHtml = '';
   for (const g of P.gebouwen.filter(filter)) {
     const n = c.gebouwen[g.id] || 0;
@@ -728,36 +733,47 @@ function gebouwLijst(filter) {
       gHtml += `<div class="gebouw" style="opacity:.45"><div class="naam">${esc(g.naam)}</div><div class="sub">🔒 Komt vrij in fase ${esc(f?.naam ?? '')}${f ? ` (dag ${f.dag})` : ''}</div></div>`;
       continue;
     }
-    const kosten = sim.bouwKosten(s, c, g.id);
-    const vrij = sim.vrijePlekken(s, c, g.id);
-    const kan = sim.kanBetalen(c, kosten) && c.bouw.length < M.max_bouw && vrij > 0;
-    const reden = !vrij ? 'Geen geschikte grond vrij' : c.bouw.length >= M.max_bouw ? `Maximaal ${M.max_bouw} projecten tegelijk` : !sim.kanBetalen(c, kosten) ? 'Onvoldoende middelen' : '';
-    const actief = ui.bouwModus === g.id;
-    const eff = [
-      ...Object.entries(g.productie || {}).map(([r, v]) => `<span class="goed">+${v}${res(r)?.icoon}</span>`),
-      ...Object.entries(g.verbruik || {}).map(([r, v]) => `<span class="slecht">−${v}${res(r)?.icoon}</span>`),
-      g.kapitaalvoorraad ? `<span class="goed">K+${g.kapitaalvoorraad}</span>` : '',
-      g.opslag_bonus ? `<span class="info">opslag +${g.opslag_bonus}</span>` : '',
-    ].filter(Boolean).join(' ');
-    const terrein = g.terrein ? g.terrein.map((t) => `<span class="terrein-chip">${esc(t)}</span>`).join('') : '<span class="terrein-chip">elk land</span>';
-    gHtml += `<div class="gebouw" title="${esc(g.beschrijving ?? '')}">
-      <div class="naam">${g.icoon ?? ''} ${esc(g.naam)}<span class="n">${n}${inBouw ? ` +${inBouw}` : ''}</span></div>
-      <span class="knoppen">
-        <button class="knop klein ${actief ? 'actief' : ''}" data-actie="plaats" data-id="${esc(g.id)}" ${kan || actief ? '' : 'disabled'} title="${esc(reden || 'Kies zelf een vakje op de kaart')}">${actief ? 'Stop' : 'Plaats'} · ${kostenTekst(kosten)}</button>
-        <button class="knop klein" data-actie="bouw" data-id="${esc(g.id)}" ${kan ? '' : 'disabled'} title="Automatisch op de beste vrije plek">Auto</button>
-      </span>
-      <div class="sub">${eff} · ${g.bouwtijd ?? 5} d<br>${terrein} <span class="${vrij ? 'zacht' : 'slecht'}">${vrij} vrij</span>${g.knooppunt ? ' <span class="info">knooppunt</span>' : ''}</div>
-    </div>`;
+    gHtml += bouwKaartHtml(g, bouwKaartGegevens(s, g.id, lijst), n, inBouw);
   }
   const wachtrij = c.bouw.filter((x) => filter(P.gebouwIndex[x.gebouw]));
   if (wachtrij.length) {
     gHtml += `<div class="wachtrij">${wachtrij.map((x) => {
       const g = P.gebouwIndex[x.gebouw];
       const v = (s.dag - x.start) / Math.max(1, x.klaar - x.start);
-      return `<div><span>${esc(g.naam)} · nog ${x.klaar - s.dag} d</span><div class="voortgang"><div style="width:${pct(v)}"></div></div></div>`;
+      return `<div data-plek="${x.tegel}" role="button" tabindex="0" title="Naar de bouwplek"><span>${esc(g.naam)} · nog ${x.klaar - s.dag} d</span><div class="voortgang"><div style="width:${pct(v)}"></div></div></div>`;
     }).join('')}</div>`;
   }
   return gHtml;
+}
+
+// C16c: één bouwkaart. Kosten per grondstof in groen of rood, wat je mist als zichtbare tekst (niet alleen in title),
+// "na bouwen" en "lost tekort op". data komt uit bouwKaartData (zelfde bron als de lade).
+function bouwKaartHtml(g, data, n = 0, inBouw = 0) {
+  const s = ui.state;
+  const actief = ui.bouwModus === g.id;
+  const kan = data.kan;
+  const kosten = data.kostPerGrondstof.map((k) => `<span class="bk-kost ${k.ok ? 'ok' : 'mist'}" title="${esc(res(k.r)?.naam ?? k.r)}: ${fmt(k.heb)} van ${k.nodig}">${k.nodig}${res(k.r)?.icoon ?? esc(k.r)}</span>`).join('');
+  const mist = !kan ? data.reden : null; // evenwicht.bouwKaartData zegt al wat je mist ("nog 20 ⛏ · ±6 d")
+  const na = naBouwenStukken(s, data.effect);
+  const extra = [
+    g.kapitaalvoorraad ? `<span class="goed">K+${g.kapitaalvoorraad}</span>` : '',
+    g.opslag_bonus ? `<span class="info">opslag +${g.opslag_bonus}</span>` : '',
+  ].filter(Boolean).join(' ');
+  const lost = data.lostOp.length ? `<span class="bk-lost" title="Dit gebouw helpt tegen een tekort">lost tekort op ${data.lostOp.map((r) => res(r)?.icoon ?? '').join('')}</span>` : '';
+  const terrein = g.terrein ? g.terrein.map((t) => `<span class="terrein-chip">${esc(t)}</span>`).join('') : '<span class="terrein-chip">elk land</span>';
+  const id = `bk-${esc(g.id)}`;
+  return `<div class="gebouw bouwkaart${kan ? '' : ' geblokt'}${lost ? ' lost' : ''}" title="${esc(g.beschrijving ?? '')}">
+      <div class="naam">${g.icoon ?? ''} ${esc(g.naam)}<span class="n">${n}${inBouw ? ` +${inBouw}` : ''}</span>${lost}</div>
+      <span class="knoppen">
+        <button class="knop klein ${actief ? 'actief' : ''}" data-actie="plaats" data-id="${esc(g.id)}" ${kan || actief ? '' : 'disabled'} ${mist && !actief ? `aria-describedby="${id}"` : ''} title="${esc(actief ? 'Stop met plaatsen' : mist || 'Kies zelf een vakje op de kaart')}">${actief ? 'Stop' : 'Plaats'}</button>
+        <button class="knop klein" data-actie="bouw" data-id="${esc(g.id)}" ${kan ? '' : 'disabled'} ${mist ? `aria-describedby="${id}"` : ''} title="${esc(mist || 'Automatisch op de beste vrije plek')}">Auto</button>
+      </span>
+      <div class="bk-kosten">${kosten}<span class="zacht"> · ${g.bouwtijd ?? 5} d</span></div>
+      ${mist ? `<div class="bk-reden" id="${id}">${esc(mist)}</div>` : ''}
+      ${na.length ? `<div class="bk-na"><span class="zacht">na bouwen</span> ${na.map((e) => `<span class="${e.goed ? 'goed' : 'slecht'}">${esc(e.tekst)}</span>`).join(' · ')}</div>` : ''}
+      ${g.beschrijving ? `<div class="bk-doet">${esc(g.beschrijving)}</div>` : ''}
+      <div class="sub">${extra ? `${extra} · ` : ''}${terrein} <span class="${data.vrij ? 'zacht' : 'slecht'}">${data.vrij} vrij</span>${g.knooppunt ? ' <span class="info">knooppunt</span>' : ''}</div>
+    </div>`;
 }
 
 // ----- contextpaneel op de kaart -----
@@ -780,6 +796,7 @@ function klikOpKaart(idx, t, x, y) {
 function sluitContext() {
   ui.context = null;
   $('#context').hidden = true;
+  onderpaneel.sluit('context');
 }
 
 // Slopen (C15c): de eerste tik zet de knop op 'Zeker? Tik nogmaals', een tweede tik binnen 4 seconden geeft de order.
@@ -981,6 +998,7 @@ function renderContext() {
   const html = `<div class="context-kop"><b>${titel}</b><button class="knop klein" data-actie="sluit-context">×</button></div>${h}`;
   if (el._html !== html) { el.innerHTML = html; el._html = html; }
   el.hidden = false;
+  onderpaneel.open('context', sluitContext);
   if (TELEFOON.matches) {
     // Telefoon: uitschuifpaneel van onderen (opmaak in style.css). Schuif de kaart
     // zo dat de aangetikte plek boven het paneel zichtbaar blijft.
@@ -1087,6 +1105,33 @@ function contractBlok(land) {
 
 // Knoppen reageren op pointerdown. Een venster dat dan meteen opent, vangt de klik die
 // nog volgt (op een telefoon valt die op 'Annuleren'). Daarom pas openen na de klik.
+// Muis: meteen. Aanraken of pen: pas bij loslaten op dezelfde knop zonder te verschuiven (C16a). Begint de browser te
+// scrollen, dan komt er pointercancel en gebeurt er niets.
+const TIK_MARGE = 10;
+function naEchteTik(e, knop, fn) {
+  if (e.pointerType === 'mouse') { fn(); return; }
+  const id = e.pointerId;
+  const x0 = e.clientX;
+  const y0 = e.clientY;
+  const klaar = () => {
+    document.removeEventListener('pointerup', op, true);
+    document.removeEventListener('pointercancel', klaar, true);
+    document.removeEventListener('pointermove', beweeg, true);
+  };
+  const beweeg = (ev) => { if (ev.pointerId === id && Math.hypot(ev.clientX - x0, ev.clientY - y0) > TIK_MARGE) klaar(); };
+  const op = (ev) => {
+    if (ev.pointerId !== id) return;
+    klaar();
+    if (Math.hypot(ev.clientX - x0, ev.clientY - y0) > TIK_MARGE) return;
+    // De balk kan tussendoor opnieuw getekend zijn: vergelijk op actie en id, niet op het element zelf.
+    const onder = document.elementFromPoint(ev.clientX, ev.clientY)?.closest?.('[data-actie]');
+    if (!onder || onder === knop || (onder.dataset.actie === knop.dataset.actie && onder.dataset.id === knop.dataset.id)) fn();
+  };
+  document.addEventListener('pointerup', op, true);
+  document.addEventListener('pointercancel', klaar, true);
+  document.addEventListener('pointermove', beweeg, true);
+}
+
 function naKlik(fn) {
   const h = () => { clearTimeout(t); fn(); };
   document.addEventListener('click', h, { once: true });
@@ -1596,12 +1641,14 @@ function toonTip(idx, t, x, y) {
 
 function openModal(html, bind) {
   ui.modal = true;
+  leren.modal(true);
   $('#modal-inhoud').innerHTML = html;
   $('#modal').hidden = false;
   bind?.($('#modal-inhoud'));
 }
 function sluitModal() {
   ui.modal = null;
+  leren.modal(false);
   $('#modal').hidden = true;
 }
 
@@ -1679,7 +1726,8 @@ function toonMenu() {
       <button class="knop" id="m-replay">Replay downloaden</button>
       <button class="knop" id="m-start">Terug naar startscherm</button>
       <button class="knop primair" id="m-verder">Verder spelen</button>
-    </div>`, (el) => {
+    </div>${leren.menuHtml()}`, (el) => {
+    leren.bindMenu(el);
     el.querySelector('#m-opslaan').onclick = slaOp;
     el.querySelector('#m-opslag').onclick = downloadOpslag;
     el.querySelector('#m-replay').onclick = downloadReplay;
@@ -1708,6 +1756,7 @@ function naarStart() {
   zetTempo(0);
   autoOpslaan();
   stopTutorial(false);
+  if (leren.afhaak(ui.state, naarStart)) return; // C16d: eerst "Waarom stop je nu?"; een antwoord roept naarStart opnieuw aan
   ui.state = null;
   $('#spel').hidden = true;
   $('#start').hidden = false;
@@ -1775,6 +1824,7 @@ function verbergBalk() {
 
 // Op de telefoon staan tutorialbalk en bouwbalk allebei bovenaan de kaart: zet de bouwbalk onder de tutorial.
 function schikBouwbalk() {
+  if (opLade()) { $('#bouwbalk').style.top = ''; return; } // C16b: op de telefoon is er geen bouwbalk (de plaatsbalk staat onderaan)
   const tut = $('#tutorial');
   $('#bouwbalk').style.top = TELEFOON.matches && !tut.hidden ? `${tut.offsetHeight + 16}px` : '';
 }
@@ -1915,7 +1965,7 @@ function tutorialEvent(soort, data = {}) {
   }
   if (soort === 'tab' && k.tab && data.tab !== k.tab) return;
   if (soort === 'actie' && k.actie && data.actie !== k.actie) return;
-  bron.gebeurd = soort;
+  bron.gebeurd = soort; leren.tut(stap.id ?? soort);
 }
 
 // Is de stap of tip klaar? 'ui'-controles komen via tutorialEvent; de rest volgt het voorwaarde-formaat van de doelen,
@@ -2094,6 +2144,7 @@ function toast(tekst, soort = 'info', ping = null) {
 
 // Doelbalk, bijna klaar en sessie-overzicht (src/ui/doelen.js): leest alleen, geeft geen orders.
 const doelbalk = maakDoelen({ ui, zetTab, selecteer });
+maakBouwfeedback(ui, { toast }); // C16c: toast, zwevend label en camera na elke geslaagde bouwopdracht
 
 // Handig bij playtests en debuggen vanuit de console.
 window.machtsbalans = { ui, sim, krant };

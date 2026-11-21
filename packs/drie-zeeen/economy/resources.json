@@ -1,11 +1,15 @@
 [
   { "id": "energie", "naam": "Energie", "rol": "energie", "icoon": "⚡", "kleur": "#f2c14e", "start": 120, "opslag_max": 500,
-    "tekort_effect": { "stabiliteit": -20, "productie_factor": 0.35 } },
+    "tekort_effect": { "stabiliteit": -20, "productie_factor": 0.35 },
+    "waarschuw_dagen": 40, "advies": "Zonder stroom draaien fabrieken op een derde en wordt het volk onrustig." },
   { "id": "grondstoffen", "naam": "Grondstoffen", "rol": "grondstof", "icoon": "⛏", "kleur": "#b08968", "start": 150, "opslag_max": 500,
-    "tekort_effect": { "stabiliteit": -4 } },
+    "tekort_effect": { "stabiliteit": -4 },
+    "waarschuw_dagen": 25, "advies": "Zonder grondstoffen kun je bijna niets meer bouwen." },
   { "id": "voedsel", "naam": "Voedsel", "rol": "voedsel", "icoon": "🌾", "kleur": "#7fb77e", "start": 120, "opslag_max": 500,
-    "tekort_effect": { "stabiliteit": -30, "productie_factor": 0.8 } },
+    "tekort_effect": { "stabiliteit": -30, "productie_factor": 0.8 },
+    "waarschuw_dagen": 40, "advies": "Honger kost je bevolking en zet de straat op scherp." },
   { "id": "kapitaal", "naam": "Kapitaal", "rol": "geld", "icoon": "◈", "kleur": "#e8d7a5", "start": 300 },
-  { "id": "chips", "naam": "Chips & AI", "rol": "tech", "icoon": "◧", "kleur": "#8fb8ff", "start": 0, "opslag_max": 300 },
+  { "id": "chips", "naam": "Chips & AI", "rol": "tech", "icoon": "◧", "kleur": "#8fb8ff", "start": 0, "opslag_max": 300,
+    "vol_waarschuwing": true, "advies": "Chips laten je technologie groeien; een volle opslag is verspilde kracht." },
   { "id": "stabiliteit", "naam": "Stabiliteit", "rol": "stabiliteit", "icoon": "⚖", "kleur": "#d6a2e8", "start": 65 }
 ]

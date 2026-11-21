@@ -9,6 +9,7 @@ import * as leger from '../engine/leger.js';
 import { woningCapaciteit, campagneStatus } from '../engine/samenleving.js';
 import { mediaStatus, overnameStatus } from '../engine/media.js';
 import { brandhaardenVan, brandhaardSoort, dagenOver, goedkoopsteActie } from '../engine/brandhaarden.js';
+import { actieveVerbouw } from '../engine/verbouw.js';
 
 const KIES_INTERVAL = 3000; // zo vaak mag de balk naar een ander doel springen
 const VERNIEUW = 700; // voortgang en "bijna klaar" vaker bijwerken
@@ -33,11 +34,15 @@ function tabVan(g) {
 }
 
 // Kan de speler dit gebouw nu of na wat sparen neerzetten? Sparen telt alleen als het tekort ook echt binnenkomt.
-function bouwKans(s, g) {
+// Geeft { kan: true, kosten, voortgang, wacht, mist } of { kan: false, reden }. Projecten tellen zoals de engine
+// (sim.bouw): lopende bouw plus lopende verbouwingen (C16a).
+export function bouwKans(s, g) {
   const c = speler(s);
-  if (!g || !sim.isOntgrendeld(s, g.id)) return null;
-  if (c.bouw.length >= s.pack.model.max_bouw) return null;
-  if (sim.vrijePlekken(s, c, g.id) <= 0) return null;
+  if (!g) return { kan: false, reden: 'Onbekend gebouw' };
+  if (!sim.isOntgrendeld(s, g.id)) return { kan: false, reden: 'Nog niet beschikbaar in deze fase' };
+  const max = s.pack.model.max_bouw;
+  if (c.bouw.length + actieveVerbouw(c) >= max) return { kan: false, reden: `Maximaal ${max} projecten tegelijk` };
+  if (sim.vrijePlekken(s, c, g.id) <= 0) return { kan: false, reden: 'Geen geschikte grond vrij' };
   const kosten = sim.bouwKosten(s, c, g.id);
   let voortgang = 1;
   let wacht = 0;
@@ -46,18 +51,18 @@ function bouwKans(s, g) {
     const heb = c.voorraad[r] ?? 0;
     if (heb >= v) continue;
     const erbij = r === s.pack.rollen.geld ? c.inkomen : c.netto[r] ?? 0;
-    if (!(erbij > 0)) return null; // komt niet binnen: dan is het geen doel dat je kunt halen
+    if (!(erbij > 0)) return { kan: false, reden: `${s.pack.resIndex[r]?.naam ?? r} komt niet binnen` }; // dan is het geen doel dat je kunt halen
     voortgang = Math.min(voortgang, Math.max(0, heb) / v);
     const d = Math.ceil((v - heb) / erbij);
     if (d > wacht) { wacht = d; mist = `${rond(v - heb)}${s.pack.resIndex[r]?.icoon ?? ''}`; }
   }
-  return { kosten, voortgang, wacht, mist };
+  return { kan: true, kosten, voortgang, wacht, mist };
 }
 
 // Een bouwdoel: de reden plus, als je nog moet sparen, hoe lang nog.
 function bouwDoel(s, g, { id, titel, waarom, voortgang, soort = 'opbouwen' }) {
   const k = bouwKans(s, g);
-  if (!k) return null;
+  if (!k.kan) return null;
   const spaar = k.wacht ? ` · nog ${k.mist} sparen (±${k.wacht} d)` : ' · klik om te plaatsen';
   return {
     id: id ?? `bouw:${g.id}`, soort, titel: titel ?? `Bouw: ${g.naam}`, waarom: waarom + spaar,
@@ -66,11 +71,11 @@ function bouwDoel(s, g, { id, titel, waarom, voortgang, soort = 'opbouwen' }) {
 }
 
 // Goedkoopste gebouw dat aan een eigenschap voldoet en dat je kunt neerzetten.
-function besteGebouw(s, filter, waarde = () => 1) {
+export function besteGebouw(s, filter, waarde = () => 1) {
   let best = null;
   let bs = -Infinity;
   for (const g of s.pack.gebouwen) {
-    if (!filter(g) || !bouwKans(s, g)) continue;
+    if (!filter(g) || !bouwKans(s, g).kan) continue;
     const prijs = sim.kostenInGeld(s, sim.bouwKosten(s, speler(s), g.id)) || 1;
     const score = waarde(g) / prijs;
     if (score > bs) { bs = score; best = g; }
@@ -281,7 +286,8 @@ function tekortDoel(s) {
     const netto = c.netto[r] ?? 0;
     const ratio = c.ratio[r] ?? 1;
     const dagen = netto < 0 ? (c.voorraad[r] ?? 0) / -netto : Infinity;
-    if (ratio >= 1 && dagen >= (rol === 'grondstof' ? 25 : 40)) continue;
+    const grens = s.pack.resIndex[r]?.waarschuw_dagen ?? (rol === 'grondstof' ? 25 : 40); // C16a: uit het pack
+    if (ratio >= 1 && dagen >= grens) continue;
     const maakt = (g) => (g.productie?.[r] ?? 0) > 0 && !(g.verbruik?.[r] > 0);
     if (s.pack.gebouwen.some((g) => maakt(g) && c.bouw.some((b) => b.gebouw === g.id))) continue; // er komt er al een aan
     const g = besteGebouw(s, maakt, (x) => x.productie[r]);

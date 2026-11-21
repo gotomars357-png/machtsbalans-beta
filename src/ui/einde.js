@@ -8,6 +8,7 @@ import { berekenScore } from './score.js';
 import { bewaarResultaat, deelTekst, kopieer, datumTekst, vernieuwUitdaging } from './uitdaging.js';
 import { registreerPotje, embleemSvg, effectRegels, bepaalRivaal } from './huis.js';
 import { kroniekUit } from './krant.js';
+import { leesLeerlog, maakVerslag } from './leren.js'; // C16d: speelverslag mee in het testverslag
 
 const SPELTEST_SLEUTEL = 'machtsbalans.speltest';
 const UUR = 3600;
@@ -244,6 +245,7 @@ export function toonEindoverzicht(state, ctx) {
       <div class="st-nogeens"><span>Zou je nog een keer spelen?</span>
         ${['ja', 'misschien', 'nee'].map((v) => `<label><input type="radio" name="st-nogeens" value="${v}"> ${v}</label>`).join('')}
       </div>
+      <label class="check st-tekst"><input type="checkbox" id="st-tekst"> Ook mijn getypte antwoorden meesturen</label>
       <div class="st-knoppen"><button class="knop" id="st-opslaan">Opslaan</button><button class="knop" id="st-download">Testverslag downloaden</button></div>
     </details>`}
     <div class="keuzes">
@@ -278,10 +280,11 @@ export function toonEindoverzicht(state, ctx) {
         if (bewaard) q('#st-opslaan').textContent = 'Opgeslagen ✓';
       };
       // Het verslag bevat alle bewaarde records; is dit potje nog niet bewaard, dan gaat het wel mee in het bestand.
+      // C16d: plus het speelverslag (leerlog). De getypte antwoorden gaan alleen mee met het vinkje (standaard uit).
       q('#st-download').onclick = () => {
         const lijst = leesSpeltest();
         if (!lijst.some((r) => r.opgeslagen === opgeslagen)) lijst.push(record());
-        ctx.download({ speltest: lijst, replay: maakReplay(state) }, `machtsbalans-testverslag-${state.pack.meta.id}-dag${state.dag}.json`);
+        ctx.download(maakVerslag({ speltest: lijst, replay: maakReplay(state), leerlog: leesLeerlog(), metTekst: !!q('#st-tekst')?.checked }), `machtsbalans-testverslag-${state.pack.meta.id}-dag${state.dag}.json`);
       };
     }
     requestAnimationFrame(() => {

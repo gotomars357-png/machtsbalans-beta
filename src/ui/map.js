@@ -29,6 +29,7 @@ import { echtNu, zetBeeldTijd } from './bakbudget.js';
 import { zetVlucht } from './detail.js';
 import { BrandhaardLaag } from './brandhaard.js';
 import { LevendeKaart } from './pings.js';
+import { tekenLabels } from './bouwfeedback.js'; // C16c: zwevend label na een bouwopdracht
 import { Wegennet, KLASSE, KNOOP, PROFIEL, verkeersTijd } from './wegennet.js';
 
 // Vanaf deze zoom tekent de kaart vakjes als echte plekken: huizen, akkers, fabrieken, bomen.
@@ -81,6 +82,7 @@ export class KaartView {
     this.stadLaag = new StadLaag();
     this.oplevering = new OpleveringVolger(); // C14b: bouwstart, oprit en oplevering als kort feest op de kaart
     this.bouwKandidaat = -1; // C14b: op touch eerst tikken om te zien, dan nog eens om te bouwen
+    this.zichtOnder = 0; // C16b: zoveel px onderaan het kaartvenster is bedekt (bouwlade); vliegNaar mikt erboven
     this.zeeLaag = new ZeeLaag();
     this.werkLaag = new WerkLaag();
     this.hemelLaag = new HemelLaag();
@@ -442,6 +444,9 @@ export class KaartView {
     this.glij = null;
     this.zoomDoel = null;
     zoom = clamp(zoom, 1, 14);
+    // C16b: is de onderkant bedekt (lade, plaatsbalk), dan komt het punt midden in het vrije deel erboven.
+    const onder = Math.max(0, Math.min(this.zichtOnder || 0, (this.h || 0) * 0.8));
+    if (onder && this.w && this.h) y += onder / 2 / (Math.min(this.w / 1000, this.h / 620) * zoom);
     if (!this.w || !this.h) { this.cx = x; this.cy = y; this.zoom = zoom; this.doel = null; this.begrens(); return; }
     const p = begrensPunt(x, y, zoom, this.w, this.h);
     const plan = vluchtPlan({ x: this.cx, y: this.cy, zoom: this.zoom }, { x: p.x, y: p.y, zoom }, this.w, this.h, { kort: this.rustig });
@@ -564,9 +569,25 @@ export class KaartView {
   // de beweeg-aanroep na de tik in pointerup) en plaatst pas een tweede tik op hetzelfde vakje.
   bouwKlik(e, t) {
     // buiten de kaart (t < 0) plaatst een tik nooit, ook niet als tweede tik
-    if (e.pointerType === 'touch' && (t < 0 || t !== this.bouwKandidaat)) { this.bouwKandidaat = t; this.hoverTegel = t; return; }
+    if (e.pointerType === 'touch' && (t < 0 || t !== this.bouwKandidaat)) { this.bouwKandidaat = t; this.hoverTegel = t; this.opties.onKandidaat?.(t); return; }
     this.bouwKandidaat = -1;
     this.opties.onPlaats(t);
+  }
+
+  // Eén keer per beeld. C16b: de kandidaat vervalt alleen als de bouwmodus stopt (een ander gebouw kiezen zet hem via
+  // zetKandidaat); vroeger wiste elke wissel hem, zodat het voorbeeld van de lade meteen weer verdween.
+  volgBouwModus() {
+    if (this.bouwModus === this._bouwModusVorig) return;
+    this._bouwModusVorig = this.bouwModus;
+    if (!this.bouwModus) this.bouwKandidaat = -1;
+  }
+
+  // C16b: zet het voorbeeldgebouw op tegel t (de lade kiest de beste plek). Werkt ook _bouwModusVorig bij, zodat het
+  // volgende beeld de kandidaat niet wist; een tik op hetzelfde vakje plaatst daarna meteen.
+  zetKandidaat(t) {
+    this._bouwModusVorig = this.bouwModus;
+    this.bouwKandidaat = t;
+    this.hoverTegel = t;
   }
 
   // ---------- tekenen ----------
@@ -691,7 +712,7 @@ export class KaartView {
     this.tekenKoopvaardij(c, sc, nu);
     this.stadLaag.teken(c, this, sc, nu, dt, tempo);
     this.bouwFrac = tempo > 0 ? frac : (this.bouwFrac ?? 0);
-    if (this.bouwModus !== this._bouwModusVorig) { this._bouwModusVorig = this.bouwModus; this.bouwKandidaat = -1; }
+    this.volgBouwModus();
     this.tekenGebouwen(c, sc, detail);
     this.oplevering.volg(s, nu); this.oplevering.teken(c, this);
     this.grensLaag.teken(c, this, sc, nu, dt, tempo);
@@ -699,6 +720,7 @@ export class KaartView {
     this.werkLaag.teken(c, this, sc, nu, dt, tempo);
     dun(() => this.natuurLaag.teken(c, this, sc, nu, dt, tempo));
     if (this.bouwModus) this.tekenBouwVoorbeeld(c, sc);
+    tekenLabels(c, this, this.echtNu); // C16c
     dun(() => this.sfeerLaag.tekenGrond(c, this, sc, nu, frac));
     this.tekenEenheden(c, sc, detail, frac);
     this.infraLaag.tekenLucht(c, this, sc, nu);
