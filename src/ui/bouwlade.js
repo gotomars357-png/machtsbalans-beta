@@ -59,11 +59,11 @@ export function tabVan(g) {
 // Voorkeur: een oplosser die je nu kunt bouwen, anders de beste die al vrij is.
 export function aanbevolen(s, lijst = toestand(s)) {
   const e = ergste(s, lijst);
-  if (!e.item || (e.niveau !== 'rood' && e.niveau !== 'oranje')) return null;
-  const opl = oplossers(s, e.item.r, AANBEVOLEN_MAX, lijst);
+  if (!e.item || (e.niveau !== 'rood' && e.niveau !== 'oranje' && e.niveau !== 'rem')) return null; // C18a: ook bij een rem
+  const opl = oplossers(s, e.item.r, AANBEVOLEN_MAX, lijst).filter((o) => o.gebouw); // de marktaankoop is geen bouwkaart
   const k = opl.find((o) => o.kan) ?? opl.find((o) => !o.slot) ?? null;
   if (!k) return null;
-  return { gebouw: k.gebouw, r: e.item.r, niveau: e.niveau, zin: TEKST.lost(`${e.item.icoon ? `${e.item.icoon} ` : ''}${e.niveau === 'rood' ? 'tekort' : 'krapte'}`) };
+  return { gebouw: k.gebouw, r: e.item.r, niveau: e.niveau, zin: TEKST.lost(`${e.item.icoon ? `${e.item.icoon} ` : ''}${e.niveau === 'rood' ? 'tekort' : e.niveau === 'rem' ? (e.item.r === s.pack.rollen.geld ? 'stilliggend geld' : 'de rem') : 'krapte'}`) };
 }
 
 // Het hoofdeffect per dag als korte tekst: "± +10,8 ⚡/d". Eerst wat het gebouw maakt, anders de grootste verandering.

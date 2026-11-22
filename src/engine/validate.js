@@ -53,6 +53,7 @@ export function validatePack(p) {
     }
   }
   checkVerbouw(p, fouten);
+  checkGroei(p, fouten);
   for (const r of p.resources) {
     if (r.rol === 'geld' || r.rol === 'stabiliteit') continue;
     if (!geproduceerd.has(r.id)) waarschuwingen.push(`Resource '${r.id}' wordt door geen enkel gebouw geproduceerd.`);
@@ -131,6 +132,18 @@ export function validatePack(p) {
     waarschuwingen.push('Dit pack gaat over actuele verhoudingen. Leiders zijn archetypen; uitkomsten zijn spel, geen voorspelling.');
   }
   return { fouten, waarschuwingen };
+}
+
+// Groei en markt (C18a): optionele getallen van 0 of hoger in het model; markt_diepte moet boven 0 liggen.
+export const GROEI_VELDEN = ['kosten_schaal_grondstof', 'markt_basis', 'markt_diepte', 'markt_herstel', 'markt_max_per_dag', 'markt_verkoop', 'rem_netto', 'rem_dagen', 'rem_geld', 'markt_koop'];
+function checkGroei(p, fouten) {
+  const M = p.model || {};
+  for (const veld of GROEI_VELDEN) {
+    if (M[veld] == null) continue;
+    if (typeof M[veld] !== 'number' || !(M[veld] >= 0)) fouten.push(`model: '${veld}' moet een getal van 0 of hoger zijn.`);
+  }
+  if (typeof M.markt_diepte === 'number' && !(M.markt_diepte > 0)) fouten.push("model: 'markt_diepte' moet groter dan 0 zijn.");
+  if (typeof M.markt_herstel === 'number' && M.markt_herstel > 1) fouten.push("model: 'markt_herstel' ligt tussen 0 en 1.");
 }
 
 // Verbouwen en slopen (C15c): lengtes per niveau, geen negatieve waarden, en verbouwbaar is een ja/nee.
@@ -295,7 +308,7 @@ function checkRivalen(p, fouten) {
 }
 
 // De Krant (C14): alleen waarschuwingen, de krant kan het spel nooit tegenhouden.
-export const KRANT_SOORTEN = ['start', 'aansluiting', 'afvallig', 'aandeel', 'bijna', 'fase', 'oorlog', 'vrede', 'haard_opgelost', 'haard_uitgebarsten', 'verkiezing', 'hervorming', 'kolonie', 'einde_winst', 'einde_verlies'];
+export const KRANT_SOORTEN = ['start', 'aansluiting', 'afvallig', 'aandeel', 'bijna', 'fase', 'oorlog', 'vrede', 'haard_opgelost', 'haard_uitgebarsten', 'verkiezing', 'hervorming', 'kolonie', 'einde_winst', 'einde_verlies', 'te_machtig', 'nerveus', 'wapenrust'];
 export const KRANT_PLAATSHOUDERS = ['land', 'blok', 'speler', 'spelerblok', 'leider', 'rivaal', 'rivaalland', 'fase', 'aandeel', 'haard', 'jaar'];
 function checkKrant(p, waarschuwingen) {
   const koppen = p.krant?.koppen;

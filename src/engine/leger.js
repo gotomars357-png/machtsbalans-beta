@@ -8,6 +8,7 @@ import {
 } from './sim.js';
 import { regimeEffect } from './regimes.js';
 import { moraalFactor } from './media.js';
+import { bijsturingFactor } from './bijsturing.js';
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 const TERREIN_KOSTEN = { vlakte: 1, kust: 1, bos: 1.5, berg: 2.2 };
@@ -765,7 +766,8 @@ export function aiOorlogsbeslissingen(state) {
       if (verhouding >= drempel && score > best) { best = score; doel = t; }
     }
     // Moeilijkheid schaalt de kans alleen als het doel de speler of zijn blok is (Makkelijk: zelden).
-    const oorlogFactor = partij(state, doel ?? leider) === spelerPartij ? (MOEILIJKHEID[state.instellingen.moeilijkheid]?.oorlog ?? 1) : 1;
+    // C18c: tijdens een wapenrust na een zware klap nog minder (1 zonder meegroeiend).
+    const oorlogFactor = partij(state, doel ?? leider) === spelerPartij ? (MOEILIJKHEID[state.instellingen.moeilijkheid]?.oorlog ?? 1) * bijsturingFactor(state, state.spelerBlok, 'oorlog') : 1;
     if (!doel || nextRandom(state) > M.ai_oorlog_kans * oorlogFactor) continue;
     const st = escalatieStatus(state, leider.idx, doel.idx, oorlogActie);
     if (st.ok && !((state.wapenstilstand[[b.id, partij(state, doel)].sort().join('|')] ?? -1) > state.dag)) verklaarOorlog(state, leider.idx, doel.idx, oorlogActie, st);

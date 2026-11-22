@@ -21,6 +21,8 @@ import { voerCyberUit, cyberTick } from './cyber.js';
 import { brandhaardenTick, voerBrandhaardActieUit, brandhaardenAfdruk } from './brandhaarden.js';
 import { actieveVerbouw, verbouwTick, voerVerbouwUit, voerSloopUit, heeftSloop, sloopOpruim, verbouwAfdruk } from './verbouw.js';
 import { gebiedCentra, gebiedVan, voerBouwrijUit, bouwrijTick, bouwrijAfdruk } from './gebieden.js';
+import { voerMarktUit, marktTick, marktAfdruk, verkoopStart, verkoopOverschot } from './markt.js'; // C18a
+import { bijsturingTick, bijsturingAfdruk, bijsturingFactor, vgRij, mgWaarde } from './bijsturing.js'; // C18c
 
 export const MOEILIJKHEID = {
   makkelijk: { econ: 0.93, invloed: 0.6, oorlog: 0.2, naam: 'Makkelijk' },
@@ -160,8 +162,10 @@ export function bouwKosten(state, c, gebouwId) {
   const g = state.pack.gebouwIndex[gebouwId];
   const n = (c.gebouwen[gebouwId] || 0) + c.bouw.filter((b) => b.gebouw === gebouwId).length;
   const f = (1 + state.pack.model.kosten_schaal * n) * (1 - regimeEffect(state, c, 'bouw_korting'));
+  // C18a: met groei stijgt de bouwgrondstof per gebouw minder hard (kosten_schaal_grondstof) dan het geld.
+  const fg = state.instellingen.groei ? (1 + state.pack.model.kosten_schaal_grondstof * n) * (1 - regimeEffect(state, c, 'bouw_korting')) : f;
   const kosten = {};
-  for (const [r, v] of Object.entries(g.kosten || {})) kosten[r] = Math.round(v * f);
+  for (const [r, v] of Object.entries(g.kosten || {})) kosten[r] = Math.round(v * (state.pack.resIndex[r]?.rol === 'grondstof' ? fg : f));
   return kosten;
 }
 
@@ -380,10 +384,12 @@ function economieTick(state, c, schok) {
   verbruik[R.energie] = (verbruik[R.energie] || 0) + eEcon * ratio[R.energie];
   verbruik[R.voedsel] = (verbruik[R.voedsel] || 0) + fEcon * ratio[R.voedsel];
 
+  const metGroei = state.instellingen.groei; // C18a: een vol plafond verkoopt het overschot in plaats van het stil te laten verdwijnen
+  if (metGroei) verkoopStart(state, c);
   for (const r of Object.keys(ratio)) {
     const netto = (prod[r] || 0) - (verbruik[r] || 0);
     c.netto[r] = netto;
-    c.voorraad[r] = clamp((c.voorraad[r] || 0) + netto, 0, opslagMax(state, c, r));
+    c.voorraad[r] = metGroei ? verkoopOverschot(state, c, r, (c.voorraad[r] || 0) + netto, opslagMax(state, c, r)) : clamp((c.voorraad[r] || 0) + netto, 0, opslagMax(state, c, r));
   }
   c.ratio = ratio;
   c.vraag = vraag;
@@ -416,7 +422,7 @@ function economieTick(state, c, schok) {
   for (const g of P.gebouwen) onderhoud += ((c.gebouwen[g.id] || 0) + (c.extraOnderhoud?.[g.id] ?? 0)) * (g.onderhoud ?? M.onderhoud_per_gebouw);
   onderhoud += legerOnderhoud(state, c);
   c.onderhoud = onderhoud;
-  c.inkomen = belasting - sociaal + handel + leningen - onderhoud;
+  c.inkomen = belasting - sociaal + handel + leningen - onderhoud + (metGroei ? c.verkoopGeld : 0);
   c.voorraad[geld] += c.inkomen;
   if (c.voorraad[geld] < 0) c.voorraad[geld] *= 1 + M.rente;
 
@@ -518,6 +524,13 @@ function buren(state, c) {
   return c.buren;
 }
 
+// C18c: de aantrekkingskracht van een blok op zijn buren. Alleen de rem geldt hier, voor iedereen gelijk; steun werkt
+// alleen via hefbomen die een blok zelf inzet.
+function trekFactor(state, blokId) {
+  const f = bijsturingFactor(state, blokId, 'invloed');
+  return f < 1 && mgWaarde(state, 'trek') ? f : 1;
+}
+
 function loyaliteitTick(state) {
   const M = state.pack.model;
   for (const c of state.landen) {
@@ -525,9 +538,10 @@ function loyaliteitTick(state) {
     for (const b of state.blokken) {
       let l = c.loyaliteit[b.id];
       l += (c.basis[b.id] - l) * M.loyaliteit_verval;
-      if (c.alignment === b.id) l += Math.min(0.1, M.blok_zwaartekracht * b.leden);
+      const trek = trekFactor(state, b.id); // C18c: 1 zonder meegroeiend
+      if (c.alignment === b.id) l += Math.min(0.1, M.blok_zwaartekracht * b.leden) * trek;
       l += regimeVerwantschap(state, c, b.id) * M.regime_affiniteit;
-      for (const n of buren(state, c)) if (n.alignment === b.id) l += M.route_trek;
+      for (const n of buren(state, c)) if (n.alignment === b.id) l += M.route_trek * trek;
       c.loyaliteit[b.id] = l;
     }
     for (const b of Object.keys(c.moeheid)) c.moeheid[b] *= 0.97;
@@ -653,8 +667,9 @@ function eindig(state, blokId, reden) {
 function registreerGeschiedenis(state) {
   const c = state.landen[state.speler];
   const aandelen = {};
-  for (const b of state.blokken) aandelen[b.id] = b.aandeel;
-  state.geschiedenis.push({ dag: state.dag, Y: c.Y, A: c.A, stab: c.stab, geld: c.voorraad[state.pack.rollen.geld], aandelen });
+  const vg = {}; // C18c: voortgang per winroute per blok, voor de trend in bijsturing.achterstand (leest alleen)
+  for (const b of state.blokken) { aandelen[b.id] = b.aandeel; vg[b.id] = vgRij(state, b.id); }
+  state.geschiedenis.push({ dag: state.dag, Y: c.Y, A: c.A, stab: c.stab, geld: c.voorraad[state.pack.rollen.geld], aandelen, vg });
 }
 
 // ---------- de tick ----------
@@ -668,6 +683,7 @@ export function tick(state) {
   const geldVoor = speler.voorraad[state.pack.rollen.geld];
   cyberTick(state);
   for (const c of state.landen) economieTick(state, c, schok);
+  marktTick(state); // C18a: de marktdruk zakt (niets zonder groei)
   if (heeftSloop(state)) sloopOpruim(state);
   contractenTick(state);
   const inkomen = speler.voorraad[state.pack.rollen.geld] - geldVoor;
@@ -679,6 +695,7 @@ export function tick(state) {
   loyaliteitTick(state);
   aggregeerBlokken(state);
   faseTick(state);
+  bijsturingTick(state); // C18c: wie ver voorstaat, wekt wantrouwen (niets zonder meegroeiend)
   aiTick(state);
   aiContractenTick(state);
   legerTick(state);
@@ -729,6 +746,7 @@ export function applyOrder(state, o) {
     case 'bouw': return bouw(state, s, o.gebouw, o.tegel);
     case 'verbouw': return voerVerbouwUit(state, s, +o.tegel);
     case 'bouwrij': return voerBouwrijUit(state, s, o); // C17c
+    case 'markt': return voerMarktUit(state, s, o, opslagMax); // C18a
     case 'sloop': return voerSloopUit(state, s, +o.tegel);
     case 'beleid': return beleid(state, s, o);
     case 'hefboom': return voerHefboomUit(state, s, o.doel, o.actie);
@@ -806,7 +824,8 @@ export function verwachteWinst(state, payerIdx, doelIdx, h) {
   const uitspeel = t.uitspelen ? 1.2 : 1;
   const moeheid = 1 / (1 + state.pack.model.diplomatieke_moeheid * (t.moeheid[blok] || 0));
   const regime = t.regime === payer.regime ? 1 + state.pack.model.regime_hefboom : 1 - state.pack.model.regime_hefboom * 0.5;
-  return h.loyaliteit * sens * afnemend * kern * spanning * uitspeel * moeheid * regime;
+  // C18c: wie ver voorstaat, wekt wantrouwen; wie ver achter staat, is het tegenwicht (1 zonder meegroeiend).
+  return h.loyaliteit * sens * afnemend * kern * spanning * uitspeel * moeheid * regime * bijsturingFactor(state, blok, 'invloed');
 }
 
 export function voerHefboomUit(state, payerIdx, doelIdx, actieId) {
@@ -1005,5 +1024,5 @@ export function vingerafdruk(state) {
   const leger = state.eenheden.map((u) => `${u.id}:${u.t}:${u.hp.toFixed(2)}`).join(',');
   const regimes = state.landen.map((c) => c.regime[0]).join('');
   const keten = state.eventKeten.length ? `#k${state.eventKeten.map((k) => `${k.id}@${k.dag}@${k.land}`).join(',')}` : '';
-  return `${state.dag}#${state.rng}#${parts.join(';')}#${leger}#${state.oorlogen.length}#${regimes}#${state.kolonies.length}${contractenAfdruk(state)}${keten}${brandhaardenAfdruk(state)}${verbouwAfdruk(state)}${bouwrijAfdruk(state)}`;
+  return `${state.dag}#${state.rng}#${parts.join(';')}#${leger}#${state.oorlogen.length}#${regimes}#${state.kolonies.length}${contractenAfdruk(state)}${keten}${brandhaardenAfdruk(state)}${verbouwAfdruk(state)}${bouwrijAfdruk(state)}${marktAfdruk(state)}${bijsturingAfdruk(state)}`;
 }

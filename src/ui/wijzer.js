@@ -58,11 +58,13 @@ export const TEKST = {
   stilWonen: (g) => `Je bouwers staan stil. Een ${g} laat je bevolking groeien.`,
   stilGroei: (g) => `Je bouwers staan stil. Een ${g} laat je productie groeien.`,
   stilTekort: (g) => `Je bouwers staan stil. Een ${g} lost een tekort op.`,
+  volOmzetten: (res, g) => `Je hebt ${res} over: zet het om in groei. Bouw een ${g}.`, // C18a
+  rem: (res, g, waar) => `Je groei staat stil: te weinig ${res}. Bouw een ${g}, ${waar}.`, // C18b
   volOpslag: (res, g) => `Je opslag voor ${res} is vol: wat erbij komt, gaat verloren. Een ${g} geeft meer ruimte.`,
   volVerbruik: (res, g) => `Je opslag voor ${res} is vol: wat erbij komt, gaat verloren. Een ${g} gebruikt het.`,
 };
 const RICHTING = ['oosten', 'zuidoosten', 'zuiden', 'zuidwesten', 'westen', 'noordwesten', 'noorden', 'noordoosten'];
-const ICOON = { tekort: '⚠', dreiging: '⚔', brandhaard: '🔥', kolonie: '🚩', stil: '🔨', vol: '📦' };
+const ICOON = { tekort: '⚠', dreiging: '⚔', brandhaard: '🔥', kolonie: '🚩', stil: '🔨', vol: '📦', rem: '⛏' };
 
 const spelerVan = (s) => s.landen[s.speler];
 const rond = (v) => Math.round(v);
@@ -138,6 +140,23 @@ function tekortKandidaten(s, ctx, niveau) {
       zin: niveau === 'rood' ? TEKST.rood(resNaam(s, x.r), gebouwNaam(s, o.gebouw), waarTekst(s, p.gebied))
         : TEKST.oranje(resNaam(s, x.r), Math.max(1, rond(isFinite(x.dagen) ? x.dagen : 1)), gebouwNaam(s, o.gebouw), waarTekst(s, p.gebied)),
       r: x.r, waarom: { type: 'oplosser', r: x.r },
+    }));
+    if (k) uit.push(k);
+  }
+  return uit;
+}
+
+// C18b: de bouwgrondstof remt je groei (niveau 'rem' uit c18a): bouw de producent die de meter als eerste noemt.
+function remKandidaten(s, ctx) {
+  const uit = [];
+  for (let i = 0; i < ctx.lijst.length; i++) {
+    const x = ctx.lijst[i];
+    if (x.niveau !== 'rem' || x.rol !== 'grondstof' || komtAl(s, x.r)) continue;
+    const o = oplossers(s, x.r, 2, ctx.lijst).find((y) => y.gebouw && y.kan);
+    if (!o) continue;
+    const k = bouwKandidaat(s, ctx, o.gebouw, (p) => ({
+      sleutel: `rem:${x.r}`, soort: 'rem', icoon: x.icoon || ICOON.rem, dekt: `rem:${x.r}`, r: x.r, waarom: { type: 'oplosser', r: x.r },
+      zin: TEKST.rem(resNaam(s, x.r).toLowerCase(), gebouwNaam(s, o.gebouw), waarTekst(s, p.gebied)),
     }));
     if (k) uit.push(k);
   }
@@ -225,15 +244,15 @@ function volKandidaten(s, ctx) {
     const res = resNaam(s, x.r).toLowerCase();
     const k = bouwKandidaat(s, ctx, o.gebouw, () => ({
       sleutel: `vol:${x.r}`, soort: 'vol', icoon: x.icoon || ICOON.vol, dekt: null, r: x.r, waarom: { type: 'oplosser', r: x.r },
-      zin: (o.soort === 'opslag' ? TEKST.volOpslag : TEKST.volVerbruik)(res, gebouwNaam(s, o.gebouw)),
+      zin: (o.soort === 'opslag' ? TEKST.volOpslag : o.soort === 'omzetten' ? TEKST.volOmzetten : TEKST.volVerbruik)(res, gebouwNaam(s, o.gebouw)),
     }));
     if (k) uit.push(k);
   }
   return uit;
 }
 
-// Alle kandidaten in volgorde van belang: rood tekort, dreiging met een plek, oranje tekort, lege kolonie, stilstaande
-// bouwers, volle opslag. mag(k) filtert (doelbalk, afkoelen, weggetikt); max stopt zodra er genoeg zijn (scheelt
+// Alle kandidaten in volgorde van belang: rood tekort, dreiging met een plek, rem (C18b), oranje tekort, lege kolonie,
+// stilstaande bouwers, volle opslag. mag(k) filtert (doelbalk, afkoelen, weggetikt); max stopt zodra er genoeg zijn (scheelt
 // rekenwerk). ctx: { lijst?, bekekenGebied, stilSinds, volSinds }. Elke kandidaat:
 // { sleutel, soort, icoon, zin, knop, dekt, gebied, tegel, actie: { type: 'bouw'|'zoalsthuis'|'tab'|'kijk', gebouw?, tab? }, waarom? }
 export function kandidaten(s, ctx = {}, mag = () => true, max = Infinity) {
@@ -242,6 +261,7 @@ export function kandidaten(s, ctx = {}, mag = () => true, max = Infinity) {
   const stappen = [
     () => tekortKandidaten(s, c, 'rood'),
     () => dreigingKandidaten(s),
+    () => remKandidaten(s, c),
     () => tekortKandidaten(s, c, 'oranje'),
     () => kolonieKandidaten(s),
     () => stilKandidaat(s, c),
@@ -262,6 +282,8 @@ export function kandidaten(s, ctx = {}, mag = () => true, max = Infinity) {
 // Mag deze kandidaat nu? Niet wat de doelbalk al toont, niet weggetikt (WEG_DAGEN), niet kort na de vorige keer.
 export function magTonen(s, k, ctx) {
   if (k.dekt && k.dekt === ctx.doelId) return false;
+  // C18b: licht het ? op (achter of gevaar), dan neemt het ? 'stil' en 'vol' over; rode tekorten en dreigingen blijven.
+  if (ctx.hulpLicht && (k.soort === 'stil' || k.soort === 'vol')) return false;
   const w = ctx.weg?.[k.sleutel];
   // Review: een dag ná vandaag komt uit een ander potje met dezelfde pack en seed (de seed staat standaard op 2026).
   if (w != null && w <= s.dag && s.dag - w < WEG_DAGEN) return false;
@@ -271,7 +293,7 @@ export function magTonen(s, k, ctx) {
 }
 
 // Het ene kaartje dat nu getoond mag worden, of null. ctx: { doelId, weg: {sleutel: dag}, getoond: {sleutel: {dag, ms}},
-// nuMs, laatsteMs, bekekenGebied, stilSinds, volSinds, lijst? }.
+// nuMs, laatsteMs, bekekenGebied, stilSinds, volSinds, lijst?, hulpLicht? }.
 export function kiesWijzer(s, ctx = {}) {
   if (!s || s.uitkomst) return null;
   if (ctx.laatsteMs != null && (ctx.nuMs ?? 0) - ctx.laatsteMs < AFKOEL_MS) return null;
@@ -517,6 +539,7 @@ export function maakWijzer(api) {
     const k = kiesWijzer(s, {
       doelId: api.doelbalk?.huidig?.()?.id ?? null, weg: w.weg, getoond: w.getoond, nuMs: now, laatsteMs: w.laatsteMs,
       bekekenGebied: api.gebieden?.huidig?.() ?? -1, stilSinds: w.mem.stilSinds, volSinds: w.mem.volSinds, lijst,
+      hulpLicht: !!w.hulpLicht?.(),
     });
     if (k) toon(k, now);
   }
@@ -554,5 +577,15 @@ export function maakWijzer(api) {
   const menuHtml = () => `<label class="check wz-schakel"><input type="checkbox" id="m-wijzer" ${w.aan ? 'checked' : ''}> ${esc(TEKST.schakelaar)}</label>`;
   const bindMenu = (root) => { const i = root.querySelector('#m-wijzer'); if (i) i.onchange = () => zetAan(i.checked); };
 
-  return { gaNaar, zetAan, menuHtml, bindMenu, huidig: () => w.k, open: () => !el.hidden, geheugen: w };
+  // C18b: het ? meldt welke stap het net toonde (dan niet dubbel als wijzerkaartje) en of het oplicht.
+  function doorHulpGetoond(sleutel) {
+    const s = ui.state;
+    if (!s || !sleutel) return;
+    const k = String(sleutel).replace(/^wijzer:/, '');
+    w.getoond[k] = { dag: s.dag, ms: w.nu };
+    if (w.k?.sleutel === k) verberg();
+  }
+  const zetHulp = (licht) => { w.hulpLicht = licht; };
+
+  return { gaNaar, zetAan, menuHtml, bindMenu, huidig: () => w.k, open: () => !el.hidden, geheugen: w, bouwDaar, voerUit, vlieg, doorHulpGetoond, zetHulp };
 }

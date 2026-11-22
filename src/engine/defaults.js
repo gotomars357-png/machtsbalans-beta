@@ -53,6 +53,17 @@ export const DEFAULT_MODEL = {
   prijs_referentie: 120,
   onderhoud_per_gebouw: 0.5,
   max_bouw: 2,
+  // C18a "groei loopt door" (alleen met instellingen.groei, dus nieuwe potjes):
+  kosten_schaal_grondstof: 0.08, // de bouwgrondstof stijgt per gebouw van dezelfde soort met 8% (het geld blijft op kosten_schaal)
+  markt_basis: 9,             // wereldmarkt: prijs in geld van één eenheid bouwgrondstof zonder druk
+  markt_diepte: 400,          // de druk stijgt met gekocht / diepte (400 gekocht: prijs ×2)
+  markt_herstel: 0.02,        // de druk zakt elke dag met 2%
+  markt_max_per_dag: 50,      // hooguit zoveel kopen per dag
+  markt_verkoop: 0.1,         // overschot boven het opslagplafond wordt verkocht voor dit deel van markt_basis per eenheid
+  rem_geld: 3,                // en geld op 'rem' als je bouwers ruimte hebben en je zoveel keer de prijs van een groeigebouw hebt liggen
+  rem_netto: 3,               // de meter toont 'rem' als de bouwgrondstof te laag is voor het volgende groeigebouw en er minder dan dit per dag binnenkomt
+  rem_dagen: 15,              // ... of als sparen voor dat gebouw langer duurt dan zoveel dagen
+  markt_koop: 50,             // de marktknop op het kaartje koopt zoveel
   bouwrij_max: 8,             // C17c: hooguit zoveel gebouwen in de wachtrij van één gebied ("Bouw zoals thuis")
   bouwrij_buffer: 0.25,       // C17c: de wachtrij laat van elke grondstof minstens dit deel van de voorraad over
   bouwrij_wacht: 60,          // C17c: zo lang wacht een item op geld, daarna vervalt het
@@ -103,6 +114,34 @@ export const DEFAULT_MODEL = {
   brandhaard_afkoeling: 120,    // dezelfde soort komt in hetzelfde land pas na zoveel dagen terug
   brandhaard_ai_drempel: 20,    // vanaf deze druk pakt een AI-land een haard aan (vóór de eerste trap op 33)
   brandhaard_stilte: 80,        // na zoveel stille dagen bij de speler (geen haard, gebeurtenis of oorlog) loopt de kans op
+  // C18c Meegroeiend (alleen met instellingen.meegroeiend): wie ver voorstaat in voortgang naar zijn beste winroute,
+  // wekt wantrouwen bij de zwevende landen; na een zware klap volgt een wapenrust. Zie src/engine/bijsturing.js.
+  // Per moeilijkheid: leider_rem (AI-blok als leider), speler_rem (jij als leider), steun_max, rust_oorlog.
+  meegroeiend: {
+    rem_vanaf: 0.15, // voorsprong (in voortgang naar de beste winroute) waarboven het wantrouwen begint
+    rem_min: 0.5, // de invloed van een leider zakt nooit verder dan dit
+    speler_rem_vanaf: 0.3, // de speler als leider: de rem begint pas bij deze voorsprong (anders kost hij net-gewonnen potjes)
+    steun_vanaf: 0.2, // achterstand op de leider waarboven de zwevende landen een tegenwicht zoeken
+    steun_ai: 1, // 1: ook een AI-blok dat ver achter staat krijgt steun (0: alleen de speler)
+    steun_helling: 1.0, // zoveel extra invloed per punt achterstand boven steun_vanaf (tot steun_max)
+    trek: 1, // 1: de factor geldt ook voor de vanzelf werkende aantrekkingskracht (buren en blokzwaartekracht)
+    stap_per_dag: 0.01, // de factor beweegt hooguit zoveel per dag
+    melding_aan: 0.05, // een rem of steun wordt gemeld zodra de factor zoveel van 1 afwijkt
+    melding_uit: 0.01, // en losgelaten als hij weer zo dicht bij 1 is
+    achter_drempel: 0.1, // ernst 'achter': de beste AI staat zoveel voor ...
+    achter_dagen: 10, // ... zoveel dagen op rij
+    gevaar_dagen: 90, // ernst 'gevaar': een AI-blok wint naar verwachting binnen zoveel dagen
+    gevaar_stab: 15, // of: al een revolutie gehad en de stabiliteit onder deze waarde
+    gevaar_oorlog: 0.6, // of: in oorlog en jouw leger is minder dan dit deel van het hunne
+    trend_dagen: 60, // over zoveel dagen kijkt de schatting naar de trend
+    rust_dagen: 60, // zo lang duurt de wapenrust na een zware klap
+    rust_interval: 200, // hooguit eens per zoveel dagen
+    rust_y_verlies: 0.25, // een zware klap: zoveel van je productie kwijt binnen rust_y_dagen
+    rust_y_dagen: 60,
+    makkelijk: { leider_rem: 1.8, speler_rem: 0.2, speler_rem_vanaf: 0.15, steun_max: 1.15, steun_ai: 0, rust_oorlog: 0.2 },
+    normaal: { leider_rem: 1.5, speler_rem: 0.3, steun_max: 1.0, rust_oorlog: 0.3 },
+    moeilijk: { leider_rem: 1.5, speler_rem: 0.5, steun_max: 1.0, rust_oorlog: 0.6 },
+  },
   // Verbouwen en slopen (C15c). Per niveau (1, 2, 3): effect, verbruik en onderhoud als factor op het gebouw.
   // kosten en bouwtijd per stap (1→2, 2→3) als factor op de bouwkosten en bouwtijd; tijdens = kracht tijdens de verbouwing.
   // sloop_terug: deel van alles wat erin zat dat je terugkrijgt; sloop_oorlog_afstand: vakjes tot een vijandelijke eenheid.
@@ -164,6 +203,13 @@ export const DEFAULT_KRANT = {
       sub: ['Niet iedereen is blij met de koerswijziging', 'Partners vragen om uitleg'] },
     kolonie: { goed: ['Kolonie gesticht: {speler} vestigt zich overzee', 'Eerste kolonisten van {speler} gaan aan land'], slecht: [],
       sub: ['Het nieuwe gebied heeft nog alles nodig', 'Het centrum werkt als nieuw knooppunt'] },
+    // C18c Meegroeiend: wie ver voorstaat, wekt wantrouwen; na een zware klap komt er even rust.
+    te_machtig: { goed: ['De zwevende landen vinden {blok} te machtig', 'Wantrouwen tegen {blok} groeit'], slecht: [],
+      sub: ['Kleine landen houden de boot af', 'Een tegenwicht is welkom'] },
+    nerveus: { goed: [], slecht: ['Je buren worden nerveus', 'Zwevende landen houden afstand van {spelerblok}'],
+      sub: ['Wie ver voorstaat, krijgt tegenwind', 'Overtuigen kost nu meer moeite'] },
+    wapenrust: { goed: ['{blok} houdt zich even koest', 'Adempauze voor {speler}'], slecht: [],
+      sub: ['Tijd om de schade te herstellen', 'De rust duurt niet eeuwig'] },
     einde_winst: { goed: ['{spelerblok} wint de strijd om de wereld', 'Historische dag voor {speler}'], slecht: [],
       sub: ['Een tijdperk is ten einde', 'In de hoofdstad wordt gefeest'] },
     einde_verlies: { goed: [], slecht: ['Het spel is uit voor {speler}', 'Nederlaag voor {spelerblok}'],

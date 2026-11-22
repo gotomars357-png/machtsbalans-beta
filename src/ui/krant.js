@@ -70,6 +70,8 @@ export function krantFoto(state) {
   return {
     dag: state.dag, faseIdx: state.faseIdx, aandeel: blok?.aandeel ?? 0, leden, oorlogen, haarden, blokken,
     logLen: state.log.length, logLaatste: state.log[state.log.length - 1] ?? null, uitkomst: !!state.uitkomst,
+    // C18c Meegroeiend: welke blokken geremd zijn (-1) of steun krijgen (1), en het begin van een wapenrust.
+    mg: state.bijsturing ? { gemeld: { ...state.bijsturing.gemeld }, rustVan: state.bijsturing.rust?.van ?? null, rivaal: state.bijsturing.rust?.rivaal ?? null } : null,
   };
 }
 
@@ -118,6 +120,20 @@ export function krantMomenten(vorige, nu, state, gemeld = new Set()) {
       gemeld.add(k);
       const eigen = b.id === state.spelerBlok;
       zet('bijna', 3, eigen ? 'goed' : 'slecht', { blok: state.blokken.find((x) => x.id === b.id)?.naam ?? b.id });
+    }
+  }
+  // C18c: de machtsbalans slaat aan (alleen bij aanslaan, nooit elke dag; loslaten haalt de krant niet).
+  if (nu.mg) {
+    const was = vorige.mg?.gemeld ?? {};
+    for (const b of state.blokken) {
+      if ((nu.mg.gemeld[b.id] ?? 0) !== -1 || (was[b.id] ?? 0) === -1) continue;
+      if (b.id === state.spelerBlok) zet('nerveus', 3, 'slecht', { blok: b.naam });
+      else zet('te_machtig', 3, 'goed', { blok: b.naam });
+    }
+    if (nu.mg.rustVan != null && nu.mg.rustVan !== (vorige.mg?.rustVan ?? null)) {
+      const r = nu.mg.rivaal;
+      const naam = r?.startsWith('land:') ? state.landen[+r.slice(5)]?.naam : state.blokken.find((x) => x.id === r)?.naam;
+      if (naam) zet('wapenrust', 3, 'goed', { blok: naam });
     }
   }
   if (nu.oorlogen > vorige.oorlogen) zet('oorlog', 3, 'slecht');

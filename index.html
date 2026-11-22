@@ -21,6 +21,7 @@
   <link rel="stylesheet" href="css/bewaren.css">
   <link rel="stylesheet" href="css/gebieden.css">
   <link rel="stylesheet" href="css/wijzer.css">
+  <link rel="stylesheet" href="css/hulpknop.css">
 </head>
 <body>
   <!-- Startscherm: wereld kiezen, validatie zien, instellingen -->
@@ -53,6 +54,7 @@
               </select>
             </label>
             <label>Seed <input id="opt-seed" type="number" value="2026"></label>
+            <label class="check meegroeiend" title="Wie ver voorstaat, krijgt meer tegenwind. Jij ook. Na een zware klap krijg je even rust."><input id="opt-meegroeiend" type="checkbox" checked> <span>Meegroeiend<small>Wie ver voorstaat, krijgt meer tegenwind. Jij ook.</small></span></label>
             <label class="check"><input id="opt-onboarding" type="checkbox" checked> Fasen en onboarding</label>
             <label class="check"><input id="opt-events" type="checkbox" checked> Gebeurtenissen</label>
             <label class="check"><input id="opt-schokken" type="checkbox" checked> Wereldschokken</label>
@@ -91,6 +93,7 @@
     <main id="hoofd">
       <div id="kaart-wrap">
         <canvas id="kaart"></canvas>
+        <button id="hulpknop" type="button" class="hulpknop stand-grijs" aria-label="Hulp: wat is nu de beste stap?" hidden>?</button>
         <div class="kaart-knoppen">
           <button data-kaart="in" title="Inzoomen (scrollwiel)">+</button>
           <button data-kaart="uit" title="Uitzoomen">−</button>

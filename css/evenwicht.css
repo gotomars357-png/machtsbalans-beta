@@ -105,3 +105,17 @@ body[data-onderpaneel] .krant-kaart, body[data-onderpaneel] .sessiekaart { displ
   .oplosser .ev-bouw { min-height: 44px; min-width: 72px; justify-content: center; }
   body[data-onderpaneel="oplosser"] #toasts { bottom: calc(45svh + 8px); }
 }
+
+/* ---------- C18a: 'rem' (bouwgrondstof remt je groei) en de marktknop ---------- */
+:root { --ev-rem: #f0923a; }
+.res.niv-rem { border-color: var(--ev-rem); box-shadow: 0 0 0 1px var(--ev-rem) inset; background: rgba(240,146,58,.08); }
+.res.niv-rem .ev-tag { background: var(--ev-rem); color: #1d0e00; }
+.res.niv-rem .ev-tag::before { content: '🔒'; font-size: 8px; margin-right: 2px; }
+.res.niv-rem .ev-vul i { background: var(--ev-rem); }
+.ev-meter.niv-rem { border-color: var(--ev-rem); }
+.ev-meter.niv-rem .ev-bol { background: var(--ev-rem); box-shadow: 0 0 8px var(--ev-rem); }
+.oplosser .ev-label.niv-rem { background: var(--ev-rem); color: #1d0e00; }
+.oplosser .ev-verkocht { color: var(--ev-goud); }
+.oplosser .ev-markt { white-space: nowrap; }
+/* C18a: op de telefoon geen slotje in het label, anders bedekt het de waarde van de chip. */
+@media (max-width: 600px) { #resources .res.niv-rem .ev-tag::before { content: none; } }

@@ -10,6 +10,7 @@ import { woningCapaciteit, campagneStatus } from '../engine/samenleving.js';
 import { mediaStatus, overnameStatus } from '../engine/media.js';
 import { brandhaardenVan, brandhaardSoort, dagenOver, goedkoopsteActie } from '../engine/brandhaarden.js';
 import { actieveVerbouw } from '../engine/verbouw.js';
+import { toestand } from './evenwicht.js'; // C18b: de rem-regel in kiesDoel
 
 const KIES_INTERVAL = 3000; // zo vaak mag de balk naar een ander doel springen
 const VERNIEUW = 700; // voortgang en "bijna klaar" vaker bijwerken
@@ -399,9 +400,24 @@ export function kiesDoel(s, { zonderDreiging = false } = {}) {
   ];
   for (const f of reeks) {
     const d = f(s);
-    if (d) return d;
+    if (d) return remVoorrang(s, d);
   }
   return null;
+}
+
+// C18b: wacht een bouwdoel op de bouwgrondstof terwijl die op 'rem' staat, dan gaat de producent voor ("Bouw: Mijn").
+// Zo spaart de balk niet maandenlang op een gebouw waarvoor de grondstof nooit binnenkomt.
+function remVoorrang(s, d) {
+  if (!d.naar?.gebouw) return d;
+  const k = bouwKans(s, s.pack.gebouwIndex[d.naar.gebouw]);
+  if (!k.kan || !k.wacht) return d;
+  const c = speler(s);
+  const rem = toestand(s).find((x) => x.niveau === 'rem' && x.rol === 'grondstof' && (k.kosten[x.r] ?? 0) > (c.voorraad[x.r] ?? 0));
+  if (!rem) return d;
+  const r = rem.r;
+  if (s.pack.gebouwen.some((g) => (g.productie?.[r] ?? 0) > 0 && c.bouw.some((b) => b.gebouw === g.id))) return d; // er komt er al een aan
+  const g = besteGebouw(s, (x) => (x.productie?.[r] ?? 0) > 0 && !(x.verbruik?.[r] > 0), (x) => x.productie[r]);
+  return (g && bouwDoel(s, g, { id: `rem:${r}`, waarom: `Je groei staat stil: te weinig ${s.pack.resIndex[r]?.naam.toLowerCase() ?? 'grondstof'}` })) || d;
 }
 
 // Kiest het doel en onthoudt (in geheugen, niet in de spelstand) hoe lang dezelfde dreiging al staat. Blijft een

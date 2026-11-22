@@ -12,6 +12,8 @@
 import * as sim from '../engine/sim.js';
 import { actieveVerbouw } from '../engine/verbouw.js';
 import * as onderpaneel from './onderpaneel.js';
+import { marktStatus, groeiAan } from '../engine/markt.js'; // C18a
+import { meldOrder } from './ordersignaal.js'; // C18a: de marktknop geeft zelf een order
 
 export { actieveVerbouw }; // main.js telt projecten met dezelfde helper (afspraak 7)
 
@@ -29,10 +31,17 @@ export const TERUGVAL = {
   stab: 'Onder 30 dreigen onrust en de val van je regering.',
   vol: 'Je opslag is vol: wat er nog bij komt, gaat verloren.',
   vol_tip: 'Bouw extra opslag, iets dat dit verbruikt, of bouw voorlopig minder van wat het maakt.',
+  // C18a: met groei wordt het overschot verkocht, en 'rem' zegt dat de bouwgrondstof je groei tegenhoudt.
+  vol_verkocht: 'Het overschot wordt vanzelf verkocht.',
+  vol_omzetten: (naam) => `Je hebt ${naam} over: zet het om in groei.`,
+  rem: (naam, gebouw, nodig, heb, trend) => `Je groei staat stil: te weinig ${naam}. Een ${gebouw} vraagt ${nodig}, je hebt ${heb}, en er komt ${trend} per dag bij.`,
+  geld_rem: (geld, gebouw) => `Je geld ligt stil: ${geld} ◈ en je bouwers hebben ruimte. Een ${gebouw} laat je land groeien.`,
+  rem_tip: 'Een producent kost alleen geld. Op de markt koop je direct, maar elke keer iets duurder.',
+  verkocht: (geld) => `+${geld} ◈ per dag uit verkocht overschot`,
   geld_tip: 'Of verhoog de belasting in Economie, en bouw even niets bij.',
   stab_tip: 'Verlaag de belasting of verhoog de sociale verdeling in Economie.',
 };
-const NIVEAU_RANG = { rood: 3, oranje: 2, goud: 1, neutraal: 0 };
+const NIVEAU_RANG = { rood: 3, oranje: 2, rem: 1.5, goud: 1, neutraal: 0 }; // C18a: rem gaat boven een volle opslag
 
 const rond = (v) => Math.round(v);
 const komma = (v, d = 1) => v.toFixed(d).replace('.', ',');
@@ -90,6 +99,45 @@ function brutoBalans(s, c, rid) {
 
 // ---------- toestand ----------
 
+// C18a: het groeigebouw (kapitaalvoorraad) dat je nu kunt bouwen met de meeste kapitaal per prijs, als je bouwers
+// ruimte hebben. { gebouw, naam, prijs } of null. Zelfde toetsen als sim.bouw, zonder bouwKaartData (dat leest toestand).
+export function groeiNu(s, c) {
+  const P = s.pack;
+  if (c.bouw.length + actieveVerbouw(c) >= P.model.max_bouw) return null;
+  let best = null;
+  for (let i = 0; i < P.gebouwen.length; i++) {
+    const g = P.gebouwen[i];
+    if (!(g.kapitaalvoorraad > 0) || g.knooppunt || g.categorie || !sim.isOntgrendeld(s, g.id)) continue;
+    const kosten = sim.bouwKosten(s, c, g.id);
+    if (!sim.kanBetalen(c, kosten) || sim.vrijePlekken(s, c, g.id) <= 0) continue;
+    const prijs = sim.kostenInGeld(s, kosten);
+    const score = g.kapitaalvoorraad / Math.max(1, prijs);
+    if (!best || score > best.score) best = { gebouw: g.id, naam: g.naam, prijs, score };
+  }
+  return best;
+}
+
+// C18a: het goedkoopste ontgrendelde groeigebouw (kapitaalvoorraad, tech of woningen, met een vrije plek) dat je nu niet
+// kunt betalen door te weinig bouwgrondstof rid. { gebouw, naam, nodig, heb } of null.
+export function volgendGroeigebouw(s, c, rid) {
+  const P = s.pack;
+  const tech = P.rollen.tech;
+  const heb = c.voorraad[rid] ?? 0;
+  let best = null;
+  for (let i = 0; i < P.gebouwen.length; i++) {
+    const g = P.gebouwen[i];
+    if (g.knooppunt || g.categorie) continue;
+    if (!(g.kapitaalvoorraad > 0 || (tech && (g.productie?.[tech] ?? 0) > 0) || g.woningen > 0)) continue;
+    if (!sim.isOntgrendeld(s, g.id) || sim.vrijePlekken(s, c, g.id) <= 0) continue;
+    const kosten = sim.bouwKosten(s, c, g.id);
+    const nodig = kosten[rid] ?? 0;
+    if (nodig <= heb) continue;
+    const prijs = sim.kostenInGeld(s, kosten);
+    if (!best || prijs < best.prijs || (prijs === best.prijs && g.id < best.gebouw)) best = { gebouw: g.id, naam: g.naam, nodig, heb: Math.floor(heb), prijs };
+  }
+  return best;
+}
+
 // Per ontgrendelde grondstof: voorraad, opslag, trend (per dag), dagen tot leeg en een niveau.
 // Niveaus: rood (ratio < 1: de productie valt stil; kapitaal onder nul; stabiliteit onder 30), oranje (leeg binnen
 // waarschuw_dagen), goud (opslag vol en de trend positief) en neutraal.
@@ -119,6 +167,11 @@ export function toestand(s) {
       if (item.trend < 0) item.dagen = Math.max(0, item.voorraad) / -item.trend;
       if (item.voorraad < 0) { item.niveau = 'rood'; item.kort = 'schuld'; }
       else if (item.trend < 0 && item.dagen < waarschuw) { item.niveau = 'oranje'; item.kort = `nog ${Math.max(1, rond(item.dagen))} d`; }
+      else if (groeiAan(s)) {
+        // C18a: je bouwers hebben ruimte en je geld stapelt op terwijl een groeigebouw nu kan: je geld ligt stil.
+        const v = groeiNu(s, c);
+        if (v && item.voorraad >= (P.model.rem_geld ?? 3) * v.prijs) { item.niveau = 'rem'; item.kort = 'ligt stil'; item.rem = v; }
+      }
     } else {
       item.voorraad = c.voorraad[r.id] ?? 0;
       item.cap = sim.opslagMax(s, c, r.id);
@@ -135,6 +188,12 @@ export function toestand(s) {
         if (item.trend < 0) item.dagen = item.voorraad / -item.trend;
         if (item.trend < 0 && item.dagen < waarschuw) { item.niveau = 'oranje'; item.kort = `nog ${Math.max(1, rond(item.dagen))} d`; }
         else if (r.vol_waarschuwing !== false && isFinite(item.cap) && item.voorraad >= item.cap * VOL_MARGE && item.netto > 0) { item.niveau = 'goud'; item.kort = 'vol'; }
+        else if (r.rol === 'grondstof' && groeiAan(s)) {
+          // C18a: te weinig bouwgrondstof voor het volgende groeigebouw, en er komt te weinig binnen: dat remt je groei.
+          const v = volgendGroeigebouw(s, c, r.id);
+          const wacht = v && item.trend > 0 ? (v.nodig - v.heb) / item.trend : Infinity;
+          if (v && (item.trend < (P.model.rem_netto ?? 3) || wacht > (P.model.rem_dagen ?? 15))) { item.niveau = 'rem'; item.kort = 'rem'; item.rem = { ...v, wacht }; }
+        }
       }
     }
     uit.push(item);
@@ -149,12 +208,17 @@ export function ergste(s, lijst = toestand(s)) {
   for (const x of lijst) {
     if (x.niveau === 'neutraal') continue;
     n += 1;
-    if (!best || NIVEAU_RANG[x.niveau] > NIVEAU_RANG[best.niveau] || (NIVEAU_RANG[x.niveau] === NIVEAU_RANG[best.niveau] && x.dagen < best.dagen)) best = x;
+    const gelijk = best && NIVEAU_RANG[x.niveau] === NIVEAU_RANG[best.niveau];
+    // C18a: bij twee keer rem gaat de bouwgrondstof voor het stilliggende geld (die rem lost het geld juist op).
+    if (!best || NIVEAU_RANG[x.niveau] > NIVEAU_RANG[best.niveau] || (gelijk && x.dagen < best.dagen) || (gelijk && x.niveau === 'rem' && best.r === s.pack.rollen.geld && x.r !== best.r)) best = x;
   }
   return { item: best, niveau: best?.niveau ?? 'neutraal', aantal: n };
 }
 
 // ---------- uitsplitsing ----------
+
+// C18a: de verkoop van overschot van de laatste speldag (de engine zet hem elke dag opnieuw).
+const verkochtVandaag = (s, c) => groeiAan(s) && c.verkochtDag === s.dag;
 
 // Waar een grondstof vandaan komt en waar hij heen gaat, per gebouw plus de vaste vraag. Plus wat er al in de bouw is.
 export function uitsplitsing(s, rid) {
@@ -169,6 +233,7 @@ export function uitsplitsing(s, rid) {
     const bel = (c.Y ?? 0) * (c.belasting ?? 0);
     maakt.push({ naam: 'Belasting', waarde: bel * (1 - (c.verdeling ?? 0)) });
     if ((c.onderhoud ?? 0) > 0) verbruikt.push({ naam: 'Onderhoud gebouwen en leger', waarde: c.onderhoud });
+    if (verkochtVandaag(s, c) && c.verkoopGeld > 0) maakt.push({ naam: 'Verkocht overschot', icoon: '⚖', waarde: c.verkoopGeld, verkocht: true });
   }
   if (rid === R.stabiliteit) {
     for (const [naam, d] of c.stabFactoren || []) (d >= 0 ? maakt : verbruikt).push({ naam, waarde: Math.abs(d) });
@@ -184,6 +249,7 @@ export function uitsplitsing(s, rid) {
   }
   if (rid === R.energie) verbruikt.push({ naam: 'Productie van je land', waarde: (c.Y ?? 0) * (M.energie_per_productie ?? 0) });
   if (rid === R.voedsel) verbruikt.push({ naam: 'Inwoners', waarde: (c.L ?? 0) * (M.voedsel_per_inwoner ?? 0) });
+  if (verkochtVandaag(s, c) && (c.verkocht?.[rid] ?? 0) > 0) verbruikt.push({ naam: 'Verkocht (opslag vol)', icoon: '⚖', waarde: c.verkocht[rid], verkocht: true });
   for (let i = 0; i < c.bouw.length; i++) {
     const b = c.bouw[i];
     const g = P.gebouwIndex[b.gebouw];
@@ -304,12 +370,17 @@ export function oplossers(s, rid, max = AANBEVOLEN_MAX, lijst = toestand(s)) {
   const item = lijst.find((x) => x.r === rid);
   if (!item) return [];
   const vol = item.niveau === 'goud';
+  // C18a: staat een andere grondstof op rem, dan raadt een volle opslag geen opslag aan (dat kost juist bouwgrondstof),
+  // maar de producent van wat ontbreekt: zet het overschot om in groei.
+  const rem = vol ? lijst.find((x) => x.niveau === 'rem' && x.rol === 'grondstof' && x.r !== rid) : null;
+  const doelR = rem ? rem.r : rid;
   const kandidaten = [];
   for (let i = 0; i < P.gebouwen.length; i++) {
     const g = P.gebouwen[i];
     let soort = null;
     if (rid === R.stabiliteit) { if (g.stabiliteit > 0) soort = 'stab'; }
-    else if (rid === R.geld) { if ((g.productie?.[rid] ?? 0) > 0 || (g.kapitaalvoorraad > 0 && !g.knooppunt)) soort = 'geld'; }
+    else if (rid === R.geld) { if (item.niveau === 'rem' ? g.kapitaalvoorraad > 0 && !g.knooppunt && !g.categorie : (g.productie?.[rid] ?? 0) > 0 || (g.kapitaalvoorraad > 0 && !g.knooppunt)) soort = 'geld'; }
+    else if (rem) { if ((g.productie?.[doelR] ?? 0) > 0) soort = 'omzetten'; }
     else if (vol) {
       if (g.opslag_bonus > 0) soort = 'opslag';
       else if ((g.verbruik?.[rid] ?? 0) > 0) soort = 'verbruiker';
@@ -317,19 +388,47 @@ export function oplossers(s, rid, max = AANBEVOLEN_MAX, lijst = toestand(s)) {
     if (!soort) continue;
     const data = bouwKaartData(s, g.id, lijst);
     const per = data.effect?.per ?? effectVan(s, g.id).per;
-    const delta = soort === 'opslag' ? g.opslag_bonus : soort === 'stab' ? g.stabiliteit : soort === 'verbruiker' ? -(per[rid] ?? 0) : per[rid] ?? 0;
+    const delta = soort === 'opslag' ? g.opslag_bonus : soort === 'stab' ? g.stabiliteit : soort === 'verbruiker' ? -(per[rid] ?? 0) : per[doelR] ?? 0;
     const prijs = sim.kostenInGeld(s, sim.bouwKosten(s, spelerVan(s), g.id)) || 1;
     const zelf = soort === 'maakt' && (g.verbruik?.[rid] ?? 0) > 0;
     kandidaten.push({
-      gebouw: g.id, naam: g.naam, icoon: g.icoon ?? '', soort, delta, voor: item.trend, na: soort === 'maakt' || soort === 'geld' ? item.trend + (per[rid] ?? 0) : null,
+      gebouw: g.id, naam: g.naam, icoon: g.icoon ?? '', soort, delta, voor: rem ? rem.trend : item.trend,
+      na: soort === 'maakt' || soort === 'geld' ? item.trend + (per[rid] ?? 0) : soort === 'omzetten' ? rem.trend + (per[doelR] ?? 0) : null, r: doelR,
       verbruiktZelf: zelf, slot: !sim.isOntgrendeld(s, g.id), score: delta / prijs, prijs, ...data,
     });
   }
   const volgorde = { opslag: 0, verbruiker: 1 };
   kandidaten.sort((a, b) => (a.verbruiktZelf - b.verbruiktZelf) || ((volgorde[a.soort] ?? 0) - (volgorde[b.soort] ?? 0))
-    || (a.slot - b.slot) || (b.kan - a.kan) || (rid === R.geld ? a.prijs - b.prijs : b.score - a.score) // kapitaal: de goedkoopste
+    || (a.slot - b.slot) || (b.kan - a.kan) || (rid === R.geld && item.niveau !== 'rem' ? a.prijs - b.prijs : b.score - a.score) // kapitaal: de goedkoopste; bij rem de meeste groei per prijs
     || (a.gebouw < b.gebouw ? -1 : 1));
-  return kandidaten.filter((k) => k.delta > 0).slice(0, max);
+  const uit = kandidaten.filter((k) => k.delta > 0).slice(0, max);
+  // C18a: bij een rem eerst de producent(en), dan de marktaankoop (alleen met groei).
+  if (item.niveau === 'rem') {
+    const m = marktOplosser(s, rid, item);
+    // Eén kaartje, twee keuzes: de beste producent en de markt (zo past het op een telefoon zonder scrollen).
+    if (m) { uit.length = Math.min(uit.length, 1, Math.max(0, max - 1)); uit.push(m); }
+  }
+  return uit;
+}
+
+// De marktaankoop als oplosser: { soort: 'markt', gebouw: null, actie: { type: 'markt', grondstof, hoeveel }, kan, reden, ... }.
+export function marktOplosser(s, rid, item = null) {
+  if (!groeiAan(s)) return null;
+  const c = spelerVan(s);
+  const P = s.pack;
+  const R = P.rollen;
+  const n = P.model.markt_koop ?? P.model.markt_max_per_dag;
+  const st = marktStatus(s, c, rid, n, (r) => sim.opslagMax(s, c, r));
+  if (!st.n && /niet te koop|geen markt/i.test(st.reden)) return null;
+  const hoeveel = st.n || n;
+  const prijs = st.prijs || Math.ceil(st.per * hoeveel);
+  const heb = c.voorraad[R.geld] ?? 0;
+  return {
+    gebouw: null, soort: 'markt', naam: 'Wereldmarkt', icoon: '⚖', r: rid, delta: hoeveel, voor: item?.trend ?? 0, na: null,
+    actie: { type: 'markt', grondstof: rid, hoeveel }, kan: st.kan, reden: st.kan ? '' : st.reden, prijs, per: st.per, hoeveel,
+    kostPerGrondstof: [{ r: R.geld, icoon: P.resIndex[R.geld]?.icoon ?? '◈', naam: P.resIndex[R.geld]?.naam ?? R.geld, nodig: prijs, heb, ok: heb >= prijs }],
+    verbruiktZelf: false, slot: false, score: 0, lostOp: [rid],
+  };
 }
 
 // De toestand in gewone taal: eerste regel van het kaartje.
@@ -343,11 +442,20 @@ export function toestandZin(s, item) {
     const kern = `${naam} ${rond(item.voorraad)}, op weg naar ${rond(item.doel ?? item.voorraad)}.`;
     return `${kern} ${r?.advies ?? TERUGVAL.stab}`;
   }
+  if (item.r === R.geld && item.niveau === 'rem' && item.rem) return TERUGVAL.geld_rem(rond(item.voorraad), item.rem.naam.toLowerCase());
   if (item.r === R.geld) {
     const kern = item.voorraad < 0 ? `${naam}: je staat ${rond(-item.voorraad)} in de min, ${trend}.` : `${naam}: ${trend}${isFinite(item.dagen) ? `, nog ${Math.max(1, rond(item.dagen))} dagen` : ''}.`;
     return `${kern} ${r?.advies ?? TERUGVAL.geld}`;
   }
+  if (item.niveau === 'goud' && groeiAan(s)) {
+    // Het bedrag per dag staat al als eigen regel in het kaartje ("+7 ◈ per dag uit verkocht overschot"), niet nog eens hier.
+    // Zelfde regel als oplossers(): alleen een bouwgrondstof op rem (niet stilliggend geld) maakt er "zet het om" van.
+    const rem = toestand(s).find((x) => x.niveau === 'rem' && x.rol === 'grondstof' && x.r !== item.r);
+    const kern = `${naam}: opslag vol (${rond(item.voorraad)}/${rond(item.cap)}). ${TERUGVAL.vol_verkocht}`;
+    return rem ? `${kern} ${TERUGVAL.vol_omzetten(naam.toLowerCase())}` : kern;
+  }
   if (item.niveau === 'goud') return `${naam}: opslag vol (${rond(item.voorraad)}/${rond(item.cap)}), ${trend} gaat verloren. ${TERUGVAL.vol}`;
+  if (item.niveau === 'rem' && item.rem) return TERUGVAL.rem(naam.toLowerCase(), item.rem.naam.toLowerCase(), `${rond(item.rem.nodig)} ${item.icoon}`, `${rond(item.rem.heb)}`, `${teken(item.trend)}${getal(item.trend)}`);
   const kern = item.niveau === 'rood' ? `${naam} is op: ${trend} tekort, je productie valt stil.`
     : `${naam}: ${trend}${isFinite(item.dagen) ? `, nog ${Math.max(1, rond(item.dagen))} dagen` : ''}.`;
   return `${kern} ${strafZin(r, item.niveau === 'rood')}`;
@@ -492,7 +600,13 @@ export function maakEvenwicht(api) {
 
   function koppelKaartje() {
     const el = kaartEl();
-    el.addEventListener('click', (e) => { if (e.target.closest('[data-ev="sluit"]')) sluit(); });
+    // Gedelegeerd op het document: blijft werken als het kaartje-element ooit opnieuw wordt aangemaakt.
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest?.('#oplosser')) return;
+      if (e.target.closest('[data-ev="sluit"]')) sluit();
+      const m = e.target.closest('[data-ev="markt"]');
+      if (m) koop(m.dataset.r, +m.dataset.n);
+    });
     // Desktop: buiten het kaartje tikken sluit het. Telefoon: niet, de kaart blijft gewoon te bedienen.
     document.addEventListener('pointerdown', (e) => {
       if (!st.open || TELEFOON.matches) return;
@@ -517,6 +631,17 @@ export function maakEvenwicht(api) {
     };
     el.addEventListener('pointerup', los);
     el.addEventListener('pointercancel', los);
+  }
+
+  // C18a: de marktknop. Een gewone order via issueOrder, gemeld zoals geef() in main.js het doet (afspraak 4 van C16).
+  function koop(rid, n) {
+    const s = ui.state;
+    if (!s || s.replay || s.uitkomst) return;
+    const order = { type: 'markt', grondstof: rid, hoeveel: n };
+    const r = sim.issueOrder(s, order);
+    meldOrder(order, r);
+    ui.dirty = true;
+    if (st.open) vernieuwKaartje(s, true);
   }
 
   // Tik op een chip of de meter: open (of sluit als hij al open staat).
@@ -595,30 +720,40 @@ export function maakEvenwicht(api) {
     h += `<p class="ev-zin">${esc(toestandZin(s, item))}</p>`;
     h += `<div class="ev-stroom"><div><span class="zacht">Maakt:</span> ${regel(u.maakt)}</div><div><span class="zacht">${item.r === R.stabiliteit ? 'Drukt:' : 'Verbruikt:'}</span> ${regel(u.verbruikt)}</div></div>`;
     for (const b of u.inBouw) h += `<div class="ev-al">Er komt al een ${esc(b.naam)} aan (klaar over ${b.over} d)</div>`;
+    const verkocht = item.r === R.geld ? u.maakt.find((x) => x.verkocht)?.waarde ?? 0
+      : (u.verbruikt.find((x) => x.verkocht)?.waarde ?? 0) * P.model.markt_verkoop * P.model.markt_basis;
+    if (verkocht > 0.05) h += `<div class="ev-al ev-verkocht">${esc(TERUGVAL.verkocht(getal(verkocht)))}</div>`;
     const opl = oplossers(s, item.r, AANBEVOLEN_MAX, lijst);
     if (opl.length) {
-      h += `<h4 class="ev-h">${item.niveau === 'goud' ? 'Zo verspil je minder' : item.niveau === 'neutraal' ? 'Meer hiervan' : 'Dit lost het op'}</h4>`;
+      const omzetten = opl.some((o) => o.soort === 'omzetten');
+      h += `<h4 class="ev-h">${omzetten ? 'Zet het om in groei' : item.niveau === 'rem' ? 'Zo groei je weer' : item.niveau === 'goud' ? 'Zo verspil je minder' : item.niveau === 'neutraal' ? 'Meer hiervan' : 'Dit lost het op'}</h4>`;
       for (const o of opl) h += oplosserHtml(s, item, o);
     }
-    const tip = item.r === R.geld ? TERUGVAL.geld_tip : item.r === R.stabiliteit ? TERUGVAL.stab_tip : item.niveau === 'goud' ? TERUGVAL.vol_tip : '';
+    const tip = item.r === R.geld && item.niveau === 'rem' ? '' : item.r === R.geld ? TERUGVAL.geld_tip : item.r === R.stabiliteit ? TERUGVAL.stab_tip : item.niveau === 'rem' ? TERUGVAL.rem_tip
+      : item.niveau === 'goud' && !groeiAan(s) ? TERUGVAL.vol_tip : '';
     if (tip && (item.niveau !== 'neutraal' || !opl.length)) h += `<p class="ev-tip zacht">${esc(tip)}</p>`;
     return h;
   }
 
   function labelVan(item) {
-    return { rood: item.kort || 'tekort', oranje: item.kort || 'let op', goud: 'vol', neutraal: 'in orde' }[item.niveau];
+    return { rood: item.kort || 'tekort', oranje: item.kort || 'let op', rem: item.kort === 'ligt stil' ? 'ligt stil' : 'remt je groei', goud: 'vol', neutraal: 'in orde' }[item.niveau];
   }
 
   function oplosserHtml(s, item, o) {
     const P = s.pack;
     const icoon = P.resIndex[item.r]?.icoon ?? '';
     let effect;
-    if (o.soort === 'opslag') effect = `opslag +${rond(o.delta)}`;
+    const rIcoon = P.resIndex[o.r ?? item.r]?.icoon ?? icoon;
+    if (o.soort === 'markt') effect = `direct +${rond(o.hoeveel)} ${rIcoon} · ${getal(o.per)} ◈ per stuk`;
+    else if (o.soort === 'omzetten') effect = `van ${teken(o.voor)}${getal(o.voor)} naar ±${teken(o.na)}${getal(o.na)} ${rIcoon} per dag`;
+    else if (o.soort === 'opslag') effect = `opslag +${rond(o.delta)}`;
     else if (o.soort === 'stab') effect = `voorziening +${komma(o.delta)} stabiliteit`;
     else if (o.soort === 'verbruiker') effect = `verbruikt ±${getal(o.delta)} ${icoon}/d`;
     else effect = `van ${teken(o.voor)}${getal(o.voor)} naar ±${teken(o.na)}${getal(o.na)} ${icoon} per dag`;
     const kosten = o.kostPerGrondstof.map((k) => `<span class="ev-kost ${k.ok ? 'goed' : 'slecht'}">${rond(k.nodig)}${esc(k.icoon)}</span>`).join(' ');
-    const knop = o.kan
+    const knop = o.soort === 'markt'
+      ? (o.kan ? `<button class="knop klein primair ev-bouw ev-markt" data-ev="markt" data-r="${esc(o.r)}" data-n="${rond(o.hoeveel)}">Koop ${rond(o.hoeveel)} ${esc(rIcoon)}</button>` : `<span class="ev-reden">${esc(o.reden)}</span>`)
+      : o.kan
       ? `<button class="knop klein primair ev-bouw" data-actie="oplos-bouw" data-id="${esc(o.gebouw)}">Bouw</button>`
       : `<span class="ev-reden">${esc(o.reden)}</span>`;
     return `<div class="ev-opl ${o.kan ? '' : 'ev-niet'}"><div class="ev-opl-kop"><span>${esc(o.icoon)} <b>${esc(o.naam)}</b></span>${knop}</div>

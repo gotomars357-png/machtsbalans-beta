@@ -55,6 +55,9 @@ h3 { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: v
 .instellingen { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; }
 .instellingen label { display: flex; flex-direction: column; gap: 4px; color: var(--zacht); font-size: 12px; }
 .instellingen label.check { flex-direction: row; align-items: center; gap: 8px; color: var(--tekst); font-size: 13px; }
+.instellingen label.meegroeiend { grid-column: 1 / -1; min-height: 44px; } /* C18c */
+.instellingen label.meegroeiend input { width: 20px; height: 20px; flex: none; }
+.instellingen label.meegroeiend small { display: block; color: var(--zacht); font-size: 12px; margin-top: 2px; }
 .instellingen select, .instellingen input[type=number] { background: var(--paneel); border: 1px solid var(--lijn); border-radius: 6px; padding: 6px 8px; }
 .start-acties { display: flex; gap: 10px; margin-top: 22px; }
 .hint { color: var(--zacht); font-size: 12px; }

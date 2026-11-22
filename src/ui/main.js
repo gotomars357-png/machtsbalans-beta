@@ -29,6 +29,8 @@ import { maakBouwlade } from './bouwlade.js'; // C16b: bouwlade en plaatsbalk op
 import { maakBewaren, STIL_ELKE_DAGEN } from './bewaren.js'; // C17a: stil bewaren en hervatten op pauze
 import { maakGebieden } from './gebieden.js'; // C17c: gebiedenknop, bouwen in het bekeken gebied, Bouw zoals thuis
 import { maakWijzer } from './wijzer.js'; // C17b: af en toe een aanwijzing met "Ga erheen"
+import { maakHulpknop } from './hulpknop.js'; // C18b: het vraagteken met de beste stap
+import { machtsbalansRegel, bijsturingWissels } from '../engine/bijsturing.js'; // C18c: Meegroeiend (leest alleen)
 import * as leren from './leren.js'; // C16d: lokaal speelverslag, pulskaartje en afhaakvraag (alleen lezen, nooit orders)
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -151,6 +153,8 @@ function leesInstellingen() {
     systemen: { events: $('#opt-events').checked, schokken: $('#opt-schokken').checked, escalatie: $('#opt-escalatie').checked, brandhaarden: $('#opt-brandhaarden').checked, verbouw: true },
     // Rivalen met geheugen (C14): de engine kent alleen deze lijst, nooit het Huis of localStorage.
     rivalen: $('#opt-rivalen').checked ? rivaalInstelling(ui.gekozenPack?.pack) : [],
+    groei: true, // C18a: lagere grondstofprijs, wereldmarkt en verkoop van overschot (altijd aan in een nieuw potje)
+    meegroeiend: $('#opt-meegroeiend').checked, // C18c: wie ver voorstaat, krijgt meer tegenwind
   };
 }
 
@@ -355,6 +359,7 @@ function frame(now) {
     if (s.uitkomst && !ui.eindGetoond && !ui.modal) toonEinde();
     for (const m of s.meldingen.splice(0)) toast(m.tekst, m.soort, ui.kaart?.levend ? pingVoorMelding(ui.state, ui.kaart.levend.pings, m, ui.kaart.echtNu ?? 0) : null);
     krant.tick(s, now);
+    for (const d of bijsturingWissels(s, (ui.bijsturing ??= {}))) window.dispatchEvent(new CustomEvent('bijsturing', { detail: d })); // C18c
     tutorialTick(now);
     doelbalk.tick(now);
     if (ui.dirty && now - laatsteUI > 140) {
@@ -1544,6 +1549,8 @@ function renderBlokken() {
       h += `<div class="lbar"><span>${esc(b.naam)}</span><div class="baan"><div style="width:${Math.min(100, v * 100)}%;background:${b.kleur}"></div></div><span class="num">${pct(Math.min(1, v))}</span></div>`;
     }
   }
+  const mb = machtsbalansRegel(s); // C18c: Meegroeiend en de aftelling
+  if (mb) h += `<p class="machtsbalans" style="font-size:13px;margin:8px 0 0;padding:6px 8px;border-left:3px solid var(--accent);background:rgba(255,255,255,.04)">${esc(mb)}</p>`;
   h += `<p class="zacht" style="font-size:12px;margin:8px 0 0">Einde van de tijdlijn op dag ${V.dag_limiet} (nog ${Math.max(0, V.dag_limiet - s.dag)} dagen). Dan wint het blok met het grootste aandeel.</p></section>`;
   zet('overwinning', h);
 }
@@ -2154,6 +2161,7 @@ function toast(tekst, soort = 'info', ping = null) {
 // Doelbalk, bijna klaar en sessie-overzicht (src/ui/doelen.js): leest alleen, geeft geen orders.
 const doelbalk = maakDoelen({ ui, zetTab, selecteer });
 const wijzer = maakWijzer({ ui, bouwlade, gebieden, evenwicht, doelbalk, startBouwModus, zetTab }); // C17b
+maakHulpknop({ ui, wijzer, doelbalk, evenwicht, bouwlade, gebieden, zetTab, selecteer, onderpaneel, toast: (...a) => toast(...a) }); // C18b
 maakBouwfeedback(ui, { toast }); // C16c: toast, zwevend label en camera na elke geslaagde bouwopdracht
 
 // Handig bij playtests en debuggen vanuit de console.

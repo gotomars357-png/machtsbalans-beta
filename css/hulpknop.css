@@ -1,0 +1,59 @@
+/* ---------- C18b: het vraagteken (src/ui/hulpknop.js) ---------- */
+
+/* De knop: rond, 48 px, rechts op de kaart direct boven de kaartknoppen (bottom/right zet hulpknop.js). */
+.hulpknop { position: absolute; right: 12px; bottom: 180px; z-index: 6; width: 48px; height: 48px; padding: 0; border-radius: 50%;
+  display: grid; place-items: center; cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  background: rgba(13,20,28,.92); border: 1px solid var(--lijn); color: var(--zacht); font: inherit; font-size: 24px; font-weight: 700;
+  box-shadow: 0 2px 10px rgba(0,0,0,.35); transition: color .3s, border-color .3s, box-shadow .3s; }
+.hulpknop[hidden] { display: none; }
+.hulpknop .hk-teken { line-height: 1; }
+.hulpknop:hover { border-color: var(--accent); color: var(--tekst); }
+.hulpknop:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Goud: je raakt achter. Een zachte gloed, geen knipperen. */
+.hulpknop.stand-goud, .hulpknop.stand-gevaar { color: #1b1300; background: var(--accent); border-color: var(--accent);
+  box-shadow: 0 0 0 4px rgba(240,180,41,.25), 0 0 18px rgba(240,180,41,.55); }
+/* Gevaar: drie keer knipperen bij het begin, daarna een rood stipje. */
+.hulpknop .hk-stip { position: absolute; top: 2px; right: 2px; width: 12px; height: 12px; border-radius: 50%;
+  background: var(--slecht, #e05a4f); border: 2px solid rgba(13,20,28,.95); display: none; }
+.hulpknop.stand-gevaar .hk-stip { display: block; }
+.hulpknop.knipper { animation: hk-knipper .5s ease-in-out 3; }
+@keyframes hk-knipper { 0%, 100% { transform: scale(1); filter: none; } 50% { transform: scale(1.15); filter: brightness(1.35); } }
+
+/* Het kaartje: onderpaneel 'hulp'. Geen grijze laag, de kaart en het tempo lopen door. Desktop: linksonder op de kaart. */
+.hulpkaart { position: absolute; left: 12px; bottom: 64px; z-index: 8; width: 380px; max-width: calc(100% - 88px); max-height: 40vh;
+  overflow-y: auto; box-sizing: border-box; display: flex; flex-direction: column; gap: 3px; padding: 8px 8px 8px 12px;
+  background: rgba(13,20,28,.97); border: 1px solid var(--lijn); border-left: 3px solid var(--zacht); border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0,0,0,.5); animation: hk-in .18s ease-out; }
+.hulpkaart[hidden] { display: none; }
+.hulpkaart[data-stand="goud"] { border-left-color: var(--accent); }
+.hulpkaart[data-stand="gevaar"], .hulpkaart[data-soort="gevaar"], .hulpkaart[data-soort="tekort-rood"] { border-left-color: var(--slecht, #e05a4f); }
+.hk-kop { font-size: 12px; color: var(--zacht); }
+.hk-kop[hidden] { display: none; }
+.hk-wat { font-size: 15px; line-height: 19px; font-weight: 700; color: var(--tekst); }
+.hk-waarom { font-size: 13px; line-height: 17px; color: var(--tekst); }
+.hk-levert { font-size: 13px; line-height: 17px; color: var(--goed, #8fd18f); }
+.hulpkaart[data-stand="gevaar"] .hk-levert { color: var(--accent); }
+.hk-knoppen { display: flex; gap: 6px; align-items: center; margin-top: 4px; }
+.hulpkaart button { min-height: 44px; border-radius: 8px; font: inherit; font-size: 13px; cursor: pointer; touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent; }
+.hk-doe { min-width: 104px; padding: 0 16px; border: 1px solid var(--accent); background: var(--accent); color: #1b1300; font-weight: 700 !important; font-size: 15px !important; }
+.hk-doe:disabled { opacity: .5; cursor: default; }
+.hk-ander { padding: 0 10px; border: 1px solid var(--lijn); background: none; color: var(--tekst); }
+.hk-ander[hidden] { display: none; }
+.hk-weg { margin-left: auto; width: 44px; padding: 0; border: 1px solid var(--lijn); background: none; color: var(--zacht); font-size: 15px !important; }
+.hk-doe:focus-visible, .hk-ander:focus-visible, .hk-weg:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* De knop die de speler als laatste tikt (hefboom, marktknop, vrede …). */
+.hk-gloed { box-shadow: 0 0 0 3px var(--accent), 0 0 14px rgba(240,180,41,.8) !important; animation: hk-gloed 1s ease-in-out infinite; }
+@keyframes hk-gloed { 50% { box-shadow: 0 0 0 5px var(--accent), 0 0 22px rgba(240,180,41,.9); } }
+
+@keyframes hk-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .hulpkaart, .hulpknop.knipper, .hk-gloed { animation: none; }
+}
+
+/* Telefoon: het kaartje onderaan de kaart, boven de Bouwen-knop, links van de kolom met kaartknoppen en het ?. */
+@media (max-width: 600px) {
+  .hulpkaart { left: 8px; right: 64px; width: auto; max-width: none; bottom: calc(72px + env(safe-area-inset-bottom)); }
+  body.lade-open .hulpkaart { bottom: calc(var(--lade-h, 0px) + 8px); }
+}
