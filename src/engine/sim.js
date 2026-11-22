@@ -20,6 +20,7 @@ import { initContracten, contractenTick, voerContractUit, contractenAfdruk, aiCo
 import { voerCyberUit, cyberTick } from './cyber.js';
 import { brandhaardenTick, voerBrandhaardActieUit, brandhaardenAfdruk } from './brandhaarden.js';
 import { actieveVerbouw, verbouwTick, voerVerbouwUit, voerSloopUit, heeftSloop, sloopOpruim, verbouwAfdruk } from './verbouw.js';
+import { gebiedCentra, gebiedVan, voerBouwrijUit, bouwrijTick, bouwrijAfdruk } from './gebieden.js';
 
 export const MOEILIJKHEID = {
   makkelijk: { econ: 0.93, invloed: 0.6, oorlog: 0.2, naam: 'Makkelijk' },
@@ -233,13 +234,17 @@ export function tegelStatus(state, landIdx, gebouwId, t, nodes) {
   return { ok: true, rendement: rendement(state, state.landen[landIdx], gebouwId, t, nodes ?? knooppunten(state, state.landen[landIdx])) };
 }
 
-export function kiesTegel(state, c, gebouwId) {
+// C17c: met `gebied` (een centrumtegel uit gebieden.js) alleen tegels van dat gebied, en de afstand tot dat centrum in
+// plaats van tot de hoofdstad. Zonder gebied precies zoals vroeger.
+export function kiesTegel(state, c, gebouwId, gebied = null) {
   const geo = state.pack.geo;
-  const h = geo.hoofdstad[c.idx];
+  const h = gebied == null ? geo.hoofdstad[c.idx] : gebied;
+  const centra = gebied == null ? null : gebiedCentra(state, c.idx);
   const nodes = knooppunten(state, c);
   let best = -1;
   let bestScore = -Infinity;
   for (const t of state.landTegels[c.idx]) {
+    if (centra && gebiedVan(state, c.idx, t, centra) !== gebied) continue;
     const st = tegelStatus(state, c.idx, gebouwId, t, nodes);
     if (!st.ok) continue;
     const score = st.rendement * 100 - (h >= 0 ? tegelAfstand(geo, h, t) * 0.3 : 0);
@@ -666,6 +671,7 @@ export function tick(state) {
   if (heeftSloop(state)) sloopOpruim(state);
   contractenTick(state);
   const inkomen = speler.voorraad[state.pack.rollen.geld] - geldVoor;
+  bouwrijTick(state); // C17c: de wachtrij na de bouw van vandaag en na de orders van de speler
   samenlevingTick(state);
   if (state.instellingen.systemen.brandhaarden) brandhaardenTick(state);
   mediaTick(state);
@@ -722,6 +728,7 @@ export function applyOrder(state, o) {
   switch (o.type) {
     case 'bouw': return bouw(state, s, o.gebouw, o.tegel);
     case 'verbouw': return voerVerbouwUit(state, s, +o.tegel);
+    case 'bouwrij': return voerBouwrijUit(state, s, o); // C17c
     case 'sloop': return voerSloopUit(state, s, +o.tegel);
     case 'beleid': return beleid(state, s, o);
     case 'hefboom': return voerHefboomUit(state, s, o.doel, o.actie);
@@ -998,5 +1005,5 @@ export function vingerafdruk(state) {
   const leger = state.eenheden.map((u) => `${u.id}:${u.t}:${u.hp.toFixed(2)}`).join(',');
   const regimes = state.landen.map((c) => c.regime[0]).join('');
   const keten = state.eventKeten.length ? `#k${state.eventKeten.map((k) => `${k.id}@${k.dag}@${k.land}`).join(',')}` : '';
-  return `${state.dag}#${state.rng}#${parts.join(';')}#${leger}#${state.oorlogen.length}#${regimes}#${state.kolonies.length}${contractenAfdruk(state)}${keten}${brandhaardenAfdruk(state)}${verbouwAfdruk(state)}`;
+  return `${state.dag}#${state.rng}#${parts.join(';')}#${leger}#${state.oorlogen.length}#${regimes}#${state.kolonies.length}${contractenAfdruk(state)}${keten}${brandhaardenAfdruk(state)}${verbouwAfdruk(state)}${bouwrijAfdruk(state)}`;
 }

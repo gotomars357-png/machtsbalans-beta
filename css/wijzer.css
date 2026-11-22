@@ -1,0 +1,39 @@
+/* ---------- C17b: aanwijzingen (src/ui/wijzer.js) ---------- */
+
+/* Het kaartje: klein, geen grijze laag, de kaart blijft bedienbaar. Desktop: linksonder op de kaart, boven de legenda. */
+.wijzer { position: absolute; left: 12px; bottom: 64px; z-index: 7; width: 360px; max-width: calc(100% - 80px); box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 4px; padding: 6px 6px 6px 10px; background: rgba(13,20,28,.96);
+  border: 1px solid var(--lijn); border-left: 3px solid var(--accent); border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,.45);
+  animation: wz-in .2s ease-out; }
+.wijzer[hidden] { display: none; }
+.wijzer[data-soort="tekort-rood"], .wijzer[data-soort="dreiging"], .wijzer[data-soort="brandhaard"] { border-left-color: var(--slecht); }
+.wz-tekst { display: flex; gap: 6px; align-items: flex-start; font-size: 13px; line-height: 17px; color: var(--tekst);
+  max-height: 34px; overflow: hidden; }
+.wz-ico { flex: 0 0 auto; font-size: 14px; line-height: 17px; }
+.wz-zin { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.wz-knoppen { display: flex; gap: 6px; align-items: center; }
+.wijzer button { min-height: 44px; border-radius: 8px; font: inherit; font-size: 13px; cursor: pointer; touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent; }
+.wz-ga { padding: 0 14px; border: 1px solid var(--accent); background: var(--accent); color: #1b1300; font-weight: 700 !important; }
+.wz-waarom { padding: 0 10px; border: 1px solid transparent; background: none; color: var(--zacht); text-decoration: underline; }
+.wz-waarom[hidden] { display: none; }
+.wz-weg { margin-left: auto; width: 44px; padding: 0; border: 1px solid var(--lijn); background: none; color: var(--zacht); font-size: 15px !important; }
+.wz-ga:focus-visible, .wz-waarom:focus-visible, .wz-weg:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.wz-ga:hover { filter: brightness(1.08); }
+.wz-weg:hover, .wz-waarom:hover { color: var(--tekst); }
+
+/* Het randpijltje: 32 px, niet klikbaar, wijst naar de plek als die buiten beeld ligt. */
+.wijzer-pijl { position: absolute; z-index: 6; width: 32px; height: 32px; display: grid; place-items: center; pointer-events: none;
+  border-radius: 50%; background: rgba(13,20,28,.85); border: 1px solid var(--accent); color: var(--accent); font-size: 16px; line-height: 1; }
+.wijzer-pijl[hidden] { display: none; }
+
+.wz-schakel { display: flex; align-items: center; gap: 6px; min-height: 44px; margin: 6px 0 0; } /* review: hele regel is tikvlak, >= 44 px */
+
+@keyframes wz-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .wijzer { animation: none; } }
+
+/* Telefoon: onderaan de kaart, boven de Bouwen-knop en de legenda-knop, links van de kaartknoppen. */
+@media (max-width: 600px) {
+  .wijzer { left: 8px; right: 64px; width: auto; max-width: none; bottom: calc(72px + env(safe-area-inset-bottom)); }
+  body.lade-open .wijzer, body.lade-open .wijzer-pijl { display: none; }
+}

@@ -1,0 +1,42 @@
+/* ---------- C17a: pauzekaartje na terugkomen en laadmelding bij opstart (src/ui/bewaren.js) ---------- */
+
+/* Het pauzekaartje: geen grijze laag, de kaart erachter blijft bedienbaar. Desktop: linksonder op de kaart. */
+.bw-kaartje { position: absolute; left: 12px; bottom: 76px; z-index: 9; width: 340px; max-width: calc(100% - 90px);
+  display: flex; flex-direction: column; gap: 0; background: #0d141c; border: 1px solid var(--accent); border-radius: 12px;
+  box-shadow: 0 8px 30px rgba(0,0,0,.5); overflow: hidden; animation: bw-in .2s ease-out; }
+.bw-kaartje button { border: 0; background: none; color: var(--tekst); font: inherit; text-align: left; cursor: pointer;
+  touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.bw-verder { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 8px 12px; font-size: 14px; line-height: 1.3; }
+.bw-verder b { color: var(--tekst); }
+.bw-ico { flex: 0 0 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: #1b1300;
+  font-size: 13px; padding-left: 2px; box-sizing: border-box; }
+.bw-start { min-height: 44px; padding: 0 12px 0 54px; font-size: 12px; color: var(--zacht) !important; border-top: 1px solid var(--lijn) !important; }
+.bw-verder:hover, .bw-start:hover { background: rgba(240,180,41,.08); }
+.bw-verder:focus-visible, .bw-start:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* Een ander onderpaneel (contextpaneel, oplosser, pulskaartje) gaat voor; alleen boven de lade blijft het staan. */
+body[data-onderpaneel]:not([data-onderpaneel="lade"]) .bw-kaartje { display: none; }
+
+/* Het kaartje zegt al op welke dag je was: de sessiekaart van de doelbalk ("Welkom terug") wacht tot je verder speelt. */
+body.bw-hervat-open .sessiekaart { display: none; }
+
+@keyframes bw-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+/* Laadmelding: een rustig scherm in plaats van wit, zolang het potje opnieuw wordt afgespeeld. */
+.bw-laden { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; background: var(--bg, #0a0f15); color: var(--tekst, #e6edf3);
+  padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom); }
+.bw-laden-kaart { display: flex; flex-direction: column; align-items: center; gap: 10px; font-size: 16px; text-align: center; }
+.bw-laden-kaart .zacht { font-family: var(--mono, monospace); font-size: 13px; color: var(--zacht, #8b98a5); }
+.bw-draai { width: 28px; height: 28px; border-radius: 50%; border: 3px solid var(--lijn, #2a3542); border-top-color: var(--accent, #f0b429);
+  animation: bw-draai 1s linear infinite; }
+@keyframes bw-draai { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .bw-kaartje { animation: none; }
+  .bw-draai { animation-duration: 3s; }
+}
+
+/* Telefoon: onderaan de kaart, boven de Bouwen-knop en de legenda-knop, links van de kaartknoppen. */
+@media (max-width: 600px) {
+  .bw-kaartje { left: 8px; right: 64px; width: auto; max-width: none; bottom: calc(var(--lade-h, 0px) + 72px + env(safe-area-inset-bottom)); }
+  .bw-verder { min-height: 56px; }
+}

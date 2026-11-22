@@ -583,6 +583,8 @@ export function maakDoelen(api) {
   function gaNaar(naar) {
     const s = ui.state;
     if (!naar || !s || !ui.kaart) return;
+    // C17b: op de telefoon gaat een bouwdoel via de wijzer: zelfde gebied, camera en lade met het gebouw klaar.
+    if (naar.gebouw && api.bouwNaar && window.matchMedia?.('(max-width: 600px)').matches && api.bouwNaar(naar)) return;
     let t = -1;
     if (naar.gebouw) t = sim.kiesTegel(s, speler(s), naar.gebouw);
     if (naar.tegel != null) t = naar.tegel;
@@ -644,5 +646,5 @@ export function maakDoelen(api) {
     k.style.bottom = `${Math.max(8, rond(innerHeight - boven + 6))}px`;
   }
 
-  return { start, tick, gaNaar };
+  return { start, tick, gaNaar, huidig: () => st.doel, zetBouwNaar: (f) => { api.bouwNaar = f; } }; // C17b: voor de wijzer
 }

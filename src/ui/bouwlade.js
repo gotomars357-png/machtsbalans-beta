@@ -12,6 +12,9 @@ import * as sim from '../engine/sim.js';
 import { bouwKaartData, oplossers, ergste, toestand, effectVan, getal, teken, actieveVerbouw, AANBEVOLEN_MAX } from './evenwicht.js';
 import { meldBouwlade } from './ordersignaal.js';
 import * as onderpaneel from './onderpaneel.js';
+import { gebiedVan, gebiedCentra } from '../engine/gebieden.js'; // C17c: bouwen in het gebied dat je bekijkt
+import { gebiedNaam, isKolonie, TEKST as GEBIED_TEKST } from './gebieden.js';
+import { plekInBeeld } from './bouwfeedback.js';
 
 // ---------- weergavegetallen (geen spelregels) ----------
 export const LADE_H = 220;            // de half open lade is hoogstens zo hoog (zonder safe-area)
@@ -38,6 +41,9 @@ export const TEKST = {
   ver: 'ver van hoofdstad of depot',
   grond: 'minder geschikte grond',
   goedeGrond: 'goede grond',
+  bouwenIn: 'Bouwen in:',                            // C17c
+  geenPlekIn: (naam) => `Geen plek meer in ${naam}`,
+  wachtrij: (naam, n) => `Wachtrij ${naam}: ${n} te gaan`,
 };
 
 // ---------- puur ----------
@@ -113,9 +119,19 @@ export function ladeKosten(s) {
   return { tekst: TEKST.heb(delen.join(' '), d.projecten, d.max), projecten: d.projecten, max: d.max };
 }
 
-// De beste plek: precies de tegel die een bouw-order zonder tegel zou kiezen.
-export function startPlek(s, gebouwId) {
-  return sim.kiesTegel(s, spelerVan(s), gebouwId);
+// De beste plek: zonder gebied precies de tegel die een bouw-order zonder tegel zou kiezen; met gebied (C17c) de beste
+// plek in dat gebied (−1 als daar niets vrij is).
+export function startPlek(s, gebouwId, gebied = null) {
+  // Review: een gebied dat niet (meer) van jou is (kolonie verloren in opstand) telt als 'geen gebied'.
+  const g = gebied == null || gebied < 0 || !gebiedCentra(s, s.speler).includes(gebied) ? null : gebied;
+  return sim.kiesTegel(s, spelerVan(s), gebouwId, g);
+}
+
+// C17c: de kaart "Bouw zoals thuis" vooraan in de strook als je een kolonie bekijkt.
+export function zoalsThuisKaartHtml(s, centrum) {
+  return `<button class="bl-kaart bl-zoals" data-actie="zoalsthuis" data-id="${centrum}"${s.replay ? ' disabled' : ''}>`
+    + `<span class="bl-ico" aria-hidden="true">🏘</span><span class="bl-naam">${GEBIED_TEKST.zoalsThuis}</span>`
+    + `<span class="bl-regel">Dezelfde verhouding als thuis in ${String(gebiedNaam(s, centrum)).replace(/[&<>"]/g, '')}</span></button>`;
 }
 
 // Wat de plaatsbalk over een vakje zegt: { ok, niveau: 'groen'|'oranje'|'rood', zin, rendement, effect }.
@@ -149,7 +165,7 @@ export function plaatsStatus(s, gebouwId, tegel) {
 export function maakBesturing(api) {
   const op = api.onderpaneel ?? onderpaneel;
   const meld = api.meld ?? meldBouwlade;
-  const b = { stand: 'dicht', tab: 'economie', gebouw: null, tegel: -1, status: null, bezig: false };
+  const b = { stand: 'dicht', tab: 'economie', gebouw: null, tegel: -1, status: null, bezig: false, gebied: null, keuze: null, melding: '' };
   try { const t = api.opslag?.lees?.(); if (TABS.some((x) => x.id === t)) b.tab = t; } catch { /* geen opslag */ }
 
   const stuur = (stap, extra = {}) => meld({ stap, gebouw: b.gebouw, kaartInBeeld: !!api.kaartInBeeld?.(), ...extra });
@@ -177,13 +193,20 @@ export function maakBesturing(api) {
     api.teken?.();
   };
 
+  // C17c: het gebied dat je bekijkt (api.gebied, uit gebieden.js); zonder gebieden null (dan zoals vroeger).
+  const bekeken = () => { const g = api.gebied?.(); return g == null || g < 0 ? null : g; };
+  b.gebiedNu = () => (b.stand === 'plaats' && b.gebied != null ? b.gebied : bekeken());
+  const meldGebied = (centrum) => { const s = api.state?.(); if (s) api.meldGebied?.({ centrum, naam: gebiedNaam(s, centrum), bron: 'lade' }); };
+
   // Kaart in de lade gekozen (of Plaats/Auto in het paneel): plaatsmodus met het voorbeeld op de beste plek.
-  b.kies = (id) => {
+  // opties.gebied: bouw in dat gebied in plaats van het bekeken gebied.
+  b.kies = (id, opties = {}) => {
     const s = api.state?.();
     if (!s || !s.pack.gebouwIndex[id]) return false;
     // Review: in replay start main.js geen bouwmodus; zonder deze regel bleef de plaatsbalk staan en deed ✗ niets.
     if (s.replay) return false;
     if (b.stand === 'dicht') op.open('lade', doorAnderGesloten);
+    b.keuze = opties.gebied ?? null;
     b.bezig = true;
     if (api.bouwModus?.() !== id) api.startBouwModus(id); // main.js roept daarna plaatsGestart aan
     b.bezig = false;
@@ -200,8 +223,26 @@ export function maakBesturing(api) {
     if (b.stand === 'dicht') op.open('lade', doorAnderGesloten);
     b.stand = 'plaats';
     b.gebouw = id;
+    b.melding = '';
+    b.gebied = b.keuze ?? bekeken();
+    b.keuze = null;
     zetOnder();
-    b.naarPlek(startPlek(s, id), true);
+    b.naarPlek(startPlek(s, id, b.gebied), true);
+  };
+
+  // C17c: een ander gebied gekozen (gebiedenlijstje). In plaatsmodus het voorbeeld naar de beste plek daar.
+  b.zetGebied = (centrum) => {
+    const s = api.state?.();
+    if (!s) return;
+    b.gebied = centrum;
+    b.melding = '';
+    if (b.stand !== 'plaats') { herteken(); return; }
+    const t = startPlek(s, b.gebouw, centrum);
+    b.naarPlek(t, true);
+    // Review: geen plek voor dit gebouw daar: vlieg toch naar het gebied, de plaatsbalk zegt "Geen plek meer in …".
+    const k = api.kaart?.();
+    const tg = s.pack.geo.tegels[centrum];
+    if (t < 0 && k && tg) k.vliegNaar(tg.x, tg.y, Math.max(k.zoom ?? 1, VOORBEELD_ZOOM));
   };
 
   // Zet het voorbeeld op tegel t (en vlieg erheen als dat gevraagd is).
@@ -221,6 +262,12 @@ export function maakBesturing(api) {
   // Eerste tik op een ander vakje (map.js onKandidaat).
   b.verplaats = (t) => {
     if (b.stand !== 'plaats') return;
+    // C17c: een vakje in een ander eigen gebied aangetikt: het gebied wisselt mee.
+    const s = api.state?.();
+    if (s && b.gebied != null && t >= 0 && s.eigenaar[t] === s.speler) {
+      const g = gebiedVan(s, s.speler, t);
+      if (g >= 0 && g !== b.gebied) { b.gebied = g; meldGebied(g); }
+    }
     b.naarPlek(t, false);
     stuur('verplaats');
   };
@@ -235,9 +282,13 @@ export function maakBesturing(api) {
     const r = api.geef({ type: 'bouw', gebouw: id, tegel: b.tegel }) ?? { ok: false };
     stuur('bevestig', { ok: !!r.ok });
     if (!r.ok) { b.naarPlek(b.tegel, false); return r; }
-    // Nog een kunnen betalen en een project vrij: blijf plaatsen, met het voorbeeld op de volgende beste plek.
-    if (bouwKaartData(s, id).kan) b.naarPlek(startPlek(s, id), true);
-    else api.stopBouwModus(); // terug naar de half open lade, met het nieuwe project bovenaan
+    // Nog een kunnen betalen en een project vrij: blijf plaatsen, met het voorbeeld op de volgende beste plek in
+    // hetzelfde gebied (C17c). De camera vliegt alleen als die plek buiten beeld ligt, en nooit naar een ander gebied.
+    if (bouwKaartData(s, id).kan) {
+      const t = startPlek(s, id, b.gebied);
+      if (t < 0 && b.gebied != null) { b.melding = TEKST.geenPlekIn(gebiedNaam(s, b.gebied)); api.stopBouwModus(); }
+      else b.naarPlek(t, !(api.inBeeld?.(t) ?? false));
+    } else api.stopBouwModus(); // terug naar de half open lade, met het nieuwe project bovenaan
     return r;
   };
 
@@ -267,6 +318,7 @@ export function maakBesturing(api) {
     b.sluiten = false;
     b.stand = 'dicht';
     b.tegel = -1;
+    b.melding = '';
     herteken();
     op.sluit('lade');
     stuur('annuleer', { dicht: true, vanuit: was });
@@ -334,6 +386,9 @@ export function maakBouwlade(api) {
     teken,
     meetOnder: (stand) => { zetVast(stand); return lade.hidden ? 0 : lade.getBoundingClientRect().height; },
     kaartInBeeld,
+    gebied: () => api.gebied?.() ?? null, // C17c
+    meldGebied: (detail) => window.dispatchEvent(new CustomEvent('gebied', { detail })),
+    inBeeld: (t) => !!ui.kaart && plekInBeeld(ui.kaart, t),
   });
 
   // De kaart ligt vast tussen de bovenbalk en de onderrand zolang de lade open is (body[data-onderpaneel="lade"]).
@@ -366,6 +421,7 @@ export function maakBouwlade(api) {
     if (stand === 'plaats') {
       const g = s.pack.gebouwIndex[b.gebouw];
       const st = (b.status = plaatsStatus(s, b.gebouw, b.tegel)); // elke keer opnieuw: voorraden en projecten veranderen
+      if (b.tegel < 0 && b.gebied != null && st.zin === TEKST.kiesVakje && gebiedCentra(s, s.speler).length > 1) st.zin = TEKST.geenPlekIn(gebiedNaam(s, b.gebied)); // C17c
       const kosten = g ? Object.entries(sim.bouwKosten(s, s.landen[s.speler], g.id)).map(([r, v]) => `${v}${esc(s.pack.resIndex[r]?.icoon ?? r)}`).join(' ') : '';
       html = `<div class="pb-balk"><button type="button" class="pb-nee" data-lade="annuleer" aria-label="Stop met plaatsen">✗</button>`
         + `<div class="pb-midden"><span class="pb-ico" aria-hidden="true">${g?.icoon ?? ''}</span><span class="pb-tekst"><b>${esc(g?.naam ?? '')}</b> <span class="zacht">${kosten}</span>`
@@ -378,11 +434,18 @@ export function maakBouwlade(api) {
         const g = s.pack.gebouwIndex[x.gebouw];
         return `<button type="button" class="bl-project" data-plek="${x.tegel}" title="Naar de bouwplek">${g?.icoon ?? ''} ${esc(g?.naam ?? '')} · ${Math.max(0, x.klaar - s.dag)} d</button>`;
       }).join('');
-      const kaarten = ladeKaarten(s, b.tab).map((x) => kaartHtml(s, x)).join('');
+      // C17c: met kolonies "Bouwen in: …", de wachtrijen en vooraan "Bouw zoals thuis" als je een kolonie bekijkt.
+      const meer = gebiedCentra(s, s.speler).length > 1;
+      const g = meer ? b.gebiedNu() : null;
+      const gebiedKnop = g != null ? `<button type="button" class="bl-project bl-gebied" data-lade="gebied" aria-label="Kies waar je bouwt">${TEKST.bouwenIn} <b>${esc(gebiedNaam(s, g))}</b> ▾</button>` : '';
+      const rijen = Object.keys(c.bouwrij ?? {}).map((k) => `<span class="bl-rij">${esc(TEKST.wachtrij(gebiedNaam(s, +k), c.bouwrij[k].items.length))}`
+        + `<button type="button" class="bl-rij-stop" data-lade="rij-stop" data-gebied="${k}" aria-label="Stop de wachtrij"${s.replay ? ' disabled' : ''}>✕</button></span>`).join('');
+      const melding = b.melding ? `<span class="bl-melding">${esc(b.melding)}</span>` : '';
+      const kaarten = (g != null && isKolonie(s, g) && b.tab !== 'leger' ? zoalsThuisKaartHtml(s, g) : '') + ladeKaarten(s, b.tab).map((x) => kaartHtml(s, x)).join('');
       html = `<div class="bl-greep" aria-hidden="true"></div>`
         + `<div class="bl-kop" role="tablist">${TABS.map((t) => `<button type="button" role="tab" class="bl-tab${t.id === b.tab ? ' actief' : ''}" data-lade-tab="${t.id}" aria-selected="${t.id === b.tab}">${t.naam}</button>`).join('')}`
         + `<button type="button" class="bl-dicht" data-lade="sluit" aria-label="Lade sluiten">✕</button></div>`
-        + `<div class="bl-regel-rij"><span class="bl-heb">${esc(k.tekst)}</span>${projecten}</div>`
+        + `<div class="bl-regel-rij">${gebiedKnop}${melding}<span class="bl-heb">${esc(k.tekst)}</span>${projecten}${rijen}</div>`
         + `<div class="bl-strook">${kaarten}</div>`;
     }
     if (html !== vorigeHtml) {
@@ -419,12 +482,14 @@ export function maakBouwlade(api) {
     if (a.dataset.lade === 'annuleer') b.annuleer();
     if (a.dataset.lade === 'bevestig') b.bevestig();
     if (a.dataset.lade === 'sluit') b.sluit();
+    if (a.dataset.lade === 'gebied') api.openGebieden?.(a); // C17c: hetzelfde lijstje als de ⌂-knop
+    if (a.dataset.lade === 'rij-stop') api.geef({ type: 'bouwrij', gebied: +a.dataset.gebied, items: [] });
   });
 
   // Naar beneden vegen over de greep, de kop of de plaatsbalk sluit de lade (patroon van het contextpaneel).
   let veeg = null;
   lade.addEventListener('pointerdown', (e) => {
-    if (e.target.closest('.bl-strook, .pb-ja, .pb-nee, .bl-project')) return;
+    if (e.target.closest('.bl-strook, .pb-ja, .pb-nee, .bl-project, .bl-regel-rij')) return;
     veeg = { y: e.clientY, id: e.pointerId, dy: 0 };
   });
   lade.addEventListener('pointermove', (e) => {

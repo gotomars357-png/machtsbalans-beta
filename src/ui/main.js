@@ -26,6 +26,9 @@ import { maakEvenwicht, actieveVerbouw, toestand as evenwichtToestand } from './
 import { maakBouwfeedback, bouwKaartGegevens, naBouwenStukken } from './bouwfeedback.js'; // C16c: kaartgegevens uit evenwicht.bouwKaartData (c16a)
 import { meldOrder, meldBouwlade, zetBron as zetOrderBron } from './ordersignaal.js'; // C16b: 'order', 'bouwfeedback' en 'bouwlade' op window
 import { maakBouwlade } from './bouwlade.js'; // C16b: bouwlade en plaatsbalk op de telefoon
+import { maakBewaren, STIL_ELKE_DAGEN } from './bewaren.js'; // C17a: stil bewaren en hervatten op pauze
+import { maakGebieden } from './gebieden.js'; // C17c: gebiedenknop, bouwen in het bekeken gebied, Bouw zoals thuis
+import { maakWijzer } from './wijzer.js'; // C17b: af en toe een aanwijzing met "Ga erheen"
 import * as leren from './leren.js'; // C16d: lokaal speelverslag, pulskaartje en afhaakvraag (alleen lezen, nooit orders)
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -64,7 +67,9 @@ const krant = maakKrant({
 });
 const evenwicht = maakEvenwicht({ ui }); // C16a: evenwichtsbalk en oplosser-kaartje (src/ui/evenwicht.js)
 zetOrderBron(() => ui.state); // C16b: het ordersignaal leest de spelstand voor 'bouwfeedback'
-const bouwlade = maakBouwlade({ ui, geef: (o) => geef(o), startBouwModus: (id) => startBouwModus(id), stopBouwModus: () => stopBouwModus() }); // C16b: telefoon
+const bewaren = maakBewaren({ ui, sim, laadSpel: (o, opt) => laadSpel(o, opt), zetTempo: (t) => zetTempo(t), zetTab: (t) => zetTab(t), toast: (...a) => toast(...a), naarStart: () => naarStart() }); // C17a
+const bouwlade = maakBouwlade({ ui, geef: (o) => geef(o), startBouwModus: (id) => startBouwModus(id), stopBouwModus: () => stopBouwModus(), gebied: () => gebieden?.huidig() ?? null, openGebieden: (el) => gebieden?.wissel(el) }); // C16b: telefoon
+const gebieden = maakGebieden({ ui, bouwlade, geef: (o) => geef(o), toast: (...a) => toast(...a) }); // C17c
 
 // ---------- startscherm ----------
 
@@ -87,6 +92,7 @@ async function init() {
   toonHuis(ui.packs.find((p) => p.pack && !p.rapport.fouten.length)?.pack);
   const eerste = ui.packs.find((p) => p.pack && !p.rapport.fouten.length);
   if (eerste) kiesPack(eerste);
+  bewaren.hervatBijOpstart(); // C17a: stond er een potje klaar, dan meteen terug, op pauze (het startscherm staat er al achter)
 }
 
 function renderPacks() {
@@ -172,7 +178,7 @@ $('#replay-bestand').onchange = async (e) => {
 
 const OPSLAG_SLEUTEL = 'machtsbalans-opslag';
 const AUTO_SLEUTEL = 'machtsbalans-autosave';
-const AUTO_INTERVAL = 30;
+const AUTO_INTERVAL = STIL_ELKE_DAGEN; // C17a: elke 5 speeldagen (src/ui/bewaren.js)
 
 function leesOpslag(sleutel = OPSLAG_SLEUTEL) {
   try { return JSON.parse(localStorage.getItem(sleutel) ?? 'null'); } catch { return null; }
@@ -188,7 +194,7 @@ function toonVerderKnop() {
     k.onclick = () => { const o = leesOpslag(AUTO_SLEUTEL); if (o) laadSpel(o); };
     $('#verder-knop').after(k);
   }
-  for (const [id, sleutel, label, uitleg] of [['#verder-knop', OPSLAG_SLEUTEL, 'Verder', 'Jouw opgeslagen spel'], ['#auto-knop', AUTO_SLEUTEL, 'Autosave', 'Automatisch opgeslagen, elke 30 dagen en bij terug naar het startscherm']]) {
+  for (const [id, sleutel, label, uitleg] of [['#verder-knop', OPSLAG_SLEUTEL, 'Verder', 'Jouw opgeslagen spel'], ['#auto-knop', AUTO_SLEUTEL, 'Autosave', 'Automatisch bewaard, ook als je de app sluit']]) {
     const o = leesOpslag(sleutel);
     const knop = $(id);
     const p = o && ui.packs.find((x) => x.pack?.meta.id === o.pack?.id);
@@ -202,9 +208,7 @@ $('#verder-knop').onclick = () => { const o = leesOpslag(); if (o) laadSpel(o); 
 
 // Stil opslaan in een eigen plek, zodat de handmatige opslag blijft staan.
 function autoOpslaan() {
-  const s = ui.state;
-  if (!s || s.replay) return;
-  try { localStorage.setItem(AUTO_SLEUTEL, JSON.stringify(sim.maakOpslag(s))); } catch { /* geen opslag beschikbaar: spel gaat gewoon door */ }
+  bewaren.bewaar('interval'); // C17a: zelfde plek (machtsbalans-autosave), plus de hervat-gegevens
 }
 
 // Een opslag weet met welke pack-versie hij gemaakt is (zoals een replay). Wijkt die af, dan kan het potje anders lopen.
@@ -213,14 +217,15 @@ function opslagUitOudereVersie(opslag, pack) {
   return v != null && v !== pack?.meta?.versie;
 }
 
-function laadSpel(opslag) {
+function laadSpel(opslag, { stil = false } = {}) { // C17a: stil bij hervatten; camera, tabblad en pauze zet bewaren.js
   const p = ui.packs.find((x) => x.pack?.meta.id === opslag.pack?.id);
-  if (!p) { toast(`Laden mislukt: wereld '${opslag.pack?.id}' is niet geïnstalleerd.`, 'slecht'); return; }
+  if (!p) { toast(`Laden mislukt: wereld '${opslag.pack?.id}' is niet geïnstalleerd.`, 'slecht'); return false; }
   if (opslagUitOudereVersie(opslag, p.pack)) toast('Deze opslag komt uit een oudere versie van het spel en kan anders verlopen.', 'slecht');
   const res = sim.laadOpslag(p.pack, opslag);
   if (!res.ok) toast(`Let op: ${res.reden}`, 'slecht');
   startSpel(p.pack, opslag.instellingen, null, res.state);
-  toast(`Spel geladen op dag ${res.state.dag}.`, 'goed');
+  if (!stil) toast(`Spel geladen op dag ${res.state.dag}.`, 'goed');
+  return true;
 }
 
 function slaOp() {
@@ -431,6 +436,8 @@ document.addEventListener('pointerdown', (e) => {
     // scrollen op de telefoon: wie veegt, opent niets).
     case 'evenwicht': naEchteTik(e, b, () => evenwicht.wissel(d.id, b)); break;
     case 'oplos-bouw': naEchteTik(e, b, () => { evenwicht.sluit(); if (ui.bouwModus !== d.id) startBouwModus(d.id); }); break;
+    case 'zoalsthuis': naEchteTik(e, b, () => { sluitContext(); gebieden?.openZoalsThuis(+d.id); }); break; // C17c
+    case 'naar-gebied': naEchteTik(e, b, () => { sluitContext(); gebieden?.naarGebied(+d.id); }); break; // C17c
   }
 });
 
@@ -500,7 +507,7 @@ function startBouwModus(id) {
   if (opLade()) bouwlade.plaatsGestart(id); // plaatsbalk, voorbeeld op de beste plek en de camera erheen; geen scrollIntoView
   else {
     ui.kaart.bouwKandidaat = -1;
-    if (ui.kaart.zoom < 2.2) ui.kaart.naarLand(ui.state.speler, 3);
+    if (ui.kaart.zoom < 2.2) { if (gebieden) gebieden.vliegNaarHuidig(3); else ui.kaart.naarLand(ui.state.speler, 3); } // C17c: het bekeken gebied
     // Op een telefoon staat het paneel onder de kaart: breng de kaart in beeld, anders tikt de speler in het niets.
     if (TELEFOON.matches) $('#kaart-wrap').scrollIntoView({ block: 'start' });
   }
@@ -552,7 +559,7 @@ for (const b of document.querySelectorAll('[data-kaart]')) {
     if (!k) return;
     if (b.dataset.kaart === 'in') k.zoomRond(k.w / 2, k.h / 2, k.zoom * 1.5);
     if (b.dataset.kaart === 'uit') k.zoomRond(k.w / 2, k.h / 2, k.zoom / 1.5);
-    if (b.dataset.kaart === 'thuis') k.naarLand(ui.state.speler);
+    if (b.dataset.kaart === 'thuis') { if (gebieden) gebieden.wissel(b); else k.naarLand(ui.state.speler); } // C17c: met kolonies het lijstje
     if (b.dataset.kaart === 'wereld') { const w = k.wereldBeeld(); k.vliegNaar(w.x, w.y, w.zoom); }
   };
 }
@@ -940,7 +947,7 @@ function renderContext() {
     h += lesRegel(land);
     if (eigen) {
       h += `<h3 style="margin-top:10px">Thuisfront</h3>${mediaActies(land, ['propaganda', 'verdediging'])}
-        <div style="display:flex;gap:6px;margin-top:6px"><button class="knop klein" data-actie="naar-tab" data-id="volk">Regime en samenleving</button><button class="knop klein" data-actie="naar-tab" data-id="leger">Leger</button></div>`;
+        <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">${b.kolonie ? `<button class="knop klein" data-actie="zoalsthuis" data-id="${t}">Bouw zoals thuis</button>` : ''}<button class="knop klein" data-actie="naar-tab" data-id="volk">Regime en samenleving</button><button class="knop klein" data-actie="naar-tab" data-id="leger">Leger</button></div>`;
     } else {
       h += `<div style="font-size:12px;margin-top:6px">Jouw media-invloed hier: <b>${(land.media[s.spelerBlok] ?? 0).toFixed(0)}</b> · loyaliteit aan jou: <b>${land.loyaliteit[s.spelerBlok]?.toFixed(0)}</b></div>
         <h3 style="margin-top:10px">Media</h3>${mediaActies(land, ['belang', 'nepnieuws'])}
@@ -1355,7 +1362,7 @@ function renderLeger() {
   const mijnKolonies = s.kolonies.filter((k) => k.land === s.speler);
   const vrijLand = s.pack.geo.onbewoond.filter((i) => s.eigenaar[i] === -2).length;
   h += `<section class="blok"><h3>Kolonies</h3>
-    ${mijnKolonies.length ? mijnKolonies.map((k) => `<div style="font-size:13px">🚩 ${esc(k.naam)} <span class="zacht">sinds dag ${k.dag}</span></div>`).join('') : '<p class="zacht" style="font-size:13px;margin:0">Nog geen kolonies.</p>'}
+    ${mijnKolonies.length ? mijnKolonies.map((k) => `<div style="font-size:13px;display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:4px">🚩 ${esc(k.naam)} <span class="zacht">sinds dag ${k.dag}</span><button class="knop klein" data-actie="naar-gebied" data-id="${k.t}">Ga erheen</button><button class="knop klein" data-actie="zoalsthuis" data-id="${k.t}">Bouw zoals thuis</button></div>`).join('') : '<p class="zacht" style="font-size:13px;margin:0">Nog geen kolonies.</p>'}
     <p class="zacht" style="font-size:12px;margin:6px 0 0">${vrijLand ? `Nog ${vrijLand} vakjes onbewoond land. Bouw een haven, leid een kolonistenschip op, selecteer het en rechtsklik op een onbewoond eiland.` : 'Al het onbewoonde land is verdeeld.'}</p></section>`;
   zet('leger-overzicht', h);
 
@@ -1726,7 +1733,8 @@ function toonMenu() {
       <button class="knop" id="m-replay">Replay downloaden</button>
       <button class="knop" id="m-start">Terug naar startscherm</button>
       <button class="knop primair" id="m-verder">Verder spelen</button>
-    </div>${leren.menuHtml()}`, (el) => {
+    </div>${wijzer?.menuHtml() ?? ''}${leren.menuHtml()}`, (el) => {
+    wijzer?.bindMenu(el);
     leren.bindMenu(el);
     el.querySelector('#m-opslaan').onclick = slaOp;
     el.querySelector('#m-opslag').onclick = downloadOpslag;
@@ -1755,6 +1763,7 @@ function naarStart() {
   krant.verberg();
   zetTempo(0);
   autoOpslaan();
+  bewaren.stopHervat(); // C17a: de volgende opstart begint op het startscherm
   stopTutorial(false);
   if (leren.afhaak(ui.state, naarStart)) return; // C16d: eerst "Waarom stop je nu?"; een antwoord roept naarStart opnieuw aan
   ui.state = null;
@@ -2144,10 +2153,11 @@ function toast(tekst, soort = 'info', ping = null) {
 
 // Doelbalk, bijna klaar en sessie-overzicht (src/ui/doelen.js): leest alleen, geeft geen orders.
 const doelbalk = maakDoelen({ ui, zetTab, selecteer });
+const wijzer = maakWijzer({ ui, bouwlade, gebieden, evenwicht, doelbalk, startBouwModus, zetTab }); // C17b
 maakBouwfeedback(ui, { toast }); // C16c: toast, zwevend label en camera na elke geslaagde bouwopdracht
 
 // Handig bij playtests en debuggen vanuit de console.
-window.machtsbalans = { ui, sim, krant };
+window.machtsbalans = { ui, sim, krant, bewaren, gebieden, wijzer };
 
 // Installeerbare webapp: de service worker houdt het spel offline speelbaar.
 if ('serviceWorker' in navigator && window.isSecureContext) {

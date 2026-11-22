@@ -53,6 +53,9 @@ export const DEFAULT_MODEL = {
   prijs_referentie: 120,
   onderhoud_per_gebouw: 0.5,
   max_bouw: 2,
+  bouwrij_max: 8,             // C17c: hooguit zoveel gebouwen in de wachtrij van één gebied ("Bouw zoals thuis")
+  bouwrij_buffer: 0.25,       // C17c: de wachtrij laat van elke grondstof minstens dit deel van de voorraad over
+  bouwrij_wacht: 60,          // C17c: zo lang wacht een item op geld, daarna vervalt het
   bereik: 5,                  // vakjes rond hoofdstad of depot met vol rendement
   rendement_verlies: 0.1,     // rendementsverlies per vakje verder weg
   min_rendement: 0.4,
